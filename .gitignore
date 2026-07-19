@@ -1,5 +1,7 @@
 .next
 .next/
+.next-standalone
+.next-standalone/
 node_modules
 node_modules/
 out
@@ -23,6 +25,16 @@ tools/weixin-local-assistant/config.txt
 应用市场草稿/
 自定义APP制作说明-完整版.md
 自定义APP制作说明-完整版改.md
+
+# 个人自定义样式（不随发布版分发）
+styles/presets/
+
+# 自定义 APP 源码 / 打包产物（塔罗占卜等，源码在仓库外单独维护）
+float-tarot/
+*.apk
+*.keystore
+*.jks
+keystore.properties
 
 # Tailscale serve cert files (written into cwd by `tailscale cert`)
 *.ts.net.crt
