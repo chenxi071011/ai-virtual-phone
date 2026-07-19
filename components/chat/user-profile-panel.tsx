@@ -22,7 +22,7 @@ import { loadChatContacts } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { triggerImmediatePost } from "@/lib/moments-engine";
 import type { Character } from "@/lib/character-types";
-import { requestNotificationPermission } from "@/lib/browser-notification";
+import { requestNotificationPermission, checkNotificationPermission, isNativeShell } from "@/lib/browser-notification";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
@@ -111,10 +111,15 @@ function ProfileSettingsSliderItem({
     );
 }
 
-function readBrowserNotificationPermissionHint(): string {
-    if (typeof window === "undefined") return "当前浏览器权限：未知（服务端渲染）";
-    if (!("Notification" in window)) return "当前浏览器权限：不支持 Notification API";
-    const permission = Notification.permission;
+async function readNotificationPermissionHint(): Promise<string> {
+    if (typeof window === "undefined") return "当前权限：未知（服务端渲染）";
+    const permission = await checkNotificationPermission();
+    if (isNativeShell()) {
+        if (permission === "granted") return "系统通知权限：已允许";
+        if (permission === "denied") return "系统通知权限：已拒绝，请去手机系统设置里给这个 APP 开通知权限";
+        return "系统通知权限：未授权";
+    }
+    if (permission === "unsupported") return "当前浏览器权限：不支持 Notification API";
     const secureHint = window.isSecureContext ? "" : "；当前不是 HTTPS/安全上下文";
     const originHint = `当前站点：${window.location.origin}`;
     if (permission === "granted") return `${originHint}；浏览器权限：已允许（granted）${secureHint}`;
@@ -122,10 +127,8 @@ function readBrowserNotificationPermissionHint(): string {
     return `${originHint}；浏览器权限：未授权（default）${secureHint}`;
 }
 
-function isBrowserNotificationGranted(): boolean {
-    return typeof window !== "undefined"
-        && "Notification" in window
-        && Notification.permission === "granted";
+async function isNotificationGranted(): Promise<boolean> {
+    return (await checkNotificationPermission()) === "granted";
 }
 
 /* ══════════════════════════════════════════
@@ -155,12 +158,13 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     useEffect(() => {
         setIdentity(resolveUserIdentity());
         const settings = loadChatAppSettings();
-        const browserGranted = isBrowserNotificationGranted();
-        setNotifEnabled(settings.browserNotificationsEnabled === true && browserGranted);
         setEnterToSendEnabled(settings.enterToSendEnabled === true);
-        if (settings.browserNotificationsEnabled === true && !browserGranted) {
-            setNotifHint(readBrowserNotificationPermissionHint());
-        }
+        void isNotificationGranted().then((granted) => {
+            setNotifEnabled(settings.browserNotificationsEnabled === true && granted);
+            if (settings.browserNotificationsEnabled === true && !granted) {
+                void readNotificationPermissionHint().then(setNotifHint);
+            }
+        });
         const wallet = loadWalletState();
         setWalletSummary({
             totalLabel: formatWalletAmount(getWalletBalance(wallet)),
@@ -197,16 +201,16 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
         if (!enabled) {
             setNotifEnabled(false);
             saveChatAppSettings({ ...loadChatAppSettings(), browserNotificationsEnabled: false });
-            setNotifHint(`已关闭。${readBrowserNotificationPermissionHint()}`);
+            setNotifHint(`已关闭。${await readNotificationPermissionHint()}`);
             return;
         }
 
         setNotifChecking(true);
-        setNotifHint("正在检查浏览器通知权限...");
+        setNotifHint(isNativeShell() ? "正在检查系统通知权限..." : "正在检查浏览器通知权限...");
         try {
             const granted = await requestNotificationPermission();
-            const permissionHint = readBrowserNotificationPermissionHint();
-            if (granted && isBrowserNotificationGranted()) {
+            const permissionHint = await readNotificationPermissionHint();
+            if (granted && await isNotificationGranted()) {
                 setNotifEnabled(true);
                 saveChatAppSettings({ ...loadChatAppSettings(), browserNotificationsEnabled: true });
                 setNotifHint(permissionHint);

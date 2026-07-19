@@ -24,6 +24,7 @@ import {
     resolveUserIdentity,
 } from "./settings-storage";
 import { assemblePromptPayload, applyOutputRegex, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
+import { toyController } from "./toy-ble";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
 import {
     buildProviderDebugMessages,
@@ -40,6 +41,7 @@ import {
     type LlmToolCallDelta,
     type LlmToolDefinition,
 } from "./llm-provider-adapter";
+import { extractThinkingBlock } from "./thinking-parser";
 import { setDebugPromptSnapshot, type DebugPromptSnapshot } from "./debug-store";
 import { extractFinishReason } from "./api-helpers";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
@@ -806,6 +808,9 @@ export async function sendLLMRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        /** Keep inline <thinking> in the returned text. Only for callers that extract it
+         *  themselves (chat / offline chat); every other caller gets it stripped. */
+        keepReasoningMarkup?: boolean;
     },
 ): Promise<string> {
     const requestMessages = toLlmRequestMessages(messages);
@@ -856,6 +861,16 @@ export async function sendLLMRequest(
         const data = await response.json();
         const parsed = parseProviderResponse(request.providerKind, data);
         let rawOutput = parsed.content || "";
+
+        // Strip inline <thinking> unless the caller consumes it itself. Only chat and
+        // offline chat do (they surface it as the collapsed block above the bubble via
+        // rich-message-parser); every other engine — Moments, diary, notewall, VN,
+        // 小红书, … — used to render the chain-of-thought as if it were content, because
+        // parseProviderResponse only strips timestamps, not reasoning markup.
+        // Must run before the includeReasoning re-add below, or story mode would lose it.
+        if (!options?.keepReasoningMarkup) {
+            rawOutput = extractThinkingBlock(rawOutput).cleaned;
+        }
 
         // Prepend reasoning content as <think> block (only when caller requests it, e.g. story mode)
         if (options?.includeReasoning) {
@@ -1131,6 +1146,8 @@ export async function sendLLMToolRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        /** 见 sendLLMRequest 上的同名字段。 */
+        keepReasoningMarkup?: boolean;
     },
 ): Promise<LLMToolRequestResult> {
     const request = buildProviderRequest(config, preset, messages, { tools });
@@ -1156,6 +1173,11 @@ export async function sendLLMToolRequest(
         const data = await response.json();
         const parsed = parseProviderResponse(request.providerKind, data);
         let rawOutput = parsed.content || "";
+        // 同 sendLLMRequest：只有自己会提取思维链的调用方才保留内联 <thinking>。
+        // 群聊 / 共创保存的 reasoning 来自 API 原生字段，不受这里影响。
+        if (!options?.keepReasoningMarkup) {
+            rawOutput = extractThinkingBlock(rawOutput).cleaned;
+        }
         if (options?.includeReasoning && parsed.reasoning) {
             rawOutput = `<think>\n${parsed.reasoning}\n</think>\n\n${rawOutput}`;
         }
@@ -1733,7 +1755,11 @@ export async function buildChatPromptMessages(
     const promptTimestampOptions = getPromptTimestampOptionsForTimeContext(promptTimeContext);
     const memConfig = loadMemoryConfig();
     const isOfflineMode = options?.appTags?.includes("offline") === true;
-    const effectiveAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
+    const mergedAppTags = mergeAppTags(options?.appTags, promptProfile?.appTags, resolvedAppId);
+    const toyConnected = !session.isGroup && character.toyControlEnabled && toyController.isConnected();
+    const effectiveAppTags = toyConnected
+        ? [...(mergedAppTags ?? [resolvedAppId]), "toy_connected"]
+        : mergedAppTags;
     const toolsAllowed = options?.toolsAllowed !== false && !isOfflineMode;
     const enabledTools = toolsAllowed ? getEnabledTools(resolvedAppId) : [];
     const toolsEnabled = enabledTools.length > 0
@@ -1890,6 +1916,8 @@ export async function generateOfflineChatCompletion(
         appTags: ["chat", "offline"],
         debugSessionId: session.id,
         signal: options?.signal,
+        // 线下模式自己会提取思维链（chat-offline-storage）
+        keepReasoningMarkup: true,
     });
     return {
         ...parseOfflineResponse(rawOutput, summaryTag),
@@ -1946,6 +1974,8 @@ async function generateNativeChatCompletion(
                     followUpCount: options?.followUpCount,
                     debugSessionId: session.id,
                     signal: options?.signal,
+                    // 聊天自己会提取思维链（rich-message-parser → 气泡上方的折叠块）
+                    keepReasoningMarkup: true,
                 },
             );
         } catch (err) {
@@ -2176,6 +2206,8 @@ export async function generateChatCompletion(
                 followUpCount: options?.followUpCount,
                 debugSessionId: session.id,
                 signal: options?.signal,
+                // 聊天自己会提取思维链（rich-message-parser → 气泡上方的折叠块）
+                keepReasoningMarkup: true,
             });
         } catch (err) {
             const errMsg = `⚠️ 回复生成失败: ${err instanceof Error ? err.message : String(err)}`;
@@ -2331,6 +2363,7 @@ export async function generateChatCompletion(
                         followUpCount: options?.followUpCount,
                         debugSessionId: session.id,
                         signal: options?.signal,
+                        keepReasoningMarkup: true,
                     });
                     throwIfAborted(options?.signal);
                     await callbacks?.onTextPart?.(finalOutput);

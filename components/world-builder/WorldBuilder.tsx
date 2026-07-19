@@ -68,13 +68,7 @@ export default function WorldBuilder() {
   }, []);
 
   const handleInitialBootBack = useCallback(() => {
-    if (window.opener && !window.opener.closed) {
-      window.opener.focus();
-    }
-    window.close();
-    window.setTimeout(() => {
-      if (!window.closed) window.location.replace("/");
-    }, 40);
+    window.location.href = "/";
   }, []);
 
   // 所有分类（预设 + 用户）
@@ -198,7 +192,7 @@ export default function WorldBuilder() {
   return (
     <div className={`wb-layout ${isLightTheme(settings.theme) ? "wb-light" : ""} ${showInitialBoot ? "wb-layout--booting" : ""}`}>
       <div className="wb-topbar">
-          <button className="wb-topbar-btn" onClick={() => window.close()}>
+          <button className="wb-topbar-btn" onClick={() => { window.location.href = "/"; }}>
             返回
           </button>
           <button className="wb-topbar-btn" onClick={handleUndo} disabled={history.current.length === 0}>

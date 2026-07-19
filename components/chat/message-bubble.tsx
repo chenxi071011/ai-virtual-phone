@@ -62,6 +62,10 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <LocationBubble msg={msg} />;
         case "poke":
             return <PokeBubble msg={msg} charName={charName} userName={userName} />;
+        case "toy_control":
+            return <ToyControlBubble msg={msg} charName={charName} />;
+        case "toy_grant":
+            return <ToyGrantCard msg={msg} charName={charName} />;
         case "sticker":
             return <StickerBubble msg={msg} characterId={characterId} />;
         case "quote":
@@ -138,6 +142,7 @@ function splitChatContent(text: string): { type: "md" | "html"; content: string 
 export function normalizeTextBubbleContent(content: string): string {
     return content
         .replace(/\[音乐(?:分享)?(?:[：:][^\]]*)?\]/g, "")
+        .replace(/\[情趣互动(?:[：:][^\]]*)?\]/g, "")
         .replace(/\[[^\]]+拍了拍[^\]]+\]/g, "")
         .replace(/\[[^\]]*?(?:获取指令|获取工具)[:：][^\]]*\]/g, "")
         .replace(/\[[^\]]*?(?:执行动作|工具调用)[:：][^\]]*?[（(][\s\S]*?[)）]\]/g, "")
@@ -1311,6 +1316,51 @@ function LocationBubble({ msg }: { msg: ChatMessage }) {
 
 // ── Poke ─────────────────────────────
 
+const TOY_PATTERN_LABEL: Record<string, string> = {
+    constant: "恒定", wave: "波浪", pulse: "脉冲", ramp: "渐强", stop: "停止",
+};
+
+function ToyControlBubble({ msg, charName }: { msg: ChatMessage; charName?: string }) {
+    const name = charName || "对方";
+    const pattern = msg.mediaData?.toyPattern || "constant";
+    const intensity = msg.mediaData?.toyIntensity ?? 0;
+    const label = TOY_PATTERN_LABEL[pattern] || pattern;
+    return (
+        <div className="chat-sys-msg ts-12 mx-auto text-center">
+            {pattern === "stop" || intensity <= 0 ? `${name} 停下了玩具` : `${name} 正在控制玩具（${label} · ${intensity}%）`}
+        </div>
+    );
+}
+
+function ToyGrantCard({ msg, charName }: { msg: ChatMessage; charName?: string }) {
+    const name = charName || "对方";
+    const granted = !!msg.mediaData?.toyGranted;
+    return (
+        <div className="chat-toy-grant-card">
+            <div className="chat-toy-grant-card-main">
+                <div className={`chat-toy-grant-card-icon${granted ? " on" : ""}`}>
+                    <HeartPulseIcon />
+                </div>
+                <div className="chat-toy-grant-card-info">
+                    <div className="chat-toy-grant-card-title">情趣玩具</div>
+                    <div className="chat-toy-grant-card-sub">
+                        {granted ? `已把控制权交给 ${name}` : "已收回控制权"}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function HeartPulseIcon() {
+    return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" />
+            <path d="M3.5 9.5h3l1.5-3 2 6 1.5-3h9" />
+        </svg>
+    );
+}
+
 function PokeBubble({ msg, charName, userName }: { msg: ChatMessage; charName?: string; userName?: string }) {
     // Prefer mediaData fields (group chat aware), fallback to old role-based logic
     const sender = msg.mediaData?.pokeSender || (msg.role === "user" ? (userName || "你") : (charName || "对方"));
@@ -1412,7 +1462,10 @@ function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false }
         <div className="chat-quote-message max-w-full">
             {d?.quotePreview && (
                 <div className="chat-quote-preview bg-black/[0.06] border-l-[3px] border-l-black/15 px-2.5 py-1.5 ts-12 text-[var(--c-icon)] mb-1.5 rounded-r-[6px] truncate max-w-full">
-                    {d.quotePreview}
+                    {/* 引用的原消息若是双语（"原文|中文"），预览只显示原文，
+                        否则会把分隔符 | 和译文一起塞进这一行。在渲染层处理，
+                        已存档的旧引用也能一并显示正常。 */}
+                    {splitBilingualText(d.quotePreview)?.original ?? d.quotePreview}
                 </div>
             )}
             {msg.content && <TextBubble content={displayContent ?? msg.content} defaultTranslationExpanded={defaultTranslationExpanded} />}

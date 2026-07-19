@@ -148,6 +148,7 @@ export const CONTENT_SCOPE_TAG_GROUPS: TagGroupProfile[] = [
     { id: "adventure", label: "冒险", tags: ["adventure"], minors: [commonMinor("adventure", ["adventure"])] },
     { id: "game", label: "游戏", tags: ["game"], minors: [commonMinor("game", ["game"])] },
     { id: "add_friend", label: "加好友", tags: ["add_friend"], minors: [commonMinor("add_friend", ["add_friend"])] },
+    { id: "toy_connected", label: "玩具连接", tags: ["toy_connected"], minors: [commonMinor("toy_connected", ["toy_connected"])] },
     {
         id: "checkphone",
         label: "查手机",

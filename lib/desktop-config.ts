@@ -25,7 +25,8 @@ export type IconId =
   | "theme"
   | "resources"
   | "characters"
-  | "worldbuilder";
+  | "worldbuilder"
+  | "toydevice";
 
 export type DesktopIconId = IconId | CustomAppIconId;
 
@@ -50,7 +51,8 @@ export const PAGE_2_DEFAULT: IconId[] = [
   "story",
   "vnmode",
   "mapmode",
-  "worldbuilder"
+  "worldbuilder",
+  "toydevice"
 ];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];
@@ -102,5 +104,11 @@ export const ICONS: Record<IconId, IconMeta> = {
     tone: "var(--c-icon-amber)",
     placeholder: false,
     path: "/world-builder"
+  },
+  toydevice: {
+    id: "toydevice",
+    label: "互动设备",
+    tone: "var(--c-icon-rose)",
+    placeholder: false,
   },
 };

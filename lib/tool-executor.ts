@@ -1,3 +1,4 @@
+import CryptoJS from "crypto-js";
 import type {
     CompositeToolConfig,
     CompositeToolPackageConfig,
@@ -66,9 +67,10 @@ import {
     readLocalDataFile,
     readLocalDataRecord,
     searchLocalDataRecords,
+    setLocalDataViewerScope,
 } from "./local-data-fs";
 import { makeTimedWakeId, saveTimedWakeSchedule } from "./timed-wake-storage";
-import { resolveUserIdentity } from "./settings-storage";
+import { resolveUserIdentity, getSiblingCharacterIds } from "./settings-storage";
 import { attachAbortSignal, isAbortError, throwIfAborted } from "./abort-utils";
 
 // ── Types ─────────────────────────────────────
@@ -743,7 +745,7 @@ async function executeInternalTool(call: ToolCall, context?: ToolExecutionContex
     if (isNoteWallToolName(call.name)) return executeNoteWallTool(call, context);
     if (isMusicControlToolName(call.name)) return executeMusicControlTool(call, context);
     if (isCalendarToolName(call.name)) return executeCalendarTool(call, context);
-    if (isLocalDataToolName(call.name)) return executeLocalDataTool(call);
+    if (isLocalDataToolName(call.name)) return executeLocalDataTool(call, context);
     if (isToolboxManagementToolName(call.name)) return executeToolboxManagementTool(call);
     if (call.name === "发送文件") return executeSendFileTool(call);
     if (call.name === "稍后主动联系" || call.name === "设置定时醒来") return executeTimedWakeTool(call, context);
@@ -847,7 +849,7 @@ function stringArrayArg(args: Record<string, unknown>, key: string): string[] | 
     return items.length > 0 ? items : undefined;
 }
 
-async function executeLocalDataTool(call: ToolCall): Promise<ToolResult> {
+async function executeLocalDataTool(call: ToolCall, context?: ToolExecutionContext): Promise<ToolResult> {
     const capability = getInternalCapability(LOCAL_DATA_LIBRARY_CAPABILITY_ID);
     if (!capability || !capability.enabled || capability.mode === "off") {
         return {
@@ -857,6 +859,12 @@ async function executeLocalDataTool(call: ToolCall): Promise<ToolResult> {
             userNotice: "本地资料库能力未启用",
         };
     }
+
+    const characterId = context?.characterId;
+    setLocalDataViewerScope(characterId ? {
+        characterId,
+        siblingCharacterIds: getSiblingCharacterIds(characterId, "checkphone"),
+    } : null);
 
     try {
         let data: unknown;
@@ -911,6 +919,8 @@ async function executeLocalDataTool(call: ToolCall): Promise<ToolResult> {
             error: message,
             userNotice: `${call.name}失败：${message}`,
         };
+    } finally {
+        setLocalDataViewerScope(null);
     }
 }
 
@@ -3888,10 +3898,10 @@ function generateCodeVerifier(): string {
 }
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const hash = await crypto.subtle.digest("SHA-256", data);
-    return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    // crypto.subtle 需要"安全上下文"（https:// / localhost），手机 App 走的
+    // http://局域网IP:端口 不算，那儿 crypto.subtle 是 undefined。换纯 JS 实现。
+    const base64 = CryptoJS.enc.Base64.stringify(CryptoJS.SHA256(verifier));
+    return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
 /**

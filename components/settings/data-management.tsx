@@ -56,7 +56,8 @@ import {
   type MediaMaintenanceConfig,
   type MediaMaintenanceState,
 } from "@/lib/media-maintenance";
-import { isAndroidBrowser, isIOSBrowser } from "@/lib/download-utils";
+import { Capacitor } from "@capacitor/core";
+import { isAndroidBrowser, isIOSBrowser, usesNativeShareSheet } from "@/lib/download-utils";
 import type { BackupEnvelope, BackupManifest, DataModuleId, DataSnapshot, ImportResult, ModuleStats } from "@/lib/data-management/types";
 
 type PendingImport = {
@@ -448,12 +449,16 @@ export function DataManagement({ onNotice }: DataManagementProps) {
     if (!pendingExport || exportSaving) return;
     setExportSaving(true);
     try {
-      const useNativeShare = isIOSBrowser();
-      await downloadBackupBlob(pendingExport.blob, pendingExport.manifest, useNativeShare ? { nativeShareOnly: true } : { disableNativeShare: true });
+      const useNativeShare = usesNativeShareSheet();
+      const savedPath = await downloadBackupBlob(pendingExport.blob, pendingExport.manifest, useNativeShare ? { nativeShareOnly: true } : { disableNativeShare: true });
       setPendingExport(null);
-      onNotice?.(useNativeShare ? "已打开系统分享，请选择“存储到文件”。" : "已开始下载备份文件。");
+      onNotice?.(
+        savedPath ? `已保存到手机存储：${savedPath}`
+          : useNativeShare ? "已打开系统分享，请选择“存储到文件”。"
+            : "已开始下载备份文件。"
+      );
     } catch (error) {
-      onNotice?.(error instanceof Error ? error.message : "无法打开系统分享，请稍后再试。");
+      onNotice?.(error instanceof Error ? error.message : "保存失败，请稍后再试。");
     } finally {
       setExportSaving(false);
     }
@@ -877,16 +882,18 @@ export function DataManagement({ onNotice }: DataManagementProps) {
                 {pendingExport.manifest.mediaExcluded ? " · 不含图片/多媒体" : ""}
               </p>
               <p className="menu-desc">
-                {isIOSBrowser()
-                  ? "iOS 需要从系统分享面板保存备份文件。请点击下方按钮，然后选择“存储到文件”。"
-                  : "备份文件已准备好。请点击下方按钮下载文件。"}
+                {Capacitor.isNativePlatform()
+                  ? "点击下方按钮，会直接保存到手机存储的 Documents 目录。"
+                  : isIOSBrowser()
+                    ? "需要从系统分享面板保存备份文件。请点击下方按钮，然后选择“存储到文件”。"
+                    : "备份文件已准备好。请点击下方按钮下载文件。"}
               </p>
             </div>
             <div className="modal-footer" data-ui="modal-footer" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button type="button" className="ui-btn ui-btn-primary" style={{ width: "100%", whiteSpace: "nowrap" }} onClick={() => void savePendingExport()} disabled={exportSaving}>
                 {exportSaving
-                  ? <><Loader2 size={16} className="animate-spin" /> {isIOSBrowser() ? "打开中…" : "下载中…"}</>
-                  : isIOSBrowser()
+                  ? <><Loader2 size={16} className="animate-spin" /> {usesNativeShareSheet() ? "打开中…" : "下载中…"}</>
+                  : usesNativeShareSheet()
                     ? <><Share2 size={16} /> 分享/保存文件</>
                     : <><Download size={16} /> 下载备份文件</>}
               </button>

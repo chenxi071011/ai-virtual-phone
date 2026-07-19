@@ -6,7 +6,7 @@ import type { PresetConfig } from "./settings-types";
 import { getCheckPhonePromptTags } from "./checkphone-config";
 
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
-export const BUILTIN_PRESET_VERSION = 251; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
+export const BUILTIN_PRESET_VERSION = 253; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -52,6 +52,7 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "vn_output_format", enabled: true },
             { identifier: "vn_story_beats", enabled: true },
             { identifier: "chat_output_format", enabled: true },
+            { identifier: "chat_toy_control", enabled: true },
             { identifier: "chat_offline_format", enabled: true },
             { identifier: "chat_optional_actions", enabled: true },
             { identifier: "chat_followup", enabled: true },
@@ -469,6 +470,24 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["chat", "text"],
+            },
+            {
+                identifier: "chat_toy_control",
+                name: "▸ 玩具控制",
+                role: "system",
+                content: [
+                    "### 情趣互动（当前已连接真实设备，你现在可以真实控制它）",
+                    "用户已把一个真实的情趣玩具（震动设备）的控制权交给你，你此刻可以真实地控制它的震动。",
+                    "在你判断合适的亲密/情欲情境下，通过 [情趣互动:pattern:intensity:duration] 指令来控制它，让它配合你的言语与描写。",
+                    "pattern 可选：constant(恒定)/wave(波浪起伏)/pulse(脉冲)/ramp(渐强，升到目标后稳定保持)/stop(停止)；intensity 为 0-100 的整数强度；duration 为秒。",
+                    "【重要】发出一条指令后，震动会一直保持或循环，直到你发出下一条 [情趣互动] 指令改变它，或发送 stop 停止。想变节奏就发新指令，想停下就主动发 stop。",
+                    "把它当作真实的身体互动自然融入对话，配合文字挑逗与节奏变化；但不要毫无理由地频繁空放或滥用。",
+                    "用户随时可能收回控制权，收回后你将无法再控制它。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["toy_connected"],
             },
             {
                 identifier: "chat_followup",

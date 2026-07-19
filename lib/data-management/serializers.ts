@@ -1,3 +1,5 @@
+import CryptoJS from "crypto-js";
+
 const BLOB_MARKER = "__aiPhoneBlob";          // legacy: media inlined as base64 dataUrl (read-only compat)
 const MEDIA_REF_MARKER = "__aiPhoneMediaRef"; // new: media stored as a separate binary object, referenced by content hash
 
@@ -71,8 +73,12 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function sha256Hex(blob: Blob): Promise<string> {
   const buffer = await blob.arrayBuffer();
-  const hash = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  // crypto.subtle 只在"安全上下文"（https:// / localhost）里才有——手机 App 走的
+  // http://局域网IP:端口 不算安全上下文，crypto.subtle 在那儿是 undefined，调
+  // .digest 直接炸（"Cannot read properties of undefined (reading 'digest')"）。
+  // 换成 crypto-js 的纯 JS 实现，不依赖安全上下文，网页版和手机 App 都能用。
+  const wordArray = CryptoJS.lib.WordArray.create(new Uint8Array(buffer));
+  return CryptoJS.SHA256(wordArray).toString(CryptoJS.enc.Hex);
 }
 
 /** Content-addressed media collector (sha256 → dedupes identical media across the backup). */

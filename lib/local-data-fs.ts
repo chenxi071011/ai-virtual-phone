@@ -121,6 +121,106 @@ function hasLocalStorage(): boolean {
     return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+// ── Viewer scope — per-character isolation ──────────────────────
+// Each character calling this tool must only see its own "world": chats,
+// contacts and moments that belong to the identity the character is bound
+// to, plus other characters sharing that same identity. Memory is off-limits
+// entirely (it has its own dedicated retrieval path). Set once per tool call
+// by tool-executor.ts, cleared right after.
+
+export type LocalDataViewerScope = {
+    characterId: string;
+    siblingCharacterIds: Set<string>; // includes the calling character itself
+} | null;
+
+let _viewerScope: LocalDataViewerScope = null;
+
+export function setLocalDataViewerScope(scope: LocalDataViewerScope): void {
+    _viewerScope = scope;
+    _allowSetsCache = null;
+}
+
+async function getAllRaw(dbName: string, storeName: string): Promise<unknown[]> {
+    const db = await openDb(dbName);
+    if (!db) return [];
+    if (!Array.from(db.objectStoreNames).includes(storeName)) {
+        db.close();
+        return [];
+    }
+    try {
+        const transaction = db.transaction(storeName, "readonly");
+        return await runRequest<unknown[]>(transaction.objectStore(storeName).getAll());
+    } catch {
+        return [];
+    } finally {
+        db.close();
+    }
+}
+
+type ViewerAllowSets = {
+    siblingIds: Set<string>;
+    allowedSessionIds: Set<string>;
+    allowedPostIds: Set<string>;
+};
+
+let _allowSetsCache: Promise<ViewerAllowSets | null> | null = null;
+
+/** Computed once per tool call (cached for the duration of that call) — cleared when the scope is cleared. */
+async function computeAllowSets(): Promise<ViewerAllowSets | null> {
+    if (!_viewerScope) return null;
+    if (_allowSetsCache) return _allowSetsCache;
+    const scope = _viewerScope;
+    _allowSetsCache = (async () => {
+        const sessions = await getAllRaw("AiPhoneChatDB", "sessions") as Array<{ id: string; contactId?: string; participantIds?: string[] }>;
+        const allowedSessionIds = new Set(
+            sessions
+                .filter(s => (s.contactId && scope.siblingCharacterIds.has(s.contactId))
+                    || (Array.isArray(s.participantIds) && s.participantIds.some(id => scope.siblingCharacterIds.has(id))))
+                .map(s => s.id)
+        );
+
+        // Moments already carry a real per-post `visibility: string[]` (which characters
+        // can see this post) set from the composer's own visibility picker — reuse that
+        // instead of inventing a parallel "posted as which identity" tag. A character
+        // shouldn't be able to fetch through this tool anything it wouldn't already see
+        // in its own moments feed.
+        const posts = await getAllRaw("AiPhoneMomentsDB", "posts") as Array<{ id: string; visibility?: string[] }>;
+        const allowedPostIds = new Set(
+            posts
+                .filter(p => Array.isArray(p.visibility) && p.visibility.includes(scope.characterId))
+                .map(p => p.id)
+        );
+
+        return { siblingIds: scope.siblingCharacterIds, allowedSessionIds, allowedPostIds };
+    })();
+    return _allowSetsCache;
+}
+
+/** Sync per-record check against precomputed allow-sets — safe to call inside an IDBCursor callback. */
+function isRecordAllowed(dbName: string, storeName: string, value: unknown, allow: ViewerAllowSets): boolean {
+    const record = value as Record<string, unknown>;
+    if (dbName === "AiPhoneChatDB") {
+        if (storeName === "contacts") return typeof record.characterId === "string" && allow.siblingIds.has(record.characterId);
+        if (storeName === "sessions") return typeof record.id === "string" && allow.allowedSessionIds.has(record.id);
+        if (storeName === "messages") return typeof record.sessionId === "string" && allow.allowedSessionIds.has(record.sessionId);
+        return true;
+    }
+    if (dbName === "AiPhoneMomentsDB") {
+        if (storeName === "posts") return typeof record.id === "string" && allow.allowedPostIds.has(record.id);
+        if (storeName === "comments") return typeof record.postId === "string" && allow.allowedPostIds.has(record.postId);
+        return true;
+    }
+    return true;
+}
+
+function assertModuleAccessible(path: SourcePath | { kind: "missing"; message: string }): void {
+    if (!_viewerScope) return;
+    if (path.kind === "missing" || path.kind === "root") return;
+    if (path.module.id === "memory") {
+        throw new Error("角色无权访问记忆数据——本地资料库工具已禁止访问记忆模块。");
+    }
+}
+
 async function openDb(dbName: string): Promise<IDBDatabase | null> {
     if (!hasIndexedDb()) return null;
     return new Promise((resolve) => {
@@ -411,6 +511,7 @@ async function readIndexedDbSample(path: Extract<SourcePath, { kind: "indexeddbS
         db.close();
         throw new Error(`对象仓库不存在：${path.storeName}`);
     }
+    const allow = await computeAllowSets();
     try {
         const transaction = db.transaction(path.storeName, "readonly");
         const store = transaction.objectStore(path.storeName);
@@ -421,6 +522,10 @@ async function readIndexedDbSample(path: Extract<SourcePath, { kind: "indexeddbS
                 const cursor = request.result;
                 if (!cursor || values.length >= sample) {
                     resolve();
+                    return;
+                }
+                if (allow && !isRecordAllowed(path.dbName, path.storeName, cursor.value, allow)) {
+                    cursor.continue();
                     return;
                 }
                 values.push(cursor.value);
@@ -445,6 +550,7 @@ async function readIndexedDbStore(path: Extract<SourcePath, { kind: "indexeddbSt
         throw new Error(`对象仓库不存在：${path.storeName}`);
     }
 
+    const allow = await computeAllowSets();
     try {
         const transaction = db.transaction(path.storeName, "readonly");
         const store = transaction.objectStore(path.storeName);
@@ -456,6 +562,10 @@ async function readIndexedDbStore(path: Extract<SourcePath, { kind: "indexeddbSt
                 const cursor = request.result;
                 if (!cursor || records.length >= limit) {
                     resolve();
+                    return;
+                }
+                if (allow && !isRecordAllowed(path.dbName, path.storeName, cursor.value, allow)) {
+                    cursor.continue();
                     return;
                 }
                 if (skipped < offset) {
@@ -536,6 +646,7 @@ async function searchIndexedDbStore(path: Extract<SourcePath, { kind: "indexeddb
         return [];
     }
 
+    const allow = await computeAllowSets();
     try {
         const transaction = db.transaction(path.storeName, "readonly");
         const store = transaction.objectStore(path.storeName);
@@ -548,6 +659,10 @@ async function searchIndexedDbStore(path: Extract<SourcePath, { kind: "indexeddb
                 const cursor = request.result;
                 if (!cursor || records.length >= limit || scanned >= MAX_SEARCH_SCAN) {
                     resolve();
+                    return;
+                }
+                if (allow && !isRecordAllowed(path.dbName, path.storeName, cursor.value, allow)) {
+                    cursor.continue();
                     return;
                 }
                 scanned += 1;
@@ -638,6 +753,7 @@ async function listIndexedDbStores(module: DataModuleDefinition, source: Indexed
 export async function listLocalDataDirectory(input: LocalDataListInput = {}): Promise<unknown> {
     const path = parseSourcePath(input.path);
     if (path.kind === "missing") throw new Error(path.message);
+    assertModuleAccessible(path);
 
     if (path.kind === "root") {
         return {
@@ -747,6 +863,7 @@ export async function listLocalDataDirectory(input: LocalDataListInput = {}): Pr
 export async function readLocalDataFile(input: LocalDataReadInput): Promise<unknown> {
     const path = parseSourcePath(input.path);
     if (path.kind === "missing") throw new Error(path.message);
+    assertModuleAccessible(path);
     if (path.kind === "indexeddbStore") return readIndexedDbStore(path, input);
     if (path.kind === "kvFile") {
         const records = await readKvRecords(path.source);
@@ -763,6 +880,7 @@ export async function readLocalDataFile(input: LocalDataReadInput): Promise<unkn
 export async function readLocalDataRecord(input: LocalDataRecordInput): Promise<unknown> {
     const path = parseSourcePath(input.path);
     if (path.kind === "missing") throw new Error(path.message);
+    assertModuleAccessible(path);
     if (path.kind !== "indexeddbStore") {
         throw new Error("读取单条记录只支持 IndexedDB store 路径；KV/localStorage 请用读取资料文件。");
     }
@@ -777,6 +895,10 @@ export async function readLocalDataRecord(input: LocalDataRecordInput): Promise<
         const transaction = db.transaction(path.storeName, "readonly");
         const value = await runRequest(transaction.objectStore(path.storeName).get(parseRecordKey(input.key)));
         if (value === undefined) throw new Error(`记录不存在：${input.key}`);
+        const allow = await computeAllowSets();
+        if (allow && !isRecordAllowed(path.dbName, path.storeName, value, allow)) {
+            throw new Error(`记录不存在：${input.key}`);
+        }
         return {
             path: normalizePath(input.path),
             key: input.key,
@@ -791,6 +913,7 @@ export async function readLocalDataRecord(input: LocalDataRecordInput): Promise<
 export async function inspectLocalDataFields(input: LocalDataFieldsInput): Promise<unknown> {
     const path = parseSourcePath(input.path);
     if (path.kind === "missing") throw new Error(path.message);
+    assertModuleAccessible(path);
     const sample = normalizeSample(input.sample);
     const stats = new Map<string, { types: Set<string>; count: number; preview?: string }>();
     let sampleValues: unknown[] = [];
@@ -838,6 +961,7 @@ async function searchPath(path: SourcePath, input: LocalDataSearchInput, remaini
     const results: unknown[] = [];
 
     for (const module of modules) {
+        if (_viewerScope && module.id === "memory") continue;
         const sources = path.kind === "indexeddb"
             ? [path.source]
             : module.sources.filter(source => {
@@ -894,6 +1018,7 @@ export async function searchLocalDataRecords(input: LocalDataSearchInput): Promi
     const offset = normalizeOffset(input.offset);
     const path = parseSourcePath(input.path);
     if (path.kind === "missing") throw new Error(path.message);
+    assertModuleAccessible(path);
     const results = await searchPath(path, { ...input, limit: limit + offset }, limit + offset);
     return {
         path: normalizePath(input.path),

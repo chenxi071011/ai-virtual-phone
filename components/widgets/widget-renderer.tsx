@@ -59,7 +59,6 @@ export function WidgetRenderer({ widget, preview, onConfigChange }: WidgetRender
           onConfigChange={onConfigChange}
         />
       </div>
-      {!preview && <span className="widget-label">widgets</span>}
     </div>
   );
 }

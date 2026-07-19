@@ -1113,9 +1113,9 @@ export function ReadingViewer({ book, onBack }: Props) {
                 const { reply, actions } = parseReadingDiscussResponse(rawReply);
                 // Parse like chat: split into parts, extract inner monologue, state values, media
                 if (reply) {
-                    const { parts, statusPanel, innerMonologue, stateValues } = parseAIResponse(reply, []);
+                    const { parts, statusPanel, innerMonologue, reasoning, stateValues } = parseAIResponse(reply, []);
                     const newMsgs: ChatMessage[] = [];
-                    const saveParts: typeof parts = parts.length > 0 || !(statusPanel || innerMonologue) ? parts : [{ content: "" }];
+                    const saveParts: typeof parts = parts.length > 0 || !(statusPanel || innerMonologue || reasoning) ? parts : [{ content: "" }];
                     for (let i = 0; i < saveParts.length; i++) {
                         const msg = pushChatMessage({
                             sessionId: session.id,
@@ -1126,6 +1126,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                             mediaData: { ...saveParts[i].mediaData, readingBookTitle: book.title },
                             statusPanel: i === 0 && statusPanel ? statusPanel : undefined,
                             innerMonologue: i === 0 && innerMonologue ? innerMonologue : undefined,
+                            reasoning: i === 0 && reasoning ? reasoning : undefined,
                             stateValues: i === 0 && stateValues.length > 0 ? stateValues : undefined,
                         });
                         newMsgs.push(msg);

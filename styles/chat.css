@@ -930,6 +930,19 @@
   word-break: break-word;
 }
 
+/* Chain-of-thought fold sits above the reply, so it leads with bottom spacing
+   instead of the summary fold's top spacing. Capped and scrollable — offline
+   reasoning runs long and would otherwise push the reply off-screen. */
+.chat-offline-reasoning-fold {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.chat-offline-reasoning-fold .chat-offline-summary-content {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 .chat-offline-generating {
   padding: 10px 14px 12px 18px;
   border-top: 1px solid color-mix(in srgb, var(--c-card-border) 22%, transparent);
@@ -1018,6 +1031,12 @@
 }
 .chat-floating-ctx-menu .ctx-menu-triangle {
   right: auto !important;
+}
+.call-ctx-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 19999;
+  background: transparent;
 }
 .reading-chat-context-menu {
   z-index: 120;
@@ -2538,6 +2557,58 @@
   color: #c4a06a;
   font-style: italic;
   margin-top: 8px;
+}
+
+/* ── Chain-of-thought strip (above the reply, collapsed by default) ──
+   Deliberately quieter than the washi-tape thought card: this is the model
+   reasoning, not the character's in-fiction voice, so it stays out of the way
+   until tapped. */
+.chat-reasoning {
+  margin-left: 52px;
+  margin-right: 12px;
+  margin-bottom: -8px;
+}
+.chat-reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px 2px 5px;
+  border: 1px solid var(--c-card-border);
+  border-radius: 999px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  font-size: calc(9.9px*var(--app-text-scale,1));
+  line-height: 1.6;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: color 0.2s, border-color 0.2s;
+}
+.chat-reasoning-toggle[data-active] {
+  color: var(--c-icon-active);
+  border-color: var(--c-icon);
+}
+.chat-reasoning-chevron {
+  transition: transform 0.2s;
+}
+.chat-reasoning-toggle[data-active] .chat-reasoning-chevron {
+  transform: rotate(90deg);
+}
+.chat-reasoning-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  max-width: calc(100% - 12px);
+  border-radius: 10px;
+  border: 1px solid var(--c-card-border);
+  background: var(--c-input);
+  color: var(--c-text);
+  font-size: calc(11.7px*var(--app-text-scale,1));
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 40vh;
+  overflow-y: auto;
+  animation: thoughtCardIn 0.25s ease-out;
 }
 
 /* ── Monologue heart icon ── */
@@ -6289,6 +6360,58 @@
   border-top: 1px solid color-mix(in srgb, var(--c-card-border, #e5e5e5) 45%, transparent);
   font-size: calc(9.5px * var(--app-text-scale, 1));
   color: var(--c-icon, #aaa);
+}
+
+.chat-toy-grant-card {
+  width: 220px;
+  border-radius: 10px;
+  background: var(--c-card, #fff);
+  border: 1px solid color-mix(in srgb, var(--c-card-border, #e5e5e5) 60%, transparent);
+  overflow: hidden;
+}
+
+.chat-toy-grant-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.chat-toy-grant-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-icon, #999);
+  background: color-mix(in srgb, var(--c-icon, #999) 12%, transparent);
+}
+
+.chat-toy-grant-card-icon.on {
+  color: #ffffff;
+  background: var(--c-icon-rose, #bf6080);
+}
+
+.chat-toy-grant-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-toy-grant-card-title {
+  font-size: calc(14.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  color: var(--c-text-title, #222);
+}
+
+.chat-toy-grant-card-sub {
+  margin-top: 2px;
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  color: var(--c-icon, #999);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 名片建档流程弹窗 */

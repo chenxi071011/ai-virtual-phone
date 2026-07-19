@@ -1,10 +1,12 @@
 "use client";
 
+import { useBackHandler } from "@/lib/back-handler";
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages } from "@/lib/chat-storage";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse, type ParsedMessagePart } from "@/lib/rich-message-parser";
+import { toyController, maybeExecuteToyControlPart, formatToyControlNotice, formatToyGrantNotice } from "@/lib/toy-ble";
 import { MessageBubble, MediaDetailModal, prewarmStickerCache, BilingualTextBlock, isStandaloneHtmlPreviewContent, normalizeTextBubbleContent } from "./message-bubble";
 import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
@@ -19,7 +21,7 @@ import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { createPortal } from "react-dom";
 
-import { loadCharacters } from "@/lib/character-storage";
+import { loadCharacters, saveCharacters } from "@/lib/character-storage";
 import { Character } from "@/lib/character-types";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
@@ -41,7 +43,7 @@ import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp } from "@/lib/follow-up-service";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, Clapperboard, Gift, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Gift, HeartPulse, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { scopeSessionCSS } from "@/lib/css-scoper";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -75,7 +77,7 @@ function isCallSysMsg(msg: ChatMessage): boolean {
     return CALL_SYS_RE.test(msg.content);
 }
 /** Returns the effective UI role: call messages render as "system" regardless of stored role */
-const ACTION_MEDIA_TYPES = new Set(["poke", "accept_red_packet", "decline_red_packet", "accept_transfer", "decline_transfer", "accept_payment_request", "decline_payment_request", "group_admin_notice"]);
+const ACTION_MEDIA_TYPES = new Set(["poke", "accept_red_packet", "decline_red_packet", "accept_transfer", "decline_transfer", "accept_payment_request", "decline_payment_request", "group_admin_notice", "toy_control"]);
 function uiRole(msg: ChatMessage): string {
     if (msg.role === "system" || ACTION_MEDIA_TYPES.has(msg.mediaType || "")) return "system";
     if (isCallSysMsg(msg)) return "system";
@@ -203,6 +205,8 @@ const CHAT_MEDIA_BUBBLE_TYPES = new Set([
     "xiaohongshu_note_share",
     "app_card",
     "media_file",
+    "toy_control",
+    "toy_grant",
 ]);
 
 const STANDALONE_CARD_BUBBLE_STYLE = {
@@ -229,7 +233,8 @@ function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boo
         && !getChatFlowVisibleContent(msg, displayContent)
         && uiRole(msg) !== "system"
         && !msg.statusPanel
-        && !msg.innerMonologue;
+        && !msg.innerMonologue
+        && !msg.reasoning;
 }
 
 // ── Background generation tracking ──────────────────────────
@@ -551,6 +556,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     stickerCharacterIds?: string[];
     isGroup: boolean;
     isSpectator: boolean;
+    toyControlEnabled: boolean;
     muteUntilMs: number;
     isGenerating: boolean;
     theaterMode: boolean;
@@ -572,6 +578,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onOpenCustomPlusAction: (action: RegisteredCustomAppChatPlusAction) => void;
     onStartVideoCall: () => void;
     onStartVoiceCall: () => void;
+    onToggleToyControl: () => void;
     onSendText: (text: string) => boolean;
     onStopGeneration: () => void;
     onTriggerAIResponse: () => void;
@@ -582,6 +589,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     stickerCharacterIds,
     isGroup,
     isSpectator,
+    toyControlEnabled,
     muteUntilMs,
     isGenerating,
     theaterMode,
@@ -603,6 +611,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onOpenCustomPlusAction,
     onStartVideoCall,
     onStartVoiceCall,
+    onToggleToyControl,
     onSendText,
     onStopGeneration,
     onTriggerAIResponse,
@@ -668,6 +677,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><text x="12" y="16" textAnchor="middle" fontSize="12" fill="var(--c-text)" stroke="none">¥</text></svg>, label: "转账", onClick: () => onOpenRichModal(isGroup ? "transfer_target" : "transfer") },
         { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
+        ...(isGroup ? [] : [{
+            icon: <HeartPulse size={22} strokeWidth={1.5} color={toyControlEnabled ? "var(--c-icon-active)" : "var(--c-text)"} />,
+            label: toyControlEnabled ? "收回玩具控制权" : "交出玩具控制权",
+            onClick: onToggleToyControl,
+        }]),
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
         ...customPlusActions.map(action => ({
@@ -1002,6 +1016,8 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
     const [customPlusActions, setCustomPlusActions] = useState<RegisteredCustomAppChatPlusAction[]>(() => loadCustomAppChatPlusActions());
     const [activeCustomChatPlus, setActiveCustomChatPlus] = useState<ActiveCustomChatPlus | null>(null);
     const [showSettings, setShowSettings] = useState(false);
+    // 设置面板比会话更深一层，后注册所以会先接管返回
+    useBackHandler(showSettings, () => setShowSettings(false));
     const [showVoiceCall, setShowVoiceCall] = useState(false);
     const [showVideoCall, setShowVideoCall] = useState(false);
     const [callInitiator, setCallInitiator] = useState<"user" | "character">("user");
@@ -1075,6 +1091,8 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
     const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
     const [showConfirmMultiDelete, setShowConfirmMultiDelete] = useState(false);
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
+    // Chain-of-thought strip above each reply; collapsed until tapped.
+    const [expandedReasoningId, setExpandedReasoningId] = useState<string | null>(null);
     const [voiceTextIds, setVoiceTextIds] = useState<Set<string>>(new Set());
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState("");
@@ -2087,7 +2105,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             if (!(session.participantIds || []).includes(r.characterId)) continue;
             if (isGroupMuted(session, r.characterId)) continue;
             const responseBatchId = createResponseBatchId();
-            const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
+            const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
             let attachedState = false;
             let savedAnyPart = false;
             for (const part of parts) {
@@ -2107,6 +2125,29 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         if (callType === "voice") setShowVoiceCall(true);
                         else setShowVideoCall(true);
                     }
+                    continue;
+                }
+                if (part.mediaType === "toy_control") {
+                    const groupCharacter = loadCharacters().find(ch => ch.id === r.characterId);
+                    maybeExecuteToyControlPart(part, !!groupCharacter?.toyControlEnabled);
+                    if (!isFirst) await abortableDelay(800, guard?.signal);
+                    throwIfGenerationStopped(guard);
+                    isFirst = false;
+                    const content = formatToyControlNotice(part.mediaData?.toyPattern || "constant", part.mediaData?.toyIntensity ?? 0, r.characterName);
+                    const msg = pushChatMessage({
+                        sessionId: session.id, role: "assistant",
+                        content, mediaType: "toy_control", mediaData: part.mediaData,
+                        responseBatchId, rawResponseText: r.responseText, responseRoundId, editableResponseText,
+                        statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
+                        innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                        reasoning: !attachedState && reasoning ? reasoning : undefined,
+                        stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
+                        senderCharacterId: r.characterId,
+                        senderName: r.characterName,
+                    });
+                    attachedState = true;
+                    savedAnyPart = true;
+                    msgsSetter(prev => [...prev, msg]);
                     continue;
                 }
                 if (part.mediaType === "accept_red_packet") {
@@ -2170,6 +2211,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         editableResponseText,
                         statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
                         innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                        reasoning: !attachedState && reasoning ? reasoning : undefined,
                         stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
                         senderCharacterId: r.characterId,
                         senderName: applied.senderName,
@@ -2197,6 +2239,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         editableResponseText,
                         statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
                         innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                        reasoning: !attachedState && reasoning ? reasoning : undefined,
                         stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
                         senderCharacterId: r.characterId,
                         senderName: pokeSender,
@@ -2227,6 +2270,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     editableResponseText,
                     statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
                     innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                    reasoning: !attachedState && reasoning ? reasoning : undefined,
                     stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
                     senderCharacterId: r.characterId,
                     senderName: r.characterName,
@@ -2248,7 +2292,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     isGroup: true,
                 });
             }
-            if (!savedAnyPart && (statusPanel || innerMonologue)) {
+            if (!savedAnyPart && (statusPanel || innerMonologue || reasoning)) {
                 throwIfGenerationStopped(guard);
                 const msg = pushChatMessage({
                     sessionId: session.id,
@@ -2260,6 +2304,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     editableResponseText,
                     statusPanel,
                     innerMonologue,
+                    reasoning,
                     stateValues: stateValues.length > 0 ? stateValues : undefined,
                     senderCharacterId: r.characterId,
                     senderName: r.characterName,
@@ -2474,7 +2519,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
+        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
         throwIfGenerationStopped(options);
 
         // Detect call triggers and AI media actions, filter them out
@@ -2513,6 +2558,13 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     continue;
                 }
             }
+            // 情趣玩具控制：只有角色仍被授权时才真正驱动设备（防止 prompt 未注入却被幻觉出该标签）；
+            // 保留 mediaType 让 UI 渲染为系统提示，与 poke 一致。
+            if (p.mediaType === "toy_control") {
+                const content = formatToyControlNotice(p.mediaData?.toyPattern || "constant", p.mediaData?.toyIntensity ?? 0, charN);
+                pushFilteredPart({ ...p, content }, () => maybeExecuteToyControlPart(p, !!character?.toyControlEnabled));
+                continue;
+            }
             // Poke: keep mediaType so UI renders it as a system notice, while preserving response order.
             if (p.mediaType === "poke") {
                 const pokeSender = (p.mediaData?.pokeSender === "我" ? charN : p.mediaData?.pokeSender) || charN;
@@ -2529,7 +2581,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
 
         if (filteredParts.length === 0) {
             // Silence: only status panel / inner monologue, no visible chat text
-            if (statusPanel || innerMonologue) {
+            if (statusPanel || innerMonologue || reasoning) {
                 throwIfGenerationStopped(options);
                 const aiMsg = pushChatMessage({
                     sessionId: session.id,
@@ -2539,6 +2591,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     rawResponseText: aiResponseText,
                     statusPanel,
                     innerMonologue,
+                    reasoning,
                     stateValues: stateValues.length > 0 ? stateValues : undefined,
                 });
                 setMessages(prev => [...prev, aiMsg]);
@@ -2565,6 +2618,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 rawResponseText: aiResponseText,
                 statusPanel: idx === 0 && statusPanel ? statusPanel : undefined,
                 innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
+                reasoning: idx === 0 && reasoning ? reasoning : undefined,
                 stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
             }, options);
             throwIfGenerationStopped(options);
@@ -3044,6 +3098,28 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
         return true;
     };
 
+    const handleToggleToyControl = useCallback(() => {
+        if (session.isGroup) return;
+        const characterId = session.contactId;
+        const all = loadCharacters();
+        const target = all.find(c => c.id === characterId);
+        if (!target) return;
+        const enabled = !target.toyControlEnabled;
+        target.toyControlEnabled = enabled;
+        saveCharacters(all);
+        setCharacter({ ...target });
+        if (!enabled) toyController.emergencyStop();
+        const msg = pushChatMessage({
+            sessionId: session.id,
+            role: "user",
+            content: formatToyGrantNotice(enabled, target.name),
+            mediaType: "toy_grant",
+            mediaData: { toyGranted: enabled },
+        });
+        setMessages(prev => [...prev, msg]);
+        showChatToast(enabled ? "已把玩具控制权交给对方" : "已收回控制权");
+    }, [session.id, session.isGroup, session.contactId]);
+
     const handleOpenCustomPlusAction = useCallback((action: RegisteredCustomAppChatPlusAction) => {
         setShowPlusMenu(false);
         setShowEmojiPanel(false);
@@ -3144,7 +3220,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         const responseRoundId = senderInfo.responseRoundId || createResponseRoundId();
                         const editableResponseText = senderInfo.editableResponseText || `[${senderInfo.characterName}]: ${cleanedEditableText}`;
                         const previousState = getLatestCharacterStateValues(senderInfo.characterId);
-                        const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(text, previousState);
+                        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(text, previousState);
                         let attachedState = false;
                         let savedAnyPart = false;
                         for (const part of parts) {
@@ -3162,6 +3238,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                 editableResponseText,
                                 statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
                                 innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                                reasoning: !attachedState && reasoning ? reasoning : undefined,
                                 stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
                                 senderCharacterId: senderInfo.characterId,
                                 senderName: senderInfo.characterName,
@@ -3173,7 +3250,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                             savedAnyPart = true;
                             setMessages(prev => [...prev, msg]);
                         }
-                        if (!savedAnyPart && (statusPanel || innerMonologue)) {
+                        if (!savedAnyPart && (statusPanel || innerMonologue || reasoning)) {
                             throwIfGenerationStopped(generationGuard);
                             const msg = pushChatMessage({
                                 sessionId: session.id,
@@ -3186,6 +3263,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                 editableResponseText,
                                 statusPanel,
                                 innerMonologue,
+                                reasoning,
                                 stateValues: stateValues.length > 0 ? stateValues : undefined,
                                 senderCharacterId: senderInfo.characterId,
                                 senderName: senderInfo.characterName,
@@ -3646,6 +3724,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     summary: result.summary.trim(),
                     summaryTag: result.summaryTag,
                     rawText: result.rawText,
+                    reasoning: result.reasoning || undefined,
                 });
                 setOfflineTurns(prev => [...prev, saved]);
             } catch (error: any) {
@@ -3760,6 +3839,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 summary: result.summary.trim(),
                 summaryTag: result.summaryTag,
                 rawText: result.rawText,
+                reasoning: result.reasoning || undefined,
             });
             setOfflineTurns([...baseTurns, saved]);
         } catch (error: any) {
@@ -3961,6 +4041,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 responseBatchId?: string;
                 statusPanel?: string;
                 innerMonologue?: string;
+                reasoning?: string;
                 stateValues?: StateValue[];
                 senderCharacterId?: string;
                 senderName?: string;
@@ -3976,13 +4057,13 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             };
             for (const segment of segments) {
                 const responseBatchId = createResponseBatchId();
-                const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(segment.responseText, getCurrentStateForCharacter(segment.characterId));
+                const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(segment.responseText, getCurrentStateForCharacter(segment.characterId));
                 const normalizedParts = normalizeEditedAssistantParts(parts, segment.characterName, {
                     omitHandledFinancialActions: true,
                 });
                 let attachedState = false;
                 for (const part of normalizedParts) {
-                    if (!part.content.trim() && !part.mediaType && (!(statusPanel || innerMonologue) || attachedState)) continue;
+                    if (!part.content.trim() && !part.mediaType && (!(statusPanel || innerMonologue || reasoning) || attachedState)) continue;
                     replacementMessages.push({
                         content: part.content,
                         mediaType: part.mediaType,
@@ -3991,19 +4072,21 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         responseBatchId,
                         statusPanel: !attachedState && statusPanel ? statusPanel : undefined,
                         innerMonologue: !attachedState && innerMonologue ? innerMonologue : undefined,
+                        reasoning: !attachedState && reasoning ? reasoning : undefined,
                         stateValues: !attachedState && stateValues.length > 0 ? stateValues : undefined,
                         senderCharacterId: segment.characterId,
                         senderName: segment.characterName,
                     });
                     attachedState = true;
                 }
-                if (!attachedState && (statusPanel || innerMonologue)) {
+                if (!attachedState && (statusPanel || innerMonologue || reasoning)) {
                     replacementMessages.push({
                         content: "",
                         rawResponseText: segment.responseText,
                         responseBatchId,
                         statusPanel,
                         innerMonologue,
+                        reasoning,
                         stateValues: stateValues.length > 0 ? stateValues : undefined,
                         senderCharacterId: segment.characterId,
                         senderName: segment.characterName,
@@ -4057,9 +4140,9 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId, stateCutoff ? { before: stateCutoff } : undefined);
 
-        const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(editedResponseContent, previousState);
+        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(editedResponseContent, previousState);
         const normalizedParts = normalizeEditedAssistantParts(parts);
-        if (normalizedParts.length === 0 && (statusPanel || innerMonologue)) {
+        if (normalizedParts.length === 0 && (statusPanel || innerMonologue || reasoning)) {
             normalizedParts.push({ content: "" });
         }
         if (normalizedParts.length === 0) {
@@ -4075,6 +4158,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             {
                 statusPanel,
                 innerMonologue,
+                reasoning,
                 stateValues: stateValues.length > 0 ? stateValues : undefined,
             },
         );
@@ -4455,6 +4539,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     mediaData: part.mediaData,
                     statusPanel: index === 0 && parsed.statusPanel ? parsed.statusPanel : (index < batch.length ? base.statusPanel : undefined),
                     innerMonologue: index === 0 && parsed.innerMonologue ? parsed.innerMonologue : (index < batch.length ? base.innerMonologue : undefined),
+                    reasoning: index === 0 && parsed.reasoning ? parsed.reasoning : (index < batch.length ? base.reasoning : undefined),
                     stateValues: index === 0 ? base.stateValues : undefined,
                     displayProjected: true,
                     displaySourceId: sourceId,
@@ -4849,6 +4934,12 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                             </button>
                                         ) : null}
                                     </div>
+                                    {turn.reasoning?.trim() && (
+                                        <details className="chat-offline-summary-fold chat-offline-reasoning-fold">
+                                            <summary>思维链</summary>
+                                            <div className="chat-offline-summary-content">{turn.reasoning}</div>
+                                        </details>
+                                    )}
                                     <div
                                         className="chat-offline-text"
                                         onPointerDown={(e) => { e.stopPropagation(); handleOfflinePointerDown(e, { turnId: turn.id, role: "assistant" }); }}
@@ -5087,6 +5178,28 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                     </span>
                                 </div>
                             )}
+                            {msg.role !== "user" && !!renderMsg.reasoning?.trim() && (
+                                <div className="chat-reasoning">
+                                    <button
+                                        type="button"
+                                        className="chat-reasoning-toggle"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedReasoningId(prev => prev === msg.id ? null : msg.id);
+                                        }}
+                                        aria-expanded={expandedReasoningId === msg.id}
+                                        {...(expandedReasoningId === msg.id ? { "data-active": "" } : {})}
+                                    >
+                                        <ChevronRight size={12} className="chat-reasoning-chevron" aria-hidden="true" />
+                                        <span>思维链</span>
+                                    </button>
+                                    {expandedReasoningId === msg.id && (
+                                        <div className="chat-reasoning-body">
+                                            {renderMsg.reasoning}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             <div
                                 id={`message-${msg.id}`}
                                 className="chat-msg-wrapper"
@@ -5102,6 +5215,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                     </span>
                                 )}
                                 {uiRole(msg) === "system" ? (
+                                    <>
                                     <div
                                         onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); }}
                                         onPointerUp={(e) => handleMessagePointerUp(e)}
@@ -5143,6 +5257,25 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                         )}
                                         {activeMessageId === msg.id && renderSystemContextMenu(msg)}
                                     </div>
+                                    {/* Action-media rows (toy_control, poke, group notices) render as
+                                        centred system notices, but they can still be the anchor the
+                                        folded panel was attached to — they are just another part of
+                                        the reply. Without this the monologue is stored but has no
+                                        affordance to open it. */}
+                                    {msg.role !== "user" && hasFoldedPanel && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setExpandedThinkingId(prev => prev === msg.id ? null : msg.id); }}
+                                            className="chat-monologue-heart bg-none border-none cursor-pointer p-1 ts-14 leading-none self-center shrink-0"
+                                            {...(expandedMonologueId === msg.id ? { "data-active": "" } : {})}
+                                            title="查看折叠状态"
+                                            aria-label="查看折叠状态"
+                                        >
+                                            <svg viewBox="0 0 16 16" width="14" height="14" style={{display:"block"}}>
+                                                <path d="M8 14s-6-4-6-8c0-2.5 1.5-4 3.5-4 1 0 2 .5 2.5 1.5C8.5 2.5 9.5 2 10.5 2 12.5 2 14 3.5 14 6c0 4-6 8-6 8z" fill="currentColor"/>
+                                            </svg>
+                                        </button>
+                                    )}
+                                    </>
                                 ) : msg.isRetracted ? (
                                     <div
                                         onPointerDown={(e) => { e.stopPropagation(); handleMessagePointerDown(e, msg.id); }}
@@ -5403,6 +5536,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
 	                stickerCharacterIds={session.isGroup ? session.participantIds : undefined}
 	                isGroup={!!session.isGroup}
 	                isSpectator={!!session.isGroup && !!session.isSpectator}
+	                toyControlEnabled={!!character?.toyControlEnabled}
 	                muteUntilMs={session.isGroup && session.groupMutes?.[GROUP_SELF_KEY] ? new Date(session.groupMutes[GROUP_SELF_KEY]).getTime() : 0}
 	                isGenerating={isGenerating}
 	                theaterMode={theaterMode}
@@ -5424,6 +5558,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 onOpenCustomPlusAction={handleOpenCustomPlusAction}
                 onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
                 onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
+                onToggleToyControl={() => { setShowPlusMenu(false); handleToggleToyControl(); }}
                 onSendText={handleSendText}
                 onStopGeneration={clearStuckGeneration}
                 onTriggerAIResponse={triggerAIResponse}

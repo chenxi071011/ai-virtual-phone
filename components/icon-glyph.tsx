@@ -36,6 +36,7 @@ import {
   mdiDatabase,
   mdiAccount,
   mdiHome,
+  mdiHeartPulse,
 } from "@mdi/js";
 
 type IconGlyphProps = {
@@ -69,6 +70,7 @@ const MDI_PATHS: Record<IconId, string> = {
   resources: mdiDatabase,
   characters: mdiAccount,
   dwelling: mdiHome,
+  toydevice: mdiHeartPulse,
 };
 
 export function IconGlyph({ id, className }: IconGlyphProps) {

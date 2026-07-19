@@ -6,6 +6,7 @@
 
 import { loadCharacters } from "./character-storage";
 import { loadChatContacts } from "./chat-storage";
+import { getSiblingCharacterIds } from "./settings-storage";
 import type { Character } from "./character-types";
 import {
     addMomentPost,
@@ -342,8 +343,10 @@ async function triggerAIPost(characterId: string): Promise<void> {
             return;
         }
 
-        const contacts = loadChatContacts();
-        const visibility = contacts.map(c => c.characterId);
+        // Only visible to characters sharing the same user identity as the poster —
+        // otherwise a character bound to a different identity/"world" would see moments
+        // that character isn't supposed to know exist, breaking immersion.
+        const visibility = Array.from(getSiblingCharacterIds(characterId));
         const photoUrl = parsed.photoDescription
             ? await generateMomentPhotoUrl(parsed.photoDescription, characterId, parsed.photoUseReferenceImage === true)
             : undefined;

@@ -1,6 +1,7 @@
 import { loadChatSessions } from "./chat-storage";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { kvGet, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
+import { extractThinkingBlock } from "./thinking-parser";
 
 const CHAT_OFFLINE_TURNS_PREFIX = "ai_phone_chat_offline_turns:";
 registerDynamicPrefix(CHAT_OFFLINE_TURNS_PREFIX);
@@ -13,6 +14,7 @@ export type ChatOfflineTurn = {
     summary: string;
     summaryTag: string;
     rawText?: string;
+    reasoning?: string;
     createdAt: string;
 };
 
@@ -29,6 +31,7 @@ export type ParsedOfflineResponse = {
     content: string;
     summary: string;
     summaryTag: string;
+    reasoning: string;
 };
 
 function storageKey(sessionId: string): string {
@@ -45,14 +48,25 @@ function normalizeTurn(value: unknown): ChatOfflineTurn | null {
     if (typeof item.id !== "string" || typeof item.sessionId !== "string") return null;
     if (typeof item.userContent !== "string" || typeof item.assistantContent !== "string") return null;
     if (typeof item.createdAt !== "string") return null;
+    // Turns written before chain-of-thought was parsed still carry it inline in
+    // rawText/assistantContent. Lift it out on load so old records stop leaking
+    // reasoning into the transcript and the next turn's context; saving
+    // re-normalizes, so the migration persists on first write.
+    const storedReasoning = typeof item.reasoning === "string" ? item.reasoning : "";
+    const rawSource = typeof item.rawText === "string" ? item.rawText : undefined;
+    const rawThink = rawSource !== undefined ? extractThinkingBlock(rawSource) : null;
+    const bodyThink = extractThinkingBlock(item.assistantContent);
+    const reasoning = storedReasoning || rawThink?.content || bodyThink.content || "";
+
     return {
         id: item.id,
         sessionId: item.sessionId,
         userContent: item.userContent,
-        assistantContent: item.assistantContent,
+        assistantContent: bodyThink.cleaned,
         summary: typeof item.summary === "string" ? item.summary : "",
         summaryTag: typeof item.summaryTag === "string" && item.summaryTag.trim() ? item.summaryTag.trim() : "summary",
-        rawText: typeof item.rawText === "string" ? item.rawText : undefined,
+        rawText: rawThink ? rawThink.cleaned : rawSource,
+        reasoning: reasoning || undefined,
         createdAt: item.createdAt,
     };
 }
@@ -90,6 +104,7 @@ export function appendChatOfflineTurn(input: {
     summary: string;
     summaryTag: string;
     rawText?: string;
+    reasoning?: string;
 }): ChatOfflineTurn {
     const turn: ChatOfflineTurn = {
         id: createTurnId(),
@@ -99,6 +114,7 @@ export function appendChatOfflineTurn(input: {
         summary: input.summary,
         summaryTag: input.summaryTag.trim() || "summary",
         rawText: input.rawText,
+        reasoning: input.reasoning,
         createdAt: new Date().toISOString(),
     };
     saveChatOfflineTurns(input.sessionId, [...loadChatOfflineTurns(input.sessionId), turn]);
@@ -108,7 +124,7 @@ export function appendChatOfflineTurn(input: {
 export function updateChatOfflineTurn(
     sessionId: string,
     turnId: string,
-    patch: Partial<Pick<ChatOfflineTurn, "userContent" | "assistantContent" | "summary" | "summaryTag" | "rawText">>,
+    patch: Partial<Pick<ChatOfflineTurn, "userContent" | "assistantContent" | "summary" | "summaryTag" | "rawText" | "reasoning">>,
 ): ChatOfflineTurn | null {
     let updated: ChatOfflineTurn | null = null;
     const turns = loadChatOfflineTurns(sessionId).map((turn) => {
@@ -205,7 +221,12 @@ function stripXmlField(rawText: string, tag: string): string {
 }
 
 export function parseOfflineResponse(rawText: string, summaryTag: string): ParsedOfflineResponse {
-    const trimmed = rawText.trim();
+    // Pull the chain-of-thought out before any field extraction. `rawText` is
+    // replayed verbatim into prompt history (formatOfflineTurnXml) and is the
+    // fallback when the model omits <content>, so stripping it here is what
+    // keeps reasoning out of both the transcript and the next turn's context.
+    const think = extractThinkingBlock(rawText.trim());
+    const trimmed = think.cleaned;
     const effectiveSummaryTag = summaryTag.trim() || "summary";
     const summary = extractXmlField(trimmed, [effectiveSummaryTag, "summary"]);
     const content = extractXmlField(trimmed, ["content"])
@@ -215,5 +236,6 @@ export function parseOfflineResponse(rawText: string, summaryTag: string): Parse
         content: content.trim(),
         summary: summary.trim(),
         summaryTag: effectiveSummaryTag,
+        reasoning: think.content,
     };
 }

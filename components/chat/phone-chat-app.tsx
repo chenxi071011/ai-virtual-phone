@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState, useEffect, useRef } from "react";
+import { useBackHandler } from "@/lib/back-handler";
 import { ChatMessageList } from "./chat-message-list";
 import { ChatContactsList } from "./chat-contacts-list";
 import { MomentsFeed } from "./moments-feed";
@@ -39,6 +40,11 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
     const [visitedSessions, setVisitedSessions] = useState<Map<string, ChatSession>>(new Map());
     const [dbReady, setDbReady] = useState(false);
     const [hideTabBar, setHideTabBar] = useState(false);
+
+    // 安卓返回：会话 → 回列表，而不是退出应用。
+    // 聊天室内部更深的层级（设置面板、+号面板、各种弹窗）在各自组件里入栈，会先于这里响应。
+    useBackHandler(Boolean(activeSession), () => setActiveSession(null));
+    useBackHandler(activeMascot, () => setActiveMascot(false));
 
     // Hydrate IndexedDB → in-memory caches on mount
     useEffect(() => {

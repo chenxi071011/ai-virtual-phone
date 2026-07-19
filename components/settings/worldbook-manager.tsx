@@ -638,7 +638,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                         </div>
 
                                                         <div className="flex flex-col gap-1">
-                                                            <label className="menu-desc">备注 (Comment)</label>
+                                                            <label className="menu-desc">名称 / 备注 (Comment)</label>
                                                             <input
                                                                 type="text"
                                                                 value={entry.comment}

@@ -1185,16 +1185,18 @@ function importCloudAssistantMessage(
       mediaData: part.mediaData,
       statusPanel: index === 0 && parsed.statusPanel ? parsed.statusPanel : undefined,
       innerMonologue: index === 0 && parsed.innerMonologue ? parsed.innerMonologue : undefined,
+      reasoning: index === 0 && parsed.reasoning ? parsed.reasoning : undefined,
       stateValues: index === 0 && parsed.stateValues.length > 0 ? parsed.stateValues : undefined,
     }));
   });
 
-  if (messages.length === 0 && (parsed.statusPanel || parsed.innerMonologue || parsed.stateValues.length > 0)) {
+  if (messages.length === 0 && (parsed.statusPanel || parsed.innerMonologue || parsed.reasoning || parsed.stateValues.length > 0)) {
     messages.push(makeCloudImportedMessage(stored, session.id, createdAt, 0, {
       role: "assistant",
       content: "",
       statusPanel: parsed.statusPanel || undefined,
       innerMonologue: parsed.innerMonologue || undefined,
+      reasoning: parsed.reasoning || undefined,
       stateValues: parsed.stateValues.length > 0 ? parsed.stateValues : undefined,
     }));
   }

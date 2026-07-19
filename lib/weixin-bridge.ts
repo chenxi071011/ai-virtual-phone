@@ -1,7 +1,13 @@
 // lib/weixin-bridge.ts
 // WeChat iLink Bot 核心收发逻辑。
-// 所有 iLink 请求通过 /api/weixin 代理转发（解决 CORS）。
+// 浏览器/Netlify 环境下所有 iLink 请求通过 /api/weixin 代理转发（解决 CORS）。
+// 打包成 Capacitor 静态离线 APK 后 app/api 整个不存在（build-static-export.mjs 里挪走了），
+// 打 /api/weixin 只会命中 WebViewLocalServer 的 html5mode 兜底、拿到 index.html，
+// 报 "Unexpected token '<'"。原生壳里改用 CapacitorHttp 直连 iLink（原生网络层天然绕过
+// WebView 的 CORS 限制，网易云音乐那条链路也是同样思路，见 lib/netease/request.ts）。
 
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import CryptoJS from "crypto-js";
 import { type WeixinBotConfig } from "./weixin-storage";
 import { createOrGetSession, loadChatMessages, loadChatSessions, pushChatMessage, getLatestCharacterStateValues } from "./chat-storage";
 import { generateChatCompletion, flattenCompletionResult } from "./chat-engine";
@@ -803,13 +809,264 @@ async function partToWeixinOutgoing(part: ParsedMessagePart, charName: string, c
     return text ? { kind: "text", text } : null;
 }
 
-// ── 通过代理调用 iLink ────────────────────────────────────────
+// ── 通过代理调用 iLink（Web/Netlify）或直连（原生壳）────────────
+// app/api/weixin/route.ts 里同名常量：两边都指向真实的 iLink 服务器。
+const ILINK_BASE = "https://ilinkai.weixin.qq.com";
+
+function makeIlinkHeaders(botToken?: string): Record<string, string> {
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "iLink-App-ClientVersion": "1",
+    };
+    if (botToken) {
+        const randomUin = crypto.getRandomValues(new Uint32Array(1))[0];
+        headers["Authorization"] = `Bearer ${botToken}`;
+        headers["AuthorizationType"] = "ilink_bot_token";
+        headers["X-WECHAT-UIN"] = btoa(String(randomUin));
+    }
+    return headers;
+}
+
+async function ilinkCallNative<T = unknown>(path: string, body: unknown, botToken?: string): Promise<T> {
+    const res = await CapacitorHttp.request({
+        method: "POST",
+        url: `${ILINK_BASE}${path}`,
+        headers: makeIlinkHeaders(botToken),
+        data: body ?? {},
+    });
+    if (res.status < 200 || res.status >= 300) {
+        const bodyText = typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+        throw new Error(`ilink ${res.status}: ${bodyText.slice(0, 300)}`);
+    }
+    return (typeof res.data === "string" ? JSON.parse(res.data) : res.data) as T;
+}
+
+// ── 原生壳下的图片/语音/文件转发：CDN 上传要求把媒体先用随机 AES-128-ECB 密钥加密，
+// 再把密钥/校验信息回传给 iLink——这套协议原本全靠 Node 的 crypto 模块（route.ts），
+// 这里改用项目里网易云音乐那条链路已经在用的 crypto-js（同时支持 AES-ECB 和 MD5，
+// 浏览器/WebView 都能跑，不需要 Node 运行时），逻辑与 app/api/weixin/route.ts 一一对应。
+const CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
+
+function randomBytes(n: number): Uint8Array {
+    const bytes = new Uint8Array(n);
+    crypto.getRandomValues(bytes);
+    return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+}
+
+function bytesFromBase64(b64: string): Uint8Array {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+
+function bytesFromDataUrl(dataUrl: string, pattern: RegExp): Uint8Array {
+    const match = dataUrl.match(pattern);
+    if (!match) throw new Error("invalid_data_url");
+    return bytesFromBase64(match[1]);
+}
+
+function wordArrayToBytes(wordArray: CryptoJS.lib.WordArray): Uint8Array {
+    const { words, sigBytes } = wordArray;
+    const bytes = new Uint8Array(sigBytes);
+    for (let i = 0; i < sigBytes; i++) {
+        bytes[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+    }
+    return bytes;
+}
+
+function md5Hex(bytes: Uint8Array): string {
+    return CryptoJS.MD5(CryptoJS.lib.WordArray.create(bytes)).toString();
+}
+
+// 与 route.ts 的 aesEcbPaddedSize 一致：PKCS7 填充后的长度只取决于原始长度，
+// 在真正加密前就能算出来，iLink 的 getuploadurl 需要提前拿到这个值。
+function aesEcbPaddedSize(plaintextSize: number): number {
+    return Math.ceil((plaintextSize + 1) / 16) * 16;
+}
+
+function aesEcbEncryptBytes(data: Uint8Array, key: Uint8Array): Uint8Array {
+    const encrypted = CryptoJS.AES.encrypt(
+        CryptoJS.lib.WordArray.create(data),
+        CryptoJS.lib.WordArray.create(key),
+        { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 },
+    );
+    return wordArrayToBytes(encrypted.ciphertext);
+}
+
+function findResponseHeader(headers: Record<string, string>, name: string): string | undefined {
+    const key = Object.keys(headers || {}).find(k => k.toLowerCase() === name.toLowerCase());
+    return key ? headers[key] : undefined;
+}
+
+async function uploadMediaToCdnNative(
+    botToken: string,
+    toUserId: string,
+    media: Uint8Array,
+    mediaType: number,
+    options?: { noNeedThumb?: boolean },
+): Promise<{ filesize: number; aeskeyBase64: string; downloadParam: string }> {
+    const rawsize = media.length;
+    const filesize = aesEcbPaddedSize(rawsize);
+    const filekey = bytesToHex(randomBytes(16));
+    const aeskeyBytes = randomBytes(16);
+
+    const uploadData = await ilinkCallNative<{ upload_param?: string }>(
+        "/ilink/bot/getuploadurl",
+        {
+            filekey,
+            media_type: mediaType,
+            to_user_id: toUserId,
+            rawsize,
+            rawfilemd5: md5Hex(media),
+            filesize,
+            aeskey: bytesToHex(aeskeyBytes),
+            ...(options?.noNeedThumb ? { no_need_thumb: true } : {}),
+            base_info: BASE_INFO,
+        },
+        botToken,
+    );
+    if (!uploadData.upload_param) throw new Error("missing_upload_param");
+
+    const ciphertext = aesEcbEncryptBytes(media, aeskeyBytes);
+    const cdnUrl = `${CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(uploadData.upload_param)}&filekey=${encodeURIComponent(filekey)}`;
+    const cdnRes = await CapacitorHttp.request({
+        method: "POST",
+        url: cdnUrl,
+        headers: { "Content-Type": "application/octet-stream" },
+        data: bytesToBase64(ciphertext),
+        dataType: "file",
+    });
+    if (cdnRes.status < 200 || cdnRes.status >= 300) {
+        const bodyText = typeof cdnRes.data === "string" ? cdnRes.data : JSON.stringify(cdnRes.data);
+        throw new Error(`CDN HTTP ${cdnRes.status}: ${bodyText.slice(0, 300)}`);
+    }
+    const downloadParam = findResponseHeader(cdnRes.headers, "x-encrypted-param");
+    if (!downloadParam) throw new Error("missing_cdn_download_param");
+
+    return { filesize, aeskeyBase64: btoa(bytesToHex(aeskeyBytes)), downloadParam };
+}
+
+async function sendMediaMessageNative(
+    botToken: string,
+    toUserId: string,
+    contextToken: string,
+    itemList: unknown[],
+): Promise<void> {
+    const data = await ilinkCallNative<{ ret?: number; errmsg?: string }>(
+        "/ilink/bot/sendmessage",
+        {
+            msg: {
+                from_user_id: "",
+                to_user_id: toUserId,
+                client_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                message_type: 2,
+                message_state: 2,
+                context_token: contextToken,
+                item_list: itemList,
+            },
+            base_info: BASE_INFO,
+        },
+        botToken,
+    );
+    if (data.ret !== undefined && data.ret !== 0) throw new Error(data.errmsg || `ret=${data.ret}`);
+}
+
+async function sendImageNative(botToken: string, toUserId: string, contextToken: string, imageDataUrl: string): Promise<void> {
+    const media = bytesFromDataUrl(imageDataUrl, /^data:image\/(?:png|jpe?g|webp);base64,([\s\S]+)$/i);
+    const upload = await uploadMediaToCdnNative(botToken, toUserId, media, 1, { noNeedThumb: true });
+    await sendMediaMessageNative(botToken, toUserId, contextToken, [{
+        type: 2,
+        image_item: {
+            media: { encrypt_query_param: upload.downloadParam, aes_key: upload.aeskeyBase64, encrypt_type: 1 },
+            mid_size: upload.filesize,
+        },
+    }]);
+}
+
+async function sendVoiceNative(botToken: string, toUserId: string, contextToken: string, audioDataUrl: string): Promise<void> {
+    const media = bytesFromDataUrl(audioDataUrl, /^data:(?:audio\/(?:mpeg|mp3)|application\/octet-stream);base64,([\s\S]+)$/i);
+    const upload = await uploadMediaToCdnNative(botToken, toUserId, media, 3);
+    await sendMediaMessageNative(botToken, toUserId, contextToken, [{
+        type: 4,
+        file_item: {
+            media: { encrypt_query_param: upload.downloadParam, aes_key: upload.aeskeyBase64, encrypt_type: 1 },
+            file_name: "voice.mp3",
+            file_size: media.length,
+            file_ext: "mp3",
+        },
+    }]);
+}
+
+async function sendFileNative(botToken: string, toUserId: string, contextToken: string, fileDataUrl: string, fileName: string): Promise<void> {
+    const media = bytesFromDataUrl(fileDataUrl, /^data:[^;]+;base64,([\s\S]+)$/i);
+    const upload = await uploadMediaToCdnNative(botToken, toUserId, media, 3);
+    const rawExt = fileName.split(".").pop() || "";
+    const ext = /^[a-zA-Z0-9]{2,5}$/.test(rawExt) ? rawExt : "bin";
+    await sendMediaMessageNative(botToken, toUserId, contextToken, [{
+        type: 4,
+        file_item: {
+            media: { encrypt_query_param: upload.downloadParam, aes_key: upload.aeskeyBase64, encrypt_type: 1 },
+            file_name: fileName,
+            file_size: media.length,
+            file_ext: ext,
+        },
+    }]);
+}
+
+// ── 统一入口：原生壳直连，Web/Netlify 走代理；上层调用方不用关心区别 ──
+async function sendWeixinImage(botToken: string, toUserId: string, contextToken: string, imageDataUrl: string): Promise<void> {
+    if (Capacitor.isNativePlatform()) return sendImageNative(botToken, toUserId, contextToken, imageDataUrl);
+    const res = await fetch("/api/weixin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_image", botToken, toUserId, contextToken, imageDataUrl }),
+    });
+    if (!res.ok) throw new Error((await res.text().catch(() => "")).slice(0, 300));
+}
+
+async function sendWeixinVoice(botToken: string, toUserId: string, contextToken: string, audioDataUrl: string): Promise<void> {
+    if (Capacitor.isNativePlatform()) return sendVoiceNative(botToken, toUserId, contextToken, audioDataUrl);
+    const res = await fetch("/api/weixin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_voice", botToken, toUserId, contextToken, audioDataUrl }),
+    });
+    if (!res.ok) throw new Error((await res.text().catch(() => "")).slice(0, 300));
+}
+
+async function sendWeixinFile(botToken: string, toUserId: string, contextToken: string, fileDataUrl: string, fileName: string): Promise<void> {
+    if (Capacitor.isNativePlatform()) return sendFileNative(botToken, toUserId, contextToken, fileDataUrl, fileName);
+    const res = await fetch("/api/weixin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_file", botToken, toUserId, contextToken, fileDataUrl, fileName }),
+    });
+    if (!res.ok) throw new Error((await res.text().catch(() => "")).slice(0, 300));
+}
+
 async function ilinkCall<T = unknown>(
     path: string,
     body?: unknown,
     botToken?: string,
     signal?: AbortSignal,
 ): Promise<T> {
+    if (Capacitor.isNativePlatform()) {
+        return ilinkCallNative<T>(path, body, botToken);
+    }
     const res = await fetch("/api/weixin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -943,7 +1200,7 @@ async function handleIncomingMessage(
     // 3. 用 parseAIResponse 解析（和 follow-up-service / chat-room 一致）
     const previousState = getLatestCharacterStateValues(bot.characterId);
 
-    const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(rawReply, previousState);
+    const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(rawReply, previousState);
 
     // 解析角色名
     const sessions = loadChatSessions();
@@ -974,10 +1231,10 @@ async function handleIncomingMessage(
     }
 
     // 4. 逐条存入（带 mediaType / innerMonologue / stateValues），和 chat-room 一模一样
-    if (visibleParts.length === 0 && (statusPanel || innerMonologue)) {
+    if (visibleParts.length === 0 && (statusPanel || innerMonologue || reasoning)) {
         pushChatMessage({
             sessionId: session.id, role: "assistant", content: "",
-            statusPanel, innerMonologue, stateValues: stateValues.length > 0 ? stateValues : undefined,
+            statusPanel, innerMonologue, reasoning, stateValues: stateValues.length > 0 ? stateValues : undefined,
         });
     } else {
         for (let i = 0; i < visibleParts.length; i++) {
@@ -989,6 +1246,7 @@ async function handleIncomingMessage(
                 mediaData: visibleParts[i].mediaData,
                 statusPanel: i === 0 && statusPanel ? statusPanel : undefined,
                 innerMonologue: i === 0 && innerMonologue ? innerMonologue : undefined,
+                reasoning: i === 0 && reasoning ? reasoning : undefined,
                 stateValues: i === 0 && stateValues.length > 0 ? stateValues : undefined,
             });
         }
@@ -1005,86 +1263,48 @@ async function handleIncomingMessage(
         try {
             const item = weixinOutbox[i];
             if (item.kind === "image") {
-                const sendImageRes = await fetch("/api/weixin", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "send_image",
-                        botToken: bot.botToken,
-                        toUserId: msg.from_user_id,
-                        contextToken: msg.context_token,
-                        imageDataUrl: item.imageDataUrl,
-                    }),
-                });
-                if (!sendImageRes.ok) {
-                    const errText = await sendImageRes.text();
-                    pushBridgeNotice(session.id, `[微信转发] 第${i + 1}张图片失败: ${errText.slice(0, 200)}`);
+                try {
+                    await sendWeixinImage(bot.botToken, msg.from_user_id, msg.context_token, item.imageDataUrl);
+                } catch (err) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    pushBridgeNotice(session.id, `[微信转发] 第${i + 1}张图片失败: ${errMsg.slice(0, 200)}`);
                 }
                 continue;
             }
             if (item.kind === "voice") {
-                const sendVoiceRes = await fetch("/api/weixin", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "send_voice",
-                        botToken: bot.botToken,
-                        toUserId: msg.from_user_id,
-                        contextToken: msg.context_token,
-                        audioDataUrl: item.audioDataUrl,
-                        duration: item.duration,
-                        transcript: item.transcript,
-                    }),
-                });
-                if (!sendVoiceRes.ok) {
-                    const errText = await sendVoiceRes.text();
-                    pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条语音失败: ${errText.slice(0, 200)}`);
+                try {
+                    await sendWeixinVoice(bot.botToken, msg.from_user_id, msg.context_token, item.audioDataUrl);
+                } catch (err) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条语音失败: ${errMsg.slice(0, 200)}`);
                     if (item.fallbackImageDataUrl) {
-                        const fallbackRes = await fetch("/api/weixin", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                action: "send_image",
-                                botToken: bot.botToken,
-                                toUserId: msg.from_user_id,
-                                contextToken: msg.context_token,
-                                imageDataUrl: item.fallbackImageDataUrl,
-                            }),
-                        });
-                        if (!fallbackRes.ok) {
-                            const fallbackErr = await fallbackRes.text();
-                            pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条语音图片失败: ${fallbackErr.slice(0, 200)}`);
+                        try {
+                            await sendWeixinImage(bot.botToken, msg.from_user_id, msg.context_token, item.fallbackImageDataUrl);
+                        } catch (fallbackErr) {
+                            const fallbackErrMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+                            pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条语音图片失败: ${fallbackErrMsg.slice(0, 200)}`);
                         }
                     }
                 }
                 continue;
             }
             const clientId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            const sendRes = await fetch("/api/weixin", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    path: "/ilink/bot/sendmessage",
-                    method: "POST",
-                    botToken: bot.botToken,
-                    body: {
-                        msg: {
-                            from_user_id: "",
-                            to_user_id: msg.from_user_id,
-                            client_id: clientId,
-                            message_type: 2,
-                            message_state: 2,
-                            context_token: msg.context_token,
-                            item_list: [{ type: 1, text_item: { text: item.text } }],
-                        },
-                        base_info: BASE_INFO,
+            await ilinkCall(
+                "/ilink/bot/sendmessage",
+                {
+                    msg: {
+                        from_user_id: "",
+                        to_user_id: msg.from_user_id,
+                        client_id: clientId,
+                        message_type: 2,
+                        message_state: 2,
+                        context_token: msg.context_token,
+                        item_list: [{ type: 1, text_item: { text: item.text } }],
                     },
-                }),
-            });
-            if (!sendRes.ok) {
-                const errText = await sendRes.text();
-                pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条失败: ${errText.slice(0, 200)}`);
-            }
+                    base_info: BASE_INFO,
+                },
+                bot.botToken,
+            );
         } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
             pushBridgeNotice(session.id, `[微信转发] 第${i + 1}条异常: ${errMsg}`);
@@ -1112,48 +1332,26 @@ async function handleIncomingMessage(
             if (!dataUrl.startsWith("data:")) continue;
 
             if (att.type === "image" && dataUrl.startsWith("data:image/")) {
-                const res = await fetch("/api/weixin", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "send_image",
-                        botToken: bot.botToken,
-                        toUserId: msg.from_user_id,
-                        contextToken: msg.context_token,
-                        imageDataUrl: dataUrl,
-                    }),
-                });
-                if (!res.ok) pushBridgeNotice(session.id, `[微信转发] 工具图片${i + 1}失败: ${(await res.text()).slice(0, 200)}`);
+                try {
+                    await sendWeixinImage(bot.botToken, msg.from_user_id, msg.context_token, dataUrl);
+                } catch (err) {
+                    pushBridgeNotice(session.id, `[微信转发] 工具图片${i + 1}失败: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+                }
             } else if (att.type === "audio" && dataUrl.startsWith("data:audio/")) {
-                const res = await fetch("/api/weixin", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "send_voice",
-                        botToken: bot.botToken,
-                        toUserId: msg.from_user_id,
-                        contextToken: msg.context_token,
-                        audioDataUrl: dataUrl,
-                    }),
-                });
-                if (!res.ok) pushBridgeNotice(session.id, `[微信转发] 工具音频${i + 1}失败: ${(await res.text()).slice(0, 200)}`);
+                try {
+                    await sendWeixinVoice(bot.botToken, msg.from_user_id, msg.context_token, dataUrl);
+                } catch (err) {
+                    pushBridgeNotice(session.id, `[微信转发] 工具音频${i + 1}失败: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+                }
             } else if (att.type === "video" || att.type === "file") {
                 const defaultExt = att.type === "video" ? "mp4" : "bin";
                 const rawName = att.title || "file";
                 const fileName = /\.\w{2,5}$/.test(rawName) ? rawName : `${rawName}.${defaultExt}`;
-                const res = await fetch("/api/weixin", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "send_file",
-                        botToken: bot.botToken,
-                        toUserId: msg.from_user_id,
-                        contextToken: msg.context_token,
-                        fileDataUrl: dataUrl,
-                        fileName,
-                    }),
-                });
-                if (!res.ok) pushBridgeNotice(session.id, `[微信转发] 工具文件${i + 1}失败: ${(await res.text()).slice(0, 200)}`);
+                try {
+                    await sendWeixinFile(bot.botToken, msg.from_user_id, msg.context_token, dataUrl, fileName);
+                } catch (err) {
+                    pushBridgeNotice(session.id, `[微信转发] 工具文件${i + 1}失败: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+                }
             }
         } catch (err) {
             pushBridgeNotice(session.id, `[微信转发] 工具媒体${i + 1}异常: ${err instanceof Error ? err.message : String(err)}`);

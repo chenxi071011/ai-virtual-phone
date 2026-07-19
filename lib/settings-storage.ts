@@ -24,6 +24,7 @@ import {
     hydrateSettingsDb,
 } from "./settings-db";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
+import { loadCharacters } from "./character-storage";
 
 // --- Unsupported import format detection ---
 export const UNSUPPORTED_IMPORT_FORMAT = "UNSUPPORTED_IMPORT_FORMAT";
@@ -970,6 +971,26 @@ export function resolveUserIdentity(characterId?: string, appId?: string): UserI
         return identities.find(i => i.id === resolved.userIdentityId) || identities[0];
     }
     return identities[0];
+}
+
+/**
+ * All character IDs bound to the same user identity as `characterId` (via the
+ * same binding cascade `resolveUserIdentity` uses), including itself.
+ * Backs per-character data isolation: a character should only ever see
+ * chats/moments/contacts belonging to "its own" identity, not a sibling
+ * identity's — e.g. identity A bound to characters 1/2, identity B bound to
+ * 3/4: character 1 should see 2 but never 3 or 4.
+ */
+export function getSiblingCharacterIds(characterId: string, appId?: string): Set<string> {
+    const identity = resolveUserIdentity(characterId, appId);
+    const result = new Set<string>([characterId]);
+    if (!identity) return result;
+    for (const character of loadCharacters()) {
+        if (resolveUserIdentity(character.id, appId)?.id === identity.id) {
+            result.add(character.id);
+        }
+    }
+    return result;
 }
 
 // --- Migration from legacy CharacterSettingsOverride ---

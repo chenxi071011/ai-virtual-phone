@@ -9,6 +9,7 @@ export type Character = {
   personality?: string;    // 角色性格
   timeZone?: string;       // IANA 时区，例如 America/New_York；空值表示跟随系统时间
   tags?: string[];
+  toyControlEnabled?: boolean; // 用户是否已把情趣玩具控制权交给该角色
   createdAt: string;
   updatedAt: string;
 

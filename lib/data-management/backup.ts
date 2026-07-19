@@ -272,14 +272,14 @@ export async function readBackupBlob(blob: Blob): Promise<BackupEnvelope> {
   return { manifest, modules };
 }
 
-export async function downloadBackupBlob(blob: Blob, manifest: BackupManifest, options: DownloadFileOptions = {}): Promise<void> {
+export async function downloadBackupBlob(blob: Blob, manifest: BackupManifest, options: DownloadFileOptions = {}): Promise<string | void> {
   const date = manifest.createdAt.replace(/[:.]/g, "-").slice(0, 19);
   const zipBlob = blob.type === "application/zip" ? blob : blob.slice(0, blob.size, "application/zip");
   // Plain .zip extension so iOS Safari's file picker recognizes the type and
   // lets the user select it for import (a custom .aiphone extension is greyed
   // out on iOS, which has no UTI for it). The backup is validated by the
   // manifest's format/version on import, not by the file extension.
-  await downloadFile(zipBlob, `ai-phone-backup-${date}.zip`, options);
+  return await downloadFile(zipBlob, `ai-phone-backup-${date}.zip`, options);
 }
 
 export async function importBackupBlob(blob: Blob, moduleIds?: DataModuleId[], options: ImportOptions = {}): Promise<ImportResult> {

@@ -101,7 +101,9 @@ export type ChatMessage = {
         | "reading_discuss"
         | "system_instruction"
         | "group_admin_notice"
-        | "media_file";
+        | "media_file"
+        | "toy_control"
+        | "toy_grant";
     origin?: "chat" | "reading_discuss" | "custom_app" | "custom_app_background";
     mediaUrl?: string;
     mediaData?: {
@@ -196,6 +198,10 @@ export type ChatMessage = {
         mediaCompressedAt?: string;
         mediaCleanedAt?: string;
         readingBookTitle?: string; // 阅读讨论所属书名，用于 prompt 短期记忆边界
+        toyGranted?: boolean;      // 玩具控制权授予/收回卡片：true=授予，false=收回
+        toyPattern?: "constant" | "wave" | "pulse" | "ramp" | "stop";
+        toyIntensity?: number;     // 0-100
+        toyDuration?: number;      // 秒
         appId?: string;
         appName?: string;
         appCardTitle?: string;
@@ -216,6 +222,7 @@ export type ChatMessage = {
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
     innerMonologue?: string; // AI inner monologue content from [内心] tags
+    reasoning?: string; // model chain-of-thought from <thinking> tags (own collapsed UI above the bubble)
     stateValues?: StateValue[]; // parsed character state values from inner monologue
     followUpIndex?: number; // which follow-up round produced this message (1 = first follow-up)
     nativeToolCalls?: NativeToolCallRecord[]; // assistant native function/tool calls for prompt replay
@@ -263,6 +270,8 @@ const MEDIA_PREVIEW_MAP: Record<string, string> = {
     tool_notice: "[执行动作]",
     system_instruction: "[系统指令]",
     media_file: "[文件]",
+    toy_control: "[互动设备]",
+    toy_grant: "[情趣玩具]",
 };
 
 export function isReadingDiscussMessage(msg: Pick<ChatMessage, "origin" | "mediaType">): boolean {
@@ -300,7 +309,7 @@ export function getChatMessagePreview(msg: ChatMessage): string {
     if (msg.mediaType === "accept_red_packet" || msg.mediaType === "decline_red_packet"
         || msg.mediaType === "accept_transfer" || msg.mediaType === "decline_transfer"
         || msg.mediaType === "accept_payment_request" || msg.mediaType === "decline_payment_request"
-        || msg.mediaType === "group_admin_notice") {
+        || msg.mediaType === "group_admin_notice" || msg.mediaType === "toy_control" || msg.mediaType === "toy_grant") {
         return toYou(msg.content);
     }
 
@@ -1128,6 +1137,7 @@ function hasVisibleMessagePayload(msg: ChatMessage): boolean {
         || (!!msg.mediaType && msg.mediaType !== "tool_result" && msg.mediaType !== "tool_notice")
         || !!msg.statusPanel?.trim()
         || !!msg.innerMonologue?.trim()
+        || !!msg.reasoning?.trim()
         || !!msg.stateValues?.length;
 }
 
@@ -1395,6 +1405,7 @@ export function replaceMessageWithParts(
             editableResponseText: original.editableResponseText,
             statusPanel: i === 0 ? original.statusPanel : undefined,
             innerMonologue: i === 0 ? original.innerMonologue : undefined,
+            reasoning: i === 0 ? original.reasoning : undefined,
             stateValues: i === 0 ? original.stateValues : undefined,
             followUpIndex: original.followUpIndex,
             senderCharacterId: original.senderCharacterId,
@@ -1418,6 +1429,7 @@ export function replaceResponseBatchWithParts(
     options?: {
         statusPanel?: string;
         innerMonologue?: string;
+        reasoning?: string;
         stateValues?: StateValue[];
     },
 ): ChatMessage[] {
@@ -1455,6 +1467,7 @@ export function replaceResponseBatchWithParts(
         editableResponseText: firstMessage.editableResponseText,
         statusPanel: index === 0 ? options?.statusPanel : undefined,
         innerMonologue: index === 0 ? options?.innerMonologue : undefined,
+        reasoning: index === 0 ? options?.reasoning : undefined,
         stateValues: index === 0 ? options?.stateValues : undefined,
         followUpIndex: firstMessage.followUpIndex,
         senderCharacterId: firstMessage.senderCharacterId,
@@ -1495,6 +1508,7 @@ export function replaceGroupResponseRound(
         responseBatchId?: string;
         statusPanel?: string;
         innerMonologue?: string;
+        reasoning?: string;
         stateValues?: StateValue[];
         senderCharacterId?: string;
         senderName?: string;
@@ -1534,6 +1548,7 @@ export function replaceGroupResponseRound(
         editableResponseText,
         statusPanel: msg.statusPanel,
         innerMonologue: msg.innerMonologue,
+        reasoning: msg.reasoning,
         stateValues: msg.stateValues,
         followUpIndex: firstMessage.followUpIndex,
         senderCharacterId: msg.senderCharacterId,

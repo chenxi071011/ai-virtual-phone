@@ -1,3 +1,4 @@
+import CryptoJS from "crypto-js";
 import { buildSingleModulePayload, getBackupModules } from "../data-management/backup";
 import { importSource } from "../data-management/idb";
 import { createMediaCollector, type MediaResolver } from "../data-management/serializers";
@@ -108,9 +109,9 @@ function saveCloudBackupState(state: CloudBackupState): void {
 // ── crypto / compression helpers (native, no deps) ──
 
 async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  // crypto.subtle 需要"安全上下文"（https:// / localhost），手机 App 走的
+  // http://局域网IP:端口 不算，那儿 crypto.subtle 是 undefined。换纯 JS 实现。
+  return CryptoJS.SHA256(input).toString(CryptoJS.enc.Hex);
 }
 
 async function gzipText(text: string): Promise<Blob> {

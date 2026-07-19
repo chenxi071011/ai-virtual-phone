@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useState, useEffect } from "react";
 import { type LucideIcon, X, Check } from "lucide-react";
+import { useBackHandler } from "@/lib/back-handler";
 
 /* ── Confirm Dialog (center) ── */
 export type ConfirmDialogProps = {
@@ -30,6 +31,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  // 这些弹窗都是条件挂载的，所以"挂载即注册"正好等于"打开即入栈"
+  useBackHandler(true, onCancel);
   return (
     <div className={`modal-overlay ${overlayClassName ?? ""}`} data-ui="modal" onClick={onCancel}>
       <div className={`modal-dialog ${dialogClassName ?? ""}`} data-ui="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -65,6 +68,7 @@ export function ContentDialog({
   onCancel,
   children,
 }: ContentDialogProps) {
+  useBackHandler(true, onCancel);
   return (
     <div className="modal-overlay" data-ui="modal" onClick={onCancel}>
       <div className="modal-dialog" data-ui="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -97,6 +101,7 @@ export function BottomSheet({
   onDone,
   children,
 }: BottomSheetProps) {
+  useBackHandler(true, onClose);
   return (
     <div className="modal-overlay" data-ui="modal" onClick={onClose}>
       <div className="modal-sheet" data-ui="modal-sheet" onClick={(e) => e.stopPropagation()}>
@@ -135,6 +140,7 @@ export function TextExpandModal({
 }) {
   const [draft, setDraft] = useState(value);
 
+  useBackHandler(true, onClose);
   useEffect(() => { setDraft(value); }, [value]);
 
   return (

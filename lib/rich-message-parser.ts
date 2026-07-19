@@ -2,6 +2,7 @@
  * Shared rich-media message parser.
  *
  * Parse order:
+ *   0. Extract <thinking>...</thinking> chain-of-thought (first open → last close)
  *   1. parseStateValues() → extract [好感度:72] etc.
  *   2. Extract [状态栏]...[/状态栏] display-only status panel
  *   3. Extract [内心]...[/内心] inner monologue
@@ -13,6 +14,7 @@ import type { ChatMessage } from "./chat-storage";
 import type { StateValue } from "./chat-storage";
 import { parseStateValues, mergeStateValues } from "./state-value-parser";
 import { stripActionShells } from "./action-parser";
+import { extractThinkingBlock } from "./thinking-parser";
 import {
     formatCustomAppDirectiveSummary,
     getCustomAppDirectiveSyntaxHead,
@@ -34,6 +36,9 @@ export interface ParsedAIResponse {
     stateValues: StateValue[];
     statusPanel: string;
     innerMonologue: string;
+    /** Model chain-of-thought from <thinking> tags. Distinct from innerMonologue,
+     *  which is the character's in-fiction inner voice from [内心]. */
+    reasoning: string;
 }
 
 // ── Rich-media patterns (non-global, for single match with index) ──
@@ -98,6 +103,20 @@ const RICH_PATTERNS: {
                 label: "代付请求",
                 status: "pending" as const,
                 paymentRequestedAt: new Date().toISOString(),
+            },
+        }),
+    },
+    {
+        // 情趣玩具控制（仅在角色被授权且设备已连接时，prompt 中才会出现这个工具说明）：
+        // [情趣互动:pattern:intensity:duration]，pattern∈constant/wave/pulse/ramp/stop
+        regex: new RegExp(`\\[情趣互动${C}(constant|wave|pulse|ramp|stop)${C}(\\d+)${C}(\\d+(?:\\.\\d+)?)\\]`),
+        build: (m) => ({
+            content: "",
+            mediaType: "toy_control" as const,
+            mediaData: {
+                toyPattern: m[1] as "constant" | "wave" | "pulse" | "ramp" | "stop",
+                toyIntensity: parseInt(m[2], 10),
+                toyDuration: parseFloat(m[3]),
             },
         }),
     },
@@ -571,9 +590,14 @@ function parseSegment(segment: string, parts: ParsedMessagePart[]) {
 // ── Main parser ──────────────────────────────────────────
 
 export function parseAIResponse(rawText: string, previousState: StateValue[]): ParsedAIResponse {
-    // 0. FIRST: extract ```html blocks and <style>+HTML before any processing
+    // 0. FIRST: pull the chain-of-thought out before anything else, so state
+    //    values / rich markers the model merely *reasons about* inside it are
+    //    not parsed as if the character had actually emitted them.
+    const think = extractThinkingBlock(rawText);
+
+    // 0.1. extract ```html blocks and <style>+HTML before any processing
     const htmlBlockPlaceholders: { placeholder: string; original: string }[] = [];
-    let protected_ = rawText;
+    let protected_ = think.cleaned;
     // Protect ```html...``` blocks
     protected_ = protected_.replace(/```html\s*\n[\s\S]*?```/g, (match) => {
         const placeholder = `\x00HTML_BLOCK_${htmlBlockPlaceholders.length}\x00`;
@@ -647,5 +671,6 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         stateValues,
         statusPanel: restore(status.content),
         innerMonologue: restore(mono.content),
+        reasoning: think.content,
     };
 }

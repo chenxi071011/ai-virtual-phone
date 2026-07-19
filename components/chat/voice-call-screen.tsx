@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChatSession, ChatMessage, loadChatMessages, pushChatMessage, getLatestCharacterStateValues } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, loadChatMessages, pushChatMessage, getLatestCharacterStateValues, createResponseBatchId, deleteChatMessagesFrom, editChatMessage } from "@/lib/chat-storage";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse } from "@/lib/rich-message-parser";
+import { maybeExecuteToyControlPart, formatToyControlNotice } from "@/lib/toy-ble";
 import { generateChatCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { cancelFollowUp } from "@/lib/follow-up-service";
@@ -12,6 +13,8 @@ import { createSTTSession, type STTSession } from "@/lib/stt-service";
 import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob } from "@/lib/tts-service";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
 import { BilingualTextBlock } from "./message-bubble";
+import { TextExpandModal } from "@/components/ui/modal";
+import { useCallLongPress, CallMessageActionMenu, type ActionMenuAnchor } from "./call-message-action-menu";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import type { Character } from "@/lib/character-types";
 import { useCallKeyboardOffsetStyle } from "./use-call-keyboard-offset";
@@ -33,6 +36,8 @@ type SubtitleEntry = {
     id: string;
     role: "user" | "assistant";
     text: string;
+    messageId?: string;
+    responseBatchId?: string;
 };
 
 type VoiceCallScreenProps = {
@@ -66,6 +71,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const [typedText, setTypedText] = useState("");
     const [bgImageResolved, setBgImageResolved] = useState<string | null>(null);
     const [showSttWarning, setShowSttWarning] = useState(false);
+    const [actionMenuFor, setActionMenuFor] = useState<{ sub: SubtitleEntry; anchor: ActionMenuAnchor } | null>(null);
+    const [editingSubtitle, setEditingSubtitle] = useState<SubtitleEntry | null>(null);
 
     const sttRef = useRef<STTSession | null>(null);
     const audioAbortRef = useRef<(() => void) | null>(null);
@@ -221,42 +228,53 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
     // ── AI response processing (same logic as chat-room) ──
 
-    const processAIResponse = useCallback((aiResponseText: string): { cleanParts: string[]; stateValues: StateValue[] } => {
+    const processAIResponse = useCallback((aiResponseText: string): { cleanParts: string[]; stateValues: StateValue[]; messageId?: string; responseBatchId: string } => {
         // Use shared parseAIResponse for full rich media support (stickers, quotes, etc.)
         const previousState = getLatestCharacterStateValues(session.contactId);
 
-        const { parts, stateValues, statusPanel, innerMonologue } = parseAIResponse(aiResponseText, previousState);
+        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
 
         // Filter out non-chat action types (voice_call, video_call, poke, etc.)
         const chatParts = parts.filter(p =>
             !p.mediaType || !["voice_call", "video_call", "poke", "accept_red_packet", "decline_red_packet", "accept_transfer", "decline_transfer", "accept_payment_request", "decline_payment_request"].includes(p.mediaType)
         );
+        for (const p of chatParts) maybeExecuteToyControlPart(p, !!character?.toyControlEnabled);
 
+        const responseBatchId = createResponseBatchId();
+        let messageId: string | undefined;
         // Save messages to storage
-        if (chatParts.length === 0 && (statusPanel || innerMonologue)) {
+        if (chatParts.length === 0 && (statusPanel || innerMonologue || reasoning)) {
             const aiMsg = pushChatMessage({
                 sessionId: session.id,
                 role: "assistant",
                 content: "",
                 statusPanel,
                 innerMonologue,
+                reasoning,
+                responseBatchId, rawResponseText: aiResponseText,
                 stateValues: stateValues.length > 0 ? stateValues : undefined,
             });
             messagesRef.current = [...messagesRef.current, aiMsg];
+            messageId = aiMsg.id;
         } else {
             const newMsgs = chatParts.map((part, idx) =>
                 pushChatMessage({
                     sessionId: session.id,
                     role: "assistant",
-                    content: part.content,
+                    content: part.mediaType === "toy_control"
+                        ? formatToyControlNotice(part.mediaData?.toyPattern || "constant", part.mediaData?.toyIntensity ?? 0, character?.name || "对方")
+                        : part.content,
                     mediaType: part.mediaType,
                     mediaData: part.mediaData,
+                    responseBatchId, rawResponseText: aiResponseText,
                     statusPanel: idx === 0 && statusPanel ? statusPanel : undefined,
                     innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
+                    reasoning: idx === 0 && reasoning ? reasoning : undefined,
                     stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
                 })
             );
             messagesRef.current = [...messagesRef.current, ...newMsgs];
+            messageId = newMsgs.find(m => !m.mediaType && m.content.trim())?.id || newMsgs[0]?.id;
         }
 
         // Return clean text parts for TTS (exclude rich media content)
@@ -264,8 +282,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             .filter(p => !p.mediaType && p.content.trim())
             .map(p => p.content);
 
-        return { cleanParts, stateValues };
-    }, [session.id, session.contactId]);
+        return { cleanParts, stateValues, messageId, responseBatchId };
+    }, [session.id, session.contactId, character]);
 
     // ── Full conversation turn ──────────────────────
 
@@ -297,7 +315,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             if (stateRef.current === "ENDED") return;
 
             // 4. Process response
-            const { cleanParts } = processAIResponse(aiResponseText);
+            const { cleanParts, messageId, responseBatchId } = processAIResponse(aiResponseText);
             const displayText = cleanParts.join("\n");
             const speechText = stripBilingualForSpeech(displayText);
 
@@ -307,8 +325,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             }
 
             // 5. Add AI subtitle
-            const subtitleId = `ai-${Date.now()}`;
-            setSubtitles(prev => [...prev, { id: subtitleId, role: "assistant", text: displayText }]);
+            const subtitleId = messageId || `ai-${Date.now()}`;
+            setSubtitles(prev => [...prev, { id: subtitleId, role: "assistant", text: displayText, messageId, responseBatchId }]);
 
             // 6. TTS
             setCallState("AI_SPEAKING");
@@ -345,6 +363,33 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             }
         }
     }, [session, processAIResponse]);
+
+    // ── AI 消息长按：重说 / 编辑（复用普通聊天页同款逻辑，仅保留这两个动作）──
+
+    const handleRetrySubtitle = useCallback(async (sub: SubtitleEntry) => {
+        if (!sub.messageId) return;
+        const idx = messagesRef.current.findIndex(m => m.id === sub.messageId);
+        if (idx === -1) return;
+        deleteChatMessagesFrom(sub.messageId);
+        messagesRef.current = messagesRef.current.slice(0, idx);
+        setSubtitles(prev => {
+            const subIdx = prev.findIndex(s => s.id === sub.id);
+            return subIdx === -1 ? prev : prev.slice(0, subIdx);
+        });
+        await runConversationTurn();
+    }, [runConversationTurn]);
+
+    const handleEditSubtitleSave = useCallback((sub: SubtitleEntry, newText: string) => {
+        if (sub.messageId) editChatMessage(sub.messageId, newText);
+        setSubtitles(prev => prev.map(s => s.id === sub.id ? { ...s, text: newText } : s));
+        setEditingSubtitle(null);
+    }, []);
+
+    const { onPointerDown: onSubtitlePointerDown, onPointerUp: onSubtitlePointerUp, onPointerCancel: onSubtitlePointerCancel } =
+        useCallLongPress((id, anchor) => {
+            const sub = subtitles.find(s => s.id === id);
+            if (sub) setActionMenuFor({ sub, anchor });
+        });
 
     // ── Auto-listen: 进入 IDLE 自动开始监听 ────────
 
@@ -604,10 +649,33 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             key={sub.id}
                             className="call-subtitle"
                             data-role={sub.role}
+                            {...(sub.role === "assistant" && sub.messageId ? {
+                                onPointerDown: (e: React.PointerEvent) => onSubtitlePointerDown(e, sub.id),
+                                onPointerUp: onSubtitlePointerUp,
+                                onPointerCancel: onSubtitlePointerCancel,
+                                onPointerLeave: onSubtitlePointerCancel,
+                                onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); setActionMenuFor({ sub, anchor: { x: e.clientX, y: e.clientY } }); },
+                            } : {})}
                         >
                             <BilingualTextBlock text={sub.text} mode="plain" className="call-subtitle-bilingual" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
                         </div>
                     ))}
+                    {actionMenuFor && (
+                        <CallMessageActionMenu
+                            anchor={actionMenuFor.anchor}
+                            onRetry={() => handleRetrySubtitle(actionMenuFor.sub)}
+                            onEdit={() => setEditingSubtitle(actionMenuFor.sub)}
+                            onClose={() => setActionMenuFor(null)}
+                        />
+                    )}
+                    {editingSubtitle && (
+                        <TextExpandModal
+                            title="编辑回复"
+                            value={editingSubtitle.text}
+                            onChange={(v) => handleEditSubtitleSave(editingSubtitle, v)}
+                            onClose={() => setEditingSubtitle(null)}
+                        />
+                    )}
 
                     {/* Interim STT text */}
                     {interimText && callState === "USER_SPEAKING" && (
