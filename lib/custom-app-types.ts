@@ -53,7 +53,8 @@ export type CustomAppPermission =
   | "ui.sms"
   | "ui.call"
   | "wallet.read"
-  | "wallet.pay";
+  | "wallet.pay"
+  | "online.play";
 
 export type CustomAppSdkVersion = "1.0" | string;
 

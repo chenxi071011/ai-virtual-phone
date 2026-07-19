@@ -89,6 +89,7 @@ NEXT_PUBLIC_SELF_HOSTED_MODE=true
 - `docs/game-hall-supabase.sql`：游戏大厅
 - `docs/custom-app-market-supabase.sql`：应用市场
 - `docs/black-market-supabase.sql`：黑市
+- `docs/online-play-supabase.sql`：多人联机（自定义APP/游戏的实时房间与云端共享，可选；不在一体脚本内，需单独执行）
 
 然后关闭单机模式并填入服务端密钥：
 
@@ -97,6 +98,8 @@ NEXT_PUBLIC_SELF_HOSTED_MODE=false
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ACCOUNT_GATE_SECRET=your-random-long-secret
+# 可选：启用多人联机（Project Settings → API 的 anon public key）
+SUPABASE_ANON_KEY=your-anon-key
 ```
 
 不要把 `.env.local` 提交到 Git。

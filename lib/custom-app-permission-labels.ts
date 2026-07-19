@@ -55,6 +55,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "ui.call": "触发通话界面",
   "wallet.read": "读取钱包余额",
   "wallet.pay": "从钱包付款",
+  "online.play": "多人联机（与其他玩家实时互通，你的昵称会展示给同房间玩家）",
 };
 
 export function permissionLabel(permission: string): string {

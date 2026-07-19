@@ -1,0 +1,22 @@
+{
+  "sdkVersion": "1.0",
+  "id": "online.plaza",
+  "name": "联机广场",
+  "version": "1.0.0",
+  "author": "Float 官方",
+  "description": "联机能力官方示例：和其他真实用户开房间实时聊天（实时房间层），或者把心事装进漂流瓶扔向大海、捞起陌生人的瓶子（云端共享层）。也是创作者学习 room.* / cloud.* 联机 API 的活教材，源码即教程。",
+  "icon": "icon.png",
+  "entry": "index.html",
+  "permissions": [
+    "online.play",
+    "ui.toast"
+  ],
+  "extensions": {
+    "events": [
+      "room.message",
+      "room.players",
+      "room.state",
+      "room.closed"
+    ]
+  }
+}

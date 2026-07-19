@@ -14,6 +14,7 @@ import { permissionLabelWithContext } from "@/lib/custom-app-permission-labels";
 import { registerCustomAppToolExecutor, type CustomAppToolExecutorPayload } from "@/lib/custom-app-tool-runtime";
 import { updateInstalledCustomAppFromMarket } from "@/lib/custom-app-market-update";
 import { loadCharacters } from "@/lib/character-storage";
+import { OnlineRoomConnection, onlineCloudApi } from "@/lib/online-room-client";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { ensureSettingsStorageHydrated } from "@/lib/settings-storage";
 import {
@@ -383,6 +384,26 @@ html, body { min-height: 100%; }
       get: function(){ return request('wallet.get'); },
       pay: function(payload){ return request('wallet.pay', payload || {}); }
     },
+    room: {
+      create: function(payload){ return request('room.create', payload || {}); },
+      join: function(payload){ return request('room.join', payload || {}); },
+      current: function(){ return request('room.current'); },
+      send: function(payload){ return request('room.send', { payload: payload }); },
+      setState: function(state){ return request('room.setState', { state: state }); },
+      getState: function(){ return request('room.getState'); },
+      players: function(){ return request('room.players'); },
+      kick: function(userId){ return request('room.kick', { userId: userId }); },
+      close: function(){ return request('room.close'); },
+      leave: function(){ return request('room.leave'); }
+    },
+    cloud: {
+      put: function(payload){ return request('cloud.put', payload || {}); },
+      get: function(payload){ return request('cloud.get', typeof payload === 'string' ? { id: payload } : (payload || {})); },
+      list: function(payload){ return request('cloud.list', payload || {}); },
+      update: function(payload){ return request('cloud.update', payload || {}); },
+      delete: function(payload){ return request('cloud.delete', typeof payload === 'string' ? { id: payload } : (payload || {})); },
+      takeRandom: function(payload){ return request('cloud.takeRandom', payload || {}); }
+    },
     memory: {
       readCore: function(payload){ return request('memory.readCore', payload || {}); },
       readLongTerm: function(payload){ return request('memory.readLongTerm', payload || {}); },
@@ -688,6 +709,13 @@ export function CustomAppRunner({
   const registeredToolHandlersRef = useRef<Set<string>>(new Set());
   const frameAudioChannelsRef = useRef<Map<string, FrameAudioChannel>>(new Map());
   const frameObjectUrlsRef = useRef<Set<string>>(new Set());
+  const onlineRoomRef = useRef<OnlineRoomConnection | null>(null);
+
+  // 联机房间随 APP 生命周期走：关 APP 即退房（房主退房 = 关房）
+  useEffect(() => () => {
+    onlineRoomRef.current?.leave();
+    onlineRoomRef.current = null;
+  }, []);
   const [frameId] = useState(() => `custom_app_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const [bridgeReady, setBridgeReady] = useState(false);
   const isBackgroundRunner = Boolean(backgroundEvent || backgroundTool);
@@ -990,6 +1018,111 @@ export function CustomAppRunner({
         sourceEngine: "custom_app",
       });
       return result ?? { name, success: false, error: "工具没有返回结果。" };
+    }
+
+    if (action.startsWith("room.") || action.startsWith("cloud.")) {
+      requirePermission("online.play");
+      const namespace = `custom_app:${app.id}`;
+
+      if (action.startsWith("cloud.")) {
+        const cloudAction = action.slice("cloud.".length);
+        if (!["put", "get", "list", "update", "delete", "takeRandom"].includes(cloudAction)) {
+          throw new Error(`未知云端动作：${action}`);
+        }
+        const response = await onlineCloudApi({
+          action: cloudAction,
+          namespace,
+          collection: record.collection,
+          id: record.id,
+          data: record.data,
+          sortKey: record.sortKey,
+          limit: record.limit,
+          mine: record.mine,
+          orderBy: record.orderBy,
+        });
+        if (cloudAction === "list") return response.docs;
+        if (cloudAction === "delete") return { deleted: response.deleted === true };
+        return response.doc ?? null;
+      }
+
+      const publicRoomInfo = (connection: OnlineRoomConnection) => ({
+        id: connection.info.id,
+        code: connection.info.code,
+        title: connection.info.title,
+        maxPlayers: connection.info.maxPlayers,
+        meta: connection.info.meta,
+        hostUserId: connection.info.hostUserId,
+        hostName: connection.info.hostName,
+        isHost: connection.info.isHost,
+        selfUserId: connection.selfUserId,
+        selfName: connection.selfName,
+        players: connection.players(),
+      });
+      const current = onlineRoomRef.current && !onlineRoomRef.current.isClosed ? onlineRoomRef.current : null;
+
+      if (action === "room.create" || action === "room.join") {
+        if (current) {
+          current.leave();
+          onlineRoomRef.current = null;
+        }
+        const events = {
+          onMessage: (message: { from: { userId: string; name: string }; payload: unknown; sentAt: number }) => {
+            postHostEvent("room.message", { from: message.from, payload: message.payload, sentAt: message.sentAt });
+          },
+          onPlayers: (players: unknown[]) => postHostEvent("room.players", { players }),
+          onState: (state: Record<string, unknown>) => postHostEvent("room.state", { state }),
+          onClosed: (reason: string) => {
+            onlineRoomRef.current = null;
+            postHostEvent("room.closed", { reason });
+          },
+        };
+        const connection = action === "room.create"
+          ? await OnlineRoomConnection.create({
+            namespace,
+            title: typeof record.title === "string" ? record.title : "",
+            maxPlayers: Number(record.maxPlayers ?? 8) || 8,
+            meta: record.meta && typeof record.meta === "object" && !Array.isArray(record.meta)
+              ? record.meta as Record<string, unknown>
+              : {},
+          }, events)
+          : await OnlineRoomConnection.join({ namespace, code: String(record.code ?? "") }, events);
+        onlineRoomRef.current = connection;
+        return publicRoomInfo(connection);
+      }
+
+      if (action === "room.current") {
+        return current ? { ...publicRoomInfo(current), state: current.state() } : null;
+      }
+      if (action === "room.leave") {
+        if (current) {
+          current.leave();
+          onlineRoomRef.current = null;
+        }
+        return true;
+      }
+      if (!current) throw new Error("当前没有已连接的联机房间，请先 room.create 或 room.join。");
+      if (action === "room.send") {
+        await current.send(record.payload ?? record.data ?? record.message ?? null);
+        return true;
+      }
+      if (action === "room.setState") {
+        const state = record.state ?? record.data;
+        if (!state || typeof state !== "object" || Array.isArray(state)) throw new Error("room.setState 需要对象 state。");
+        await current.setState(state as Record<string, unknown>);
+        return true;
+      }
+      if (action === "room.getState") return current.state();
+      if (action === "room.players") return current.players();
+      if (action === "room.kick") {
+        await current.kick(String(record.userId ?? ""));
+        return true;
+      }
+      if (action === "room.close") {
+        await current.close();
+        onlineRoomRef.current = null;
+        return true;
+      }
+      throw new Error(`未知联机动作：${action}`);
     }
 
     if (action.startsWith("db.")) {

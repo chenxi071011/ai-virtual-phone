@@ -319,6 +319,49 @@ await AiPhoneGame.setTitleBar({
 await AiPhoneGame.closeGame();
 \`\`\`
 
+### 多人联机（真人对战/云共享）
+
+游戏可以让不同用户的真人联机：开房间实时对战（狼人杀、谁是卧底、你画我猜），或用云端共享数据做异步玩法（排行榜、漂流瓶）。联机不需要高级游戏权限，但要求玩家登录了联机账号——未登录或单机模式下调用会抛错，请 catch 后在界面上提示"联机功能需要登录账号"。
+
+实时房间：
+
+\`\`\`js
+// 房主开房，拿到 4 位房号给朋友；其他玩家凭房号加入
+const room = await AiPhoneGame.room.create({ title: "谁是卧底", maxPlayers: 8 });
+const joined = await AiPhoneGame.room.join({ code: "8A3F" });
+
+// 收发消息与玩家名单
+AiPhoneGame.on("room.message", (msg) => handle(msg.from.name, msg.payload));
+AiPhoneGame.on("room.players", ({ players }) => renderPlayers(players));
+await AiPhoneGame.room.send({ type: "speak", text: "我觉得是3号" });
+
+// 权威状态：只有房主能写，全员（含中途加入者）自动同步
+AiPhoneGame.on("room.state", ({ state }) => renderGame(state));
+if (room.isHost) await AiPhoneGame.room.setState({ phase: "vote", round: 2 });
+
+// 房主特权与退出；房间被关/被踢/房主掉线时收到 room.closed
+await AiPhoneGame.room.kick(playerId);
+await AiPhoneGame.room.close();
+await AiPhoneGame.room.leave();
+AiPhoneGame.on("room.closed", ({ reason }) => showEnd(reason));
+\`\`\`
+
+云端共享（异步）：
+
+\`\`\`js
+await AiPhoneGame.cloud.put({ collection: "scores", data: { score: 9800 }, sortKey: 9800 });
+const top = await AiPhoneGame.cloud.list({ collection: "scores", orderBy: "sortKey", limit: 10 });
+const bottle = await AiPhoneGame.cloud.takeRandom({ collection: "bottles" }); // 可能为 null
+\`\`\`
+
+联机架构规则（重要）：
+
+- 游戏权威逻辑（发牌、分身份、回合判定）全部放在**房主客户端**，用 \`room.setState\` 下发；其他玩家只用 \`room.send\` 把自己的操作报给房主。
+- 游戏画面始终从 \`room.state\` 渲染，\`room.send\` 的消息只当事件用——新玩家进房自动收到最新 state。
+- 房主掉线 30 秒后房间自动结束（reason 为 \`host_left\`），本版本不支持房主迁移，请做好收尾界面。
+- 限速每人每秒 25 条、单条 16000 字符；适合回合制与低频同步，不适合动作类帧同步。
+- 联机对战里的 AI 角色（如 AI 补位玩家）只在房主端调用 \`callLLM\` 生成，再通过 state 同步给全员，避免每个客户端各自生成不一致。
+
 ## 权限说明
 
 如果游戏只是普通前端小游戏，只用 \`saveGame\`、\`loadGame\`、\`closeGame\`，通常不需要高级权限。
