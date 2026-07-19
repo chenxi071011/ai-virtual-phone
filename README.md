@@ -1,4 +1,10 @@
-# AI Virtual Phone
+# AI Virtual Phone（二改版）
+
+> 本仓库是 [xiaolongbao0709/ai-virtual-phone](https://github.com/xiaolongbao0709/ai-virtual-phone) 的 fork，
+> 在原项目基础上做了二次开发，主要方向是**把它做成一个能装在手机上离线运行的安卓 APP**，
+> 并补充了几个原版没有的功能。原项目的全部功能与文档在此保留，部署方式与上游一致。
+>
+> 原作者的著作权与许可（AGPL-3.0-only）均予保留，详见 [License](#license) 与 [Credits](#credits)。
 
 一个基于 Next.js 的 AI 虚拟互动手机：在浏览器中模拟一部完整的手机，支持与你创建的 AI 角色进行仿真聊天、朋友圈互动与剧情创作。
 
@@ -13,6 +19,38 @@
 
 所有 LLM 调用都使用**你自己的 API key**，本项目不内置任何模型服务。
 
+## 本 fork 的改动
+
+### 安卓 APP（离线运行）
+
+原版是网页应用，需要部署或本地起服务才能用。本 fork 增加了静态导出构建，可以把整个应用打包进
+Capacitor 安卓壳，**装完即用、不需要服务器**（AI 对话本身仍然需要网络访问你的 API）。
+
+- 新增 `npm run build:static-export`：构建期临时移出 `app/api`，产出可直接塞进原生壳的纯静态页面。
+  这些 API 路由都是给浏览器绕 CORS 用的转发层，原生壳走 CapacitorHttp 不需要它们；
+  普通的 `npm run dev` / `npm run build` 完全不受影响，线上部署行为与上游一致。
+- 安卓返回键 / 左滑手势适配：原本在任意界面返回都会直接退出整个 APP，现在改为先交给
+  当前界面的返回栈处理，只有已经在桌面时才「双击退出」。
+
+打包好的 APK 见本仓库 [Releases](../../releases)。
+
+### 蓝牙体感设备控制
+
+新增通过 BLE 直连体感设备的支持，包含独立的设备 APP 界面与桌面悬浮控制窗，
+并接入了按「适用范围」标签授权的 AI 控制机制——AI 只能在你授权的范围内触发设备。
+
+### 网易云音乐客户端直连
+
+把原先经服务端 API 代理转发的网易云请求整体搬到了客户端（`lib/netease/*`），
+移动端离线壳因此不再依赖任何服务端路由；同时补充了播放历史。
+
+### 聊天与界面
+
+- 思考过程（reasoning）折叠展示，适配推理模型的思维链输出
+- 通话消息的操作菜单
+- 阅读 APP 支持重命名书籍与设置封面
+- 聊天、朋友圈、世界书等模块的若干交互调整与修复
+
 ## 运行要求
 
 - Node.js 20+（Next.js 15 要求 ≥ 18.18）
@@ -21,8 +59,8 @@
 ## 快速开始（本地运行）
 
 ```bash
-git clone -b main <repo-url>
-cd <repo-dir>
+git clone https://github.com/chenxi071011/ai-virtual-phone.git
+cd ai-virtual-phone
 npm install
 cp .env.example .env.local
 npm run dev
@@ -45,6 +83,27 @@ NEXT_PUBLIC_SELF_HOSTED_MODE=true
 1. 打开**设置 → API 设置**，添加你的 LLM API（填 Base URL + API Key，支持 OpenAI 兼容接口、Anthropic、Google Gemini）；
 2. 创建或导入角色卡，开始聊天；
 3. 可选：在设置里继续配置生图、Minimax 语音、网易云音乐 API 等增强功能。
+
+## 安装安卓 APP
+
+直接从 [Releases](../../releases) 下载 APK 安装即可，无需自行构建。
+
+首次安装需要在系统里允许「安装未知来源应用」。如果之前装过其它来源的同名应用，
+需要先卸载旧版再安装（签名不同无法直接覆盖）。
+
+### 自行打包
+
+需要 JDK 17+ 与 Android SDK：
+
+```bash
+npm run build:static-export     # 产出静态站点
+# 将产物同步进 Capacitor 工程后：
+cd android && ./gradlew assembleRelease
+```
+
+正式发布需要自备签名密钥（keystore），并在 `android/keystore.properties` 中配置
+`storeFile` / `storePassword` / `keyAlias` / `keyPassword`。
+**该文件与 keystore 均不可提交到 Git**（已在 `.gitignore` 中排除）。
 
 ## 部署到 Netlify / Vercel
 
@@ -127,7 +186,10 @@ npm run lint    # 代码检查
 
 ## Credits
 
-本项目为独立实现，但部分产品设计和系统抽象受 SillyTavern 启发，包括预设、正则处理、世界书 / lorebook / WorldInfo 等概念。
+本仓库是 [xiaolongbao0709/ai-virtual-phone](https://github.com/xiaolongbao0709/ai-virtual-phone) 的 fork，
+「本 fork 的改动」之外的全部功能均由原项目实现，版权归原作者所有。
+
+原项目为独立实现，但部分产品设计和系统抽象受 SillyTavern 启发，包括预设、正则处理、世界书 / lorebook / WorldInfo 等概念。
 
 - SillyTavern: https://github.com/SillyTavern/SillyTavern
 - SillyTavern 使用 AGPL-3.0 许可证。
