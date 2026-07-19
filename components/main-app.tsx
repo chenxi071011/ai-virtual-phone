@@ -8,6 +8,8 @@ import { CloudBackupScheduler } from "@/components/cloud-backup-scheduler";
 import { MediaMaintenanceScheduler } from "@/components/media-maintenance-scheduler";
 import { DesktopShell } from "./desktop-shell";
 import { SplashAnimation } from "./splash-animation";
+import { Capacitor } from "@capacitor/core";
+import { runBackHandler } from "@/lib/back-handler";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
@@ -146,6 +148,39 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
   await Promise.all(BUILTIN_FONT_LOAD_SPECS.map((spec) => document.fonts.load(spec).catch(() => [])));
 }
 
+/** 在桌面上再按一次返回就退出的时间窗。 */
+const EXIT_CONFIRM_WINDOW_MS = 2000;
+const EXIT_HINT_ID = "app-exit-hint";
+
+/** 轻量提示。这里在 DesktopShell 之外，拿不到它的 notice，所以自己挂一个。 */
+function showExitHint(): void {
+  if (document.getElementById(EXIT_HINT_ID)) return;
+  const hint = document.createElement("div");
+  hint.id = EXIT_HINT_ID;
+  hint.textContent = "再按一次退出";
+  hint.style.cssText = [
+    "position:fixed",
+    "left:50%",
+    "bottom:calc(64px + env(safe-area-inset-bottom,0px))",
+    "transform:translateX(-50%)",
+    "z-index:99999",
+    "padding:9px 18px",
+    "border-radius:999px",
+    "background:rgba(0,0,0,0.76)",
+    "color:#fff",
+    "font-size:13px",
+    "pointer-events:none",
+    "opacity:0",
+    "transition:opacity .18s",
+  ].join(";");
+  document.body.appendChild(hint);
+  requestAnimationFrame(() => { hint.style.opacity = "1"; });
+  window.setTimeout(() => {
+    hint.style.opacity = "0";
+    window.setTimeout(() => hint.remove(), 220);
+  }, EXIT_CONFIRM_WINDOW_MS - 300);
+}
+
 function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
   return (
     <main className="app-root splash-root">
@@ -227,6 +262,40 @@ export function MainApp() {
   const [preparedDesktopTheme, setPreparedDesktopTheme] = useState<PreparedDesktopTheme | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [splashDismissed, setSplashDismissed] = useState(false);
+
+  // 安卓返回 / 左滑手势。
+  // 这个应用用 React state 导航，不压 History，所以 webView.canGoBack() 恒为 false，
+  // Capacitor 的默认行为是直接 finish Activity —— 也就是从任何界面一划就退出整个 APP。
+  // 改成：先交给返回栈里最上层的界面处理，栈空（已在桌面）时才是双击退出。
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let detach: (() => void) | undefined;
+    let cancelled = false;
+    let lastPressAt = 0;
+
+    void (async () => {
+      const { App } = await import("@capacitor/app");
+      const handle = await App.addListener("backButton", () => {
+        if (runBackHandler()) return;
+
+        const now = Date.now();
+        if (now - lastPressAt < EXIT_CONFIRM_WINDOW_MS) {
+          void App.exitApp();
+          return;
+        }
+        lastPressAt = now;
+        showExitHint();
+      });
+      if (cancelled) void handle.remove();
+      else detach = () => void handle.remove();
+    })();
+
+    return () => {
+      cancelled = true;
+      detach?.();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
