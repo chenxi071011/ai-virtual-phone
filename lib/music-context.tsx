@@ -4,6 +4,7 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import type { MusicTrack } from "./music-storage";
 import { getAudioBlob, markTrackPlayed } from "./music-storage";
+import { recordPlayHistory } from "./music-history";
 import { findPlayableMatch, getNeteaseLyrics, getNeteasePlayUrl, getNeteaseSongDetail } from "./music-service";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { registerMusicControlBridge } from "./music-control-bridge";
@@ -36,6 +37,7 @@ export type MusicActions = {
     setPlayMode: (mode: PlayMode) => void;
     setQueue: (tracks: MusicTrack[]) => void;
     removeFromQueue: (trackId: string) => void;
+    updateTrackMetadata: (trackId: string, updates: Partial<MusicTrack>) => void;
     setVolume: (vol: number) => void;
     stop: () => void;
     dismissFloat: () => void;
@@ -214,6 +216,14 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
         setCurrentTrack(track);
         setCurrentTime(0);
+        recordPlayHistory({
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            coverUrl: track.coverUrl,
+            duration: track.duration,
+            source: track.id.startsWith("netease_") ? "netease" : "local",
+        });
 
         try {
             await audio.play();
@@ -236,6 +246,14 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         audio.pause();
         audio.src = url;
         setCurrentTrack(track);
+        recordPlayHistory({
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            coverUrl: track.coverUrl,
+            duration: track.duration,
+            source: track.id.startsWith("netease_") ? "netease" : "local",
+        });
         setCurrentTime(0);
         audio.play().catch(() => {});
     }, [cleanupBlobUrl]);
@@ -321,6 +339,12 @@ export function MusicProvider({ children }: { children: ReactNode }) {
             persistQueue(next);
             return next;
         });
+    }, []);
+
+    /** Patch title/artist/coverUrl etc. on the live queue + currentTrack without restarting playback. */
+    const updateTrackMetadata = useCallback((trackId: string, updates: Partial<MusicTrack>) => {
+        setCurrentTrack(prev => (prev && prev.id === trackId ? { ...prev, ...updates } : prev));
+        setQueueRaw(prev => prev.map(t => (t.id === trackId ? { ...t, ...updates } : t)));
     }, []);
 
     const dismissFloat = useCallback(() => {
@@ -448,11 +472,11 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const controlsValue = useMemo<MusicControlsValue>(() => ({
         currentTrack, isPlaying, duration, playMode, queue, volume, showFullPlayer, floatDismissed,
         playTrack, playUrl, pause, resume, togglePlay, next, prev, seek,
-        setPlayMode, setQueue, removeFromQueue, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
+        setPlayMode, setQueue, removeFromQueue, updateTrackMetadata, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
     }), [
         currentTrack, isPlaying, duration, playMode, queue, volume, showFullPlayer, floatDismissed,
         playTrack, playUrl, pause, resume, togglePlay, next, prev, seek,
-        setQueue, removeFromQueue, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
+        setQueue, removeFromQueue, updateTrackMetadata, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
     ]);
 
     const value = useMemo<MusicContextValue>(() => ({

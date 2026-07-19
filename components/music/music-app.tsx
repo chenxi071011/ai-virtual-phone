@@ -3,10 +3,11 @@
 
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import {
-    loadAllTracks, saveTrack, deleteTrack,
+    loadAllTracks, saveTrack, deleteTrack, updateTrackMeta,
     generateTrackId, parseFilename, getAudioDuration,
     type MusicTrack,
 } from "@/lib/music-storage";
+import { getPlayHistory, type PlayHistoryEntry } from "@/lib/music-history";
 import { useMusicControls, type MusicControlsValue } from "@/lib/music-context";
 import { scopeSessionCSS } from "@/lib/css-scoper";
 import {
@@ -153,6 +154,12 @@ export default function MusicApp({ onClose }: Props) {
         if (player.currentTrack?.id === trackId) player.stop();
     };
 
+    const handleEditSave = async (trackId: string, updates: Partial<MusicTrack>) => {
+        await updateTrackMeta(trackId, updates);
+        setTracks(prev => prev.map(t => (t.id === trackId ? { ...t, ...updates } : t)));
+        player.updateTrackMetadata(trackId, updates);
+    };
+
     /** Convert NeteaseSearchResult → MusicTrack */
     const toMusicTrack = useCallback((r: NeteaseSearchResult, extra?: { lyrics?: string; coverUrl?: string; name?: string; artists?: string }): MusicTrack => ({
         id: `netease_${r.id}`,
@@ -274,7 +281,7 @@ export default function MusicApp({ onClose }: Props) {
                 </div>
                 <div className="music-tabs">
                     {hasNetease && <button className="music-tab" {...(tab === "recommend" ? { "data-active": "" } : {})} onClick={() => { setTab("recommend"); setActivePlaylist(null); }}>推荐</button>}
-                    {hasNetease && <button className="music-tab" {...(tab === "mine" ? { "data-active": "" } : {})} onClick={() => { setTab("mine"); setActivePlaylist(null); }}>我的</button>}
+                    <button className="music-tab" {...(tab === "mine" ? { "data-active": "" } : {})} onClick={() => { setTab("mine"); setActivePlaylist(null); }}>我的</button>
                     {hasNetease && <button className="music-tab" {...(tab === "search" ? { "data-active": "" } : {})} onClick={() => setTab("search")}>搜索</button>}
                     <button className="music-tab" {...(tab === "local" ? { "data-active": "" } : {})} onClick={() => { setTab("local"); setActivePlaylist(null); }}>本地</button>
                 </div>
@@ -299,7 +306,7 @@ export default function MusicApp({ onClose }: Props) {
                 />
             )}
 
-            {tab === "mine" && hasNetease && (
+            {tab === "mine" && (
                 <MineTab
                     player={player}
                     formatTime={formatTime}
@@ -309,6 +316,9 @@ export default function MusicApp({ onClose }: Props) {
                     setActivePlaylist={setActivePlaylist}
                     playlists={playlists}
                     loading={playlistsLoading}
+                    hasNetease={hasNetease}
+                    localTracks={tracks}
+                    onPlayLocal={handlePlay}
                 />
             )}
 
@@ -323,7 +333,7 @@ export default function MusicApp({ onClose }: Props) {
                     ) : tracks.length === 0 ? (
                         <div className="music-empty"><div className="music-empty-icon">♪</div><div className="music-empty-text">还没有音乐</div></div>
                     ) : (
-                        <SongList tracks={tracks} player={player} formatTime={formatTime} onDelete={handleDelete} onPlay={handlePlay} />
+                        <SongList tracks={tracks} player={player} formatTime={formatTime} onDelete={handleDelete} onPlay={handlePlay} onEdit={handleEditSave} />
                     )}
                 </>
             )}
@@ -522,7 +532,10 @@ function RecommendTab({ formatTime, onPlayNetease, onOpenPlaylist }: {
 }
 
 // ── Mine Tab ──
-function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist, setActivePlaylist, playlists, loading }: {
+function MineTab({
+    player, formatTime, onPlayNetease, onPlayAll, activePlaylist, setActivePlaylist, playlists, loading,
+    hasNetease, localTracks, onPlayLocal,
+}: {
     player: MusicControlsValue;
     formatTime: (s: number) => string;
     onPlayNetease: (r: NeteaseSearchResult) => void;
@@ -531,8 +544,12 @@ function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist,
     setActivePlaylist: (pl: NeteasePlaylist | null) => void;
     playlists: NeteasePlaylist[];
     loading: boolean;
+    hasNetease: boolean;
+    localTracks: MusicTrack[];
+    onPlayLocal: (t: MusicTrack) => void;
 }) {
     const [recentTracks, setRecentTracks] = useState<NeteaseSearchResult[]>(() => readMusicCache("music-user-recent", []));
+    const [history, setHistory] = useState<PlayHistoryEntry[]>(() => getPlayHistory());
 
     useEffect(() => {
         let cancelled = false;
@@ -545,6 +562,12 @@ function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist,
             });
         }
         return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
+        const onUpdate = () => setHistory(getPlayHistory());
+        window.addEventListener("music-history-updated", onUpdate);
+        return () => window.removeEventListener("music-history-updated", onUpdate);
     }, []);
 
     if (activePlaylist) {
@@ -562,10 +585,39 @@ function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist,
         );
     }
 
+    const handleResume = (entry: PlayHistoryEntry) => {
+        if (entry.source === "local") {
+            const live = localTracks.find(t => t.id === entry.id);
+            if (live) onPlayLocal(live);
+            return;
+        }
+        onPlayNetease({
+            id: Number(entry.id.replace("netease_", "")),
+            name: entry.title,
+            artists: entry.artist,
+            album: "",
+            duration: entry.duration * 1000,
+            coverUrl: entry.coverUrl,
+        });
+    };
+
     return (
         <div className="music-discovery">
-            {recentTracks.length > 0 && (
-                <MusicSection title="最近播放" action={`${recentTracks.length} 首`}>
+            {/* 本地播放记录——不需要登录/配置网易云 API，本地文件和网易云在线播放都会记一笔。 */}
+            <MusicSection title="本地歌单" action={`${history.length} 首`}>
+                {history.length > 0 ? (
+                    <div className="music-list music-list-compact">
+                        {history.map((entry, idx) => (
+                            <PlayHistoryRow key={entry.id} entry={entry} index={idx} formatTime={formatTime} onPlay={handleResume} />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="music-empty"><div className="music-empty-text">还没有播放记录</div></div>
+                )}
+            </MusicSection>
+
+            {hasNetease && recentTracks.length > 0 && (
+                <MusicSection title="网易云最近播放" action={`${recentTracks.length} 首`}>
                     <div className="music-list music-list-compact">
                         {recentTracks.slice(0, 8).map((song, idx) => (
                             <NeteaseSongRow key={song.id} song={song} index={idx} formatTime={formatTime} onPlay={onPlayNetease} />
@@ -574,14 +626,16 @@ function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist,
                 </MusicSection>
             )}
 
-            {playlists.length > 0 ? (
-                <MusicSection title="我的歌单" action={`${playlists.length} 个`}>
-                    <PlaylistGrid playlists={playlists} onOpen={setActivePlaylist} />
-                </MusicSection>
-            ) : loading ? (
-                <div className="music-empty"><div className="music-empty-text">加载歌单...</div></div>
-            ) : (
-                <div className="music-empty"><div className="music-empty-text">没有云端歌单</div></div>
+            {hasNetease && (
+                playlists.length > 0 ? (
+                    <MusicSection title="网易云歌单" action={`${playlists.length} 个`}>
+                        <PlaylistGrid playlists={playlists} onOpen={setActivePlaylist} />
+                    </MusicSection>
+                ) : loading ? (
+                    <div className="music-empty"><div className="music-empty-text">加载歌单...</div></div>
+                ) : (
+                    <div className="music-empty"><div className="music-empty-text">没有云端歌单</div></div>
+                )
             )}
 
         </div>
@@ -640,15 +694,108 @@ function NeteaseSongRow({ song, index, formatTime, onPlay }: {
     );
 }
 
+function PlayHistoryRow({ entry, index, formatTime, onPlay }: {
+    entry: PlayHistoryEntry;
+    index: number;
+    formatTime: (s: number) => string;
+    onPlay: (entry: PlayHistoryEntry) => void;
+}) {
+    return (
+        <div className="music-song" style={{ animationDelay: `${Math.min(index * 0.04, 0.5)}s` }} onClick={() => onPlay(entry)}>
+            <div className="music-song-cover">
+                {entry.coverUrl ? <img src={entry.coverUrl} alt="" /> : (
+                    <div className="music-song-cover-placeholder">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                    </div>
+                )}
+            </div>
+            <div className="music-song-info">
+                <div className="music-song-title">{entry.title}</div>
+                <div className="music-song-artist">{entry.artist}</div>
+            </div>
+            <div className="music-song-duration">{formatTime(entry.duration)}</div>
+        </div>
+    );
+}
+
+/** Downscale a picked image file to a reasonably sized cover-art data URL. */
+function readImageAsCoverDataUrl(file: File, maxSize = 480): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+                const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                const w = Math.max(1, Math.round(img.width * scale));
+                const h = Math.max(1, Math.round(img.height * scale));
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) { reject(new Error("no canvas context")); return; }
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL("image/jpeg", 0.85));
+            };
+            img.onerror = () => reject(new Error("image decode failed"));
+            img.src = String(reader.result ?? "");
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
 // ── Song List (local) ──
-function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
+function SongList({ tracks, player, formatTime, onDelete, onPlay, onEdit }: {
     tracks: MusicTrack[];
     player: MusicControlsValue;
     formatTime: (s: number) => string;
     onDelete: (id: string, e: React.MouseEvent) => void;
     onPlay: (t: MusicTrack) => void;
+    onEdit: (id: string, updates: Partial<MusicTrack>) => void;
 }) {
     const [deleteTarget, setDeleteTarget] = useState<MusicTrack | null>(null);
+    const [editTarget, setEditTarget] = useState<MusicTrack | null>(null);
+    const [editTitle, setEditTitle] = useState("");
+    const [editArtist, setEditArtist] = useState("");
+    const [editCover, setEditCover] = useState<string | undefined>(undefined);
+    const [editLyrics, setEditLyrics] = useState<string | undefined>(undefined);
+    const [editLyricsFileName, setEditLyricsFileName] = useState<string | null>(null);
+    const editCoverInputRef = useRef<HTMLInputElement>(null);
+    const editLyricsInputRef = useRef<HTMLInputElement>(null);
+
+    const openEdit = (track: MusicTrack, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditTarget(track);
+        setEditTitle(track.title);
+        setEditArtist(track.artist);
+        setEditCover(track.coverUrl);
+        setEditLyrics(track.lyrics);
+        setEditLyricsFileName(track.lyrics ? "已导入歌词" : null);
+    };
+
+    const handleCoverPick = async (files: FileList | null) => {
+        const file = files?.[0];
+        if (!file) return;
+        const dataUrl = await readImageAsCoverDataUrl(file).catch(() => undefined);
+        if (dataUrl) setEditCover(dataUrl);
+    };
+
+    const handleLyricsPick = async (files: FileList | null) => {
+        const file = files?.[0];
+        if (!file) return;
+        const text = await file.text().catch(() => "");
+        if (!text.trim()) return;
+        setEditLyrics(text);
+        setEditLyricsFileName(file.name);
+    };
+
+    const saveEdit = () => {
+        if (!editTarget) return;
+        const title = editTitle.trim() || editTarget.title;
+        const artist = editArtist.trim();
+        onEdit(editTarget.id, { title, artist, coverUrl: editCover, lyrics: editLyrics });
+        setEditTarget(null);
+    };
 
     return (
         <div className="music-list">
@@ -674,7 +821,12 @@ function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
                         </div>
                         <div className="music-song-duration">{formatTime(track.duration)}</div>
                         <div className="music-song-actions">
-                            <button className="music-song-action-btn" data-danger="" onClick={(e) => { e.stopPropagation(); setDeleteTarget(track); }}>
+                            <button className="music-song-action-btn" onClick={(e) => openEdit(track, e)} aria-label="编辑">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                </svg>
+                            </button>
+                            <button className="music-song-action-btn" data-danger="" onClick={(e) => { e.stopPropagation(); setDeleteTarget(track); }} aria-label="删除">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                     <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                 </svg>
@@ -694,6 +846,76 @@ function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
                             <div className="music-settings-actions">
                                 <button className="music-settings-btn" onClick={() => setDeleteTarget(null)}>取消</button>
                                 <button className="music-settings-btn music-settings-btn-danger" onClick={(e) => { onDelete(deleteTarget.id, e); setDeleteTarget(null); }}>删除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit metadata modal */}
+            {editTarget && (
+                <div className="music-settings-modal-overlay" onClick={() => setEditTarget(null)}>
+                    <div className="music-settings-modal-dialog music-edit-dialog" onClick={e => e.stopPropagation()}>
+                        <div className="music-settings-header"><h2>编辑歌曲信息</h2></div>
+                        <div className="music-settings-body">
+                            <button
+                                type="button"
+                                className="music-edit-cover-picker"
+                                onClick={() => editCoverInputRef.current?.click()}
+                                aria-label="更换封面"
+                            >
+                                {editCover ? <img src={editCover} alt="" /> : (
+                                    <div className="music-song-cover-placeholder">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                                    </div>
+                                )}
+                                <span className="music-edit-cover-hint">更换封面</span>
+                            </button>
+                            <input
+                                ref={editCoverInputRef}
+                                type="file"
+                                accept="image/*"
+                                style={{ display: "none" }}
+                                onChange={(e) => { void handleCoverPick(e.target.files); e.target.value = ""; }}
+                            />
+                            <label className="music-edit-field">
+                                <span>名字</span>
+                                <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="歌曲名" />
+                            </label>
+                            <label className="music-edit-field">
+                                <span>歌手</span>
+                                <input type="text" value={editArtist} onChange={(e) => setEditArtist(e.target.value)} placeholder="歌手名" />
+                            </label>
+                            <label className="music-edit-field">
+                                <span>歌词</span>
+                                <button
+                                    type="button"
+                                    className="music-edit-lyrics-picker"
+                                    onClick={() => editLyricsInputRef.current?.click()}
+                                >
+                                    {editLyricsFileName ?? "导入 .lrc / .txt 歌词文件"}
+                                </button>
+                                {editLyrics && (
+                                    <button
+                                        type="button"
+                                        className="music-edit-lyrics-clear"
+                                        aria-label="移除歌词"
+                                        onClick={() => { setEditLyrics(undefined); setEditLyricsFileName(null); }}
+                                    >
+                                        移除
+                                    </button>
+                                )}
+                            </label>
+                            <input
+                                ref={editLyricsInputRef}
+                                type="file"
+                                accept=".lrc,.txt,text/plain"
+                                style={{ display: "none" }}
+                                onChange={(e) => { void handleLyricsPick(e.target.files); e.target.value = ""; }}
+                            />
+                            <div className="music-settings-actions">
+                                <button className="music-settings-btn" onClick={() => setEditTarget(null)}>取消</button>
+                                <button className="music-settings-btn music-settings-btn-primary" onClick={saveEdit}>保存</button>
                             </div>
                         </div>
                     </div>
