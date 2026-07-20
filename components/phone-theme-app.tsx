@@ -437,10 +437,12 @@ export function PhoneThemeApp({
             <p className="ts-14 text-[var(--c-icon)]">{"\u300C"}{SECTION_TITLES[section]}{"\u300D\u529F\u80FD\u5F00\u53D1\u4E2D\u2026"}</p>
           </div>
         )}
+      {/* 不限定 accept：.ai-theme 是自定义后缀，iOS「文件」选择器会把
+          没有注册 UTI 的类型置灰导致选不中。放开后由 installThemePackageFile
+          校验包内 manifest.json，非法文件照样会被拒。 */}
       <input
         ref={importFileRef}
         type="file"
-        accept=".ai-theme,.zip,application/zip,application/x-zip-compressed"
         className="hidden"
         onChange={handleImportFileChange}
       />

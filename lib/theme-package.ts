@@ -355,7 +355,9 @@ function makeSummary(manifest: ThemePackageManifest): ThemePackageSummary {
 function packageFileName(themeProfile: ThemeProfile): string {
   const name = (themeProfile.name || "theme").replace(/[\\/:*?"<>|]+/g, "-").trim() || "theme";
   const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-  return `${name}-${stamp}.ai-theme`;
+  // 用标准 .zip 后缀：iOS/桌面都原生识别，选择器不置灰。导入端按包内
+  // manifest.json 校验内容，旧的 .ai-theme 文件仍可正常导入。
+  return `${name}-${stamp}.zip`;
 }
 
 async function loadZip(file: File) {
