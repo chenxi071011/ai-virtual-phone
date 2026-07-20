@@ -40,6 +40,16 @@ Capacitor 安卓壳离线运行：
 新增原生 BLE 插件（`android-shell/.../ToyBlePlugin.java`），扫描 → 连 GATT → 直接下发振动指令，
 **不需要 Intiface，也不用手填设备地址**。配套有独立的设备 APP 界面和桌面悬浮控制窗。
 
+支持的协议见 `ToyProtocols.java`：JoyHub、Galaku、Kiiroo、We-Vibe、Magic Motion、Svakom、
+Libo、Picobong、Lovedistance、ZALO、Leten、Satisfyer、PrettyLove、谜姬等 **386 个具名型号**，
+另加 Lovense 与 Satisfyer 的整条产品线（按 UUID / 名称通配匹配，不逐个列型号）。
+识别以「GATT 服务 + 写特征 UUID」为主键，UUID 撞车时（`0000fff0` 被好几家共用）再用广播名消歧；
+认不出的设备会明确提示「未能识别型号」，而不是假装连上。
+
+协议数据来自 [Buttplug](https://github.com/buttplugio/buttplug) 公开的设备协议库（BSD-3-Clause），
+归属声明见 [NOTICE](./NOTICE)。要加新设备就往 `ToyProtocols.TABLE` 里加一行；
+连接时日志会 dump 完整 GATT，便于对未知设备摸协议。
+
 AI 控制走「适用范围」标签授权——AI 只能在你授权的范围内触发设备。
 
 ### 网易云音乐客户端直连

@@ -43,3 +43,37 @@ Bundled artwork:
   界面素材使用，禁止单独提取、二次分发或用于其他项目。）
 - public/models/ 3D assets: generated with Tripo AI under a paid plan
   (outputs owned by the project author).
+
+Bluetooth toy protocol data:
+
+- android-shell/.../ToyProtocols.java implements BLE control protocols for
+  third-party toys. The protocol facts it encodes (GATT service and
+  characteristic UUIDs, advertised device names, command byte layouts and
+  intensity ranges) were taken from the Buttplug project's publicly
+  documented device protocol database:
+
+      https://github.com/buttplugio/buttplug
+      Copyright 2016-2026 Nonpolynomial Labs LLC. All rights reserved.
+      Licensed under the BSD 3-Clause License.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are
+  met: redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer;
+  redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution; neither the name of
+  the project nor the names of its contributors may be used to endorse or
+  promote products derived from this software without specific prior written
+  permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+  CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT
+  NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+  CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+  EXEMPLARY, OR CONSEQUENTIAL DAMAGES HOWEVER CAUSED AND ON ANY THEORY OF
+  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+  The Java implementation itself is original work and is covered by this
+  project's AGPL-3.0 license.

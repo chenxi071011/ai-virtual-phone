@@ -45,7 +45,8 @@ public class ToyBlePlugin extends Plugin {
     private ScanCallback scanCallback;
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic txChar;
-    private String protocol = "generic";   // lovense / wevibe / svakom / generic
+    private String protocol = "generic";   // lovense / svakom / ToyProtocols.TABLE 里的任意 id / generic
+    private int maxVibe = 20;              // 当前协议的震动强度上限，见 ToyProtocols.Spec.maxVibe
     private final java.util.ArrayList<BluetoothGattCharacteristic> writables = new java.util.ArrayList<>();
     private static final java.util.UUID CCCD = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private final HashSet<String> seen = new HashSet<>();
@@ -263,14 +264,16 @@ public class ToyBlePlugin extends Plugin {
         return null;
     }
 
-    // 按服务 UUID 识别品牌协议，并选出可写特征值
+    // 按服务 UUID / 广播名识别品牌协议，并选出可写特征值
     private void detectDevice(BluetoothGatt g) {
-        protocol = "generic"; txChar = null;
+        protocol = "generic"; txChar = null; maxVibe = 20;
         if (g == null) return;
-        // 先按设备名识别司沃康（SX589A 等）：司沃康普遍走 ffe0/ffe1，指令另有格式
         String name = "";
         try { name = g.getDevice().getName(); if (name == null) name = ""; } catch (Exception e) {}
         String nl = name.toLowerCase();
+
+        // 1) 司沃康（SX589A 等）：走 ffe0/ffe1，但指令格式与 ToyProtocols 里的 svakom-v2 不同，
+        //    这条是实测跑通的路径，必须排在协议表前面，别被表里的通用规则截胡。
         boolean svakomName = nl.matches("^(sx|bx|hx|vx|va|vv|dg|dj|dt|qh|swk|s63e).*")
                 || nl.contains("svakom") || nl.contains("pulse") || nl.contains("neo") || nl.contains("aogu");
         if (svakomName) {
@@ -278,24 +281,31 @@ public class ToyBlePlugin extends Plugin {
             if (t == null) t = findWritable(g, "0000ae01");
             if (t != null) { protocol = "svakom"; txChar = t; return; }
         }
-        BluetoothGattCharacteristic fallback = null;
+
+        // 2) Lovense：几十个服务 UUID 变体都以这段厂商后缀结尾，一条判据全覆盖。
+        //    注意不能把 0000fff0 也算成 Lovense——那是 ZALO/Leten/Picobong/LELO 共用的短 UUID。
         for (BluetoothGattService s : g.getServices()) {
-            String su = s.getUuid().toString().toLowerCase();
-            boolean lovense = su.contains("4bd4-bbd5-a6920e4c5653") || su.startsWith("0000fff0");
-            boolean wevibe = su.startsWith("f000bb03");
-            boolean nordicUart = su.startsWith("6e400001"); // 部分 Svakom 用 Nordic UART
-            boolean svakomAe = su.startsWith("0000ae00") || su.startsWith("0000ae30"); // Svakom 经典服务
+            if (!s.getUuid().toString().toLowerCase().contains("4bd4-bbd5-a6920e4c5653")) continue;
             for (BluetoothGattCharacteristic c : s.getCharacteristics()) {
-                if (!isWritable(c)) continue;
-                String cu = c.getUuid().toString().toLowerCase();
-                if (lovense) { protocol = "lovense"; txChar = c; return; }
-                if (wevibe && cu.startsWith("f000bb04")) { protocol = "wevibe"; txChar = c; return; }
-                if (svakomAe && cu.startsWith("0000ae01")) { protocol = "svakom"; txChar = c; return; }
-                if (nordicUart && cu.startsWith("6e400002")) { protocol = "svakom"; txChar = c; return; }
-                if (fallback == null) fallback = c;
+                if (isWritable(c)) { protocol = "lovense"; txChar = c; maxVibe = 20; return; }
             }
         }
-        if (txChar == null && fallback != null) { txChar = fallback; protocol = "lovense"; } // 通用回退用 Lovense ASCII
+
+        // 3) 协议表：以「服务 UUID + 写特征 UUID」为主键，UUID 撞车的再用广播名消歧
+        ToyProtocols.Match m = ToyProtocols.match(g, name);
+        if (m != null) {
+            protocol = m.spec.id; txChar = m.tx; maxVibe = m.spec.maxVibe;
+            return;
+        }
+
+        // 4) 都不认识：挑一个可写特征试试 Lovense 的 ASCII 指令（encodeVibrate 的 default 分支）。
+        //    多数设备不吃这一套，但比什么都不做强，日志里也已经 dump 了完整 GATT 便于补协议。
+        //    协议名特意报成 unknown 而不是 lovense——否则用户分不清是真识别出来了还是在猜。
+        for (BluetoothGattService s : g.getServices()) {
+            for (BluetoothGattCharacteristic c : s.getCharacteristics()) {
+                if (isWritable(c)) { txChar = c; protocol = "unknown"; maxVibe = 20; return; }
+            }
+        }
     }
 
     @PluginMethod
@@ -304,15 +314,11 @@ public class ToyBlePlugin extends Plugin {
         if (level == null) level = 0.0;
         double lv = Math.max(0, Math.min(1, level));
         byte[] pkt;
-        if ("wevibe".equals(protocol)) {
-            int v = (int) Math.round(lv * 15);          // We-Vibe 0-15（实验性）
-            pkt = new byte[]{ 0x0f, 0x03, 0x00, (byte) v, (byte) v, 0x00 };
-        } else if ("svakom".equals(protocol)) {
+        if ("svakom".equals(protocol)) {
             int v = (int) Math.round(lv * 255);         // Svakom SX589A 震动=平滑强度 0-255（手动操控通道）
             pkt = new byte[]{ 0x55, 0x04, 0x00, 0x00, 0x00, (byte) v, (byte) 0xaa };
         } else {
-            int v = (int) Math.round(lv * 20);          // Lovense 0-20
-            pkt = ("Vibrate:" + v + ";").getBytes(StandardCharsets.UTF_8);
+            pkt = ToyProtocols.encodeVibrate(protocol, lv, maxVibe);
         }
         lastVibe = pkt; lastVibeChar = txChar;          // 供保活重发
         writeBytes(pkt);
@@ -327,10 +333,9 @@ public class ToyBlePlugin extends Plugin {
             writeBytesTo(txChar, new byte[]{ 0x55, 0x04, 0x00, 0x00, 0x00, 0x00, (byte) 0xaa }); // 震动强度0
             writeBytesTo(txChar, new byte[]{ 0x55, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00 });        // 吮吸关
             writeBytesTo(txChar, new byte[]{ 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 });        // 总关
-        } else if ("wevibe".equals(protocol)) {
-            writeBytesTo(txChar, new byte[]{ 0x0f, 0x03, 0x00, 0, 0, 0 });
         } else {
-            writeBytesTo(txChar, "Vibrate:0;".getBytes(StandardCharsets.UTF_8));
+            // 各协议"停"的格式不同，交给 encodeVibrate(level=0) 统一处理
+            writeBytesTo(txChar, ToyProtocols.encodeVibrate(protocol, 0, maxVibe));
         }
         call.resolve();
     }

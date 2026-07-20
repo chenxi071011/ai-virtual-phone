@@ -29,6 +29,12 @@ export default function ToyDeviceApp({ onClose }: Props) {
         else setStatusText("未连接");
     }, [toyController.connected, toyController.deviceName]);
 
+    // 没匹配上协议时是拿 Lovense 的指令格式在猜，多半不会有反应——说清楚，
+    // 免得用户以为是设备坏了或者应用有 bug。
+    const protocolText = toyController.protocol === "unknown"
+        ? "未能识别型号，正在按通用指令尝试"
+        : `协议：${toyController.protocol}`;
+
     const handleScan = useCallback(async () => {
         setScanning(true);
         setStatusText("扫描中…");
@@ -111,7 +117,7 @@ export default function ToyDeviceApp({ onClose }: Props) {
                         </div>
                         <div className="toy-dev-hero-text">
                             <div className="toy-dev-hero-title">{statusText}</div>
-                            <div className="toy-dev-hero-sub">{toyController.connected ? `协议：${toyController.protocol}` : "扫描并连接你的设备"}</div>
+                            <div className="toy-dev-hero-sub">{toyController.connected ? protocolText : "扫描并连接你的设备"}</div>
                         </div>
                     </div>
 
