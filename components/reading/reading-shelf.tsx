@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette } from "lucide-react";
-import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile } from "@/lib/reading-storage";
+import { loadBooks, addBook, updateBook, deleteBook, saveChapters, loadProgress, saveRawFile } from "@/lib/reading-storage";
 import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import type { Book, BookChapter } from "@/lib/reading-types";
 import type { ReadingAppearance } from "@/lib/reading-appearance";
@@ -100,6 +100,11 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
     const [importError, setImportError] = useState<{ summary: string; detail?: string } | null>(null);
     const [search, setSearch] = useState("");
     const [showAppearanceDialog, setShowAppearanceDialog] = useState(false);
+    const [editingBook, setEditingBook] = useState<Book | null>(null);
+    const [editTitle, setEditTitle] = useState("");
+    const [editAuthor, setEditAuthor] = useState("");
+    const [editCover, setEditCover] = useState<string | undefined>(undefined);
+    const coverInputRef = useRef<HTMLInputElement>(null);
     const fileRef = useRef<HTMLInputElement>(null);
 
     const persistImportDiagnostic = (payload: ImportDiagnostic | null) => {
@@ -348,6 +353,71 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
         setBooks(loadBooks());
     };
 
+    const openEditor = (book: Book) => {
+        setEditingBook(book);
+        setEditTitle(book.title);
+        setEditAuthor(book.author || "");
+        setEditCover(book.coverUrl);
+    };
+
+    const closeEditor = () => {
+        setEditingBook(null);
+        if (coverInputRef.current) coverInputRef.current.value = "";
+    };
+
+    /**
+     * 封面存进 kv 里，原图直接转 dataURL 会把几 MB 的照片塞进存储，
+     * 所以先按书架封面的实际显示尺寸压到 480px 宽再编码。
+     */
+    const readCoverFile = (file: File) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error("图片解析失败"));
+            img.onload = () => {
+                const MAX_W = 480;
+                const scale = Math.min(1, MAX_W / img.width);
+                const w = Math.max(1, Math.round(img.width * scale));
+                const h = Math.max(1, Math.round(img.height * scale));
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) { reject(new Error("画布不可用")); return; }
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL("image/jpeg", 0.82));
+            };
+            img.src = String(reader.result);
+        };
+        reader.readAsDataURL(file);
+    });
+
+    const handleCoverPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+            setEditCover(await readCoverFile(file));
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "封面设置失败");
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editingBook) return;
+        const title = editTitle.trim();
+        if (!title) { alert("书名不能为空"); return; }
+        const author = editAuthor.trim();
+        await updateBook({
+            ...editingBook,
+            title,
+            author: author || undefined,
+            coverUrl: editCover,
+        });
+        setBooks(loadBooks());
+        closeEditor();
+    };
+
     const formatBadge = (f: string) => f.toUpperCase();
 
     const coverGradients = ["linen", "mist", "graphite", "sage", "cream", "parchment"] as const;
@@ -437,10 +507,16 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                             const layout = coverLayouts[(book.title.length + (book.author?.length || 0)) % coverLayouts.length];
                             return (
                                 <div key={book.id} className="reading-list-item" onClick={() => onOpenBook(book)}>
-                                    <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
-                                        <span className="reading-list-cover-author">{book.author || ""}</span>
-                                        <span className="reading-list-cover-title">{book.title}</span>
-                                    </div>
+                                    {book.coverUrl ? (
+                                        <div className="reading-list-cover reading-list-cover--image">
+                                            <img src={book.coverUrl} alt="" />
+                                        </div>
+                                    ) : (
+                                        <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
+                                            <span className="reading-list-cover-author">{book.author || ""}</span>
+                                            <span className="reading-list-cover-title">{book.title}</span>
+                                        </div>
+                                    )}
                                     <div className="reading-list-info">
                                         <span className="reading-list-title">{book.title}</span>
                                         {book.author && <span className="reading-list-author">{book.author}</span>}
@@ -464,7 +540,17 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                                     </div>
                                     <button
                                         className="reading-list-delete"
+                                        onClick={(e) => { e.stopPropagation(); openEditor(book); }}
+                                        aria-label="编辑书籍信息"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        className="reading-list-delete"
                                         onClick={(e) => { e.stopPropagation(); handleDelete(book.id); }}
+                                        aria-label="删除书籍"
                                     >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                             <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -488,6 +574,63 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                     onClose={() => setShowAppearanceDialog(false)}
                     onSave={onSaveAppearance}
                 />
+            )}
+
+            {editingBook && (
+                <div className="modal-overlay" data-ui="modal" onClick={closeEditor}>
+                    <div className="reading-edit-dialog" onClick={(e) => e.stopPropagation()}>
+                        <div className="reading-edit-kicker">编辑书籍</div>
+
+                        <label className="reading-edit-label" htmlFor="reading-edit-title">书名</label>
+                        <input
+                            id="reading-edit-title"
+                            className="reading-edit-input"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            placeholder="书名"
+                        />
+
+                        <label className="reading-edit-label" htmlFor="reading-edit-author">作者</label>
+                        <input
+                            id="reading-edit-author"
+                            className="reading-edit-input"
+                            value={editAuthor}
+                            onChange={(e) => setEditAuthor(e.target.value)}
+                            placeholder="留空则不显示"
+                        />
+
+                        <div className="reading-edit-label">封面</div>
+                        <div className="reading-edit-cover-row">
+                            <div className="reading-edit-cover-preview">
+                                {editCover
+                                    ? <img src={editCover} alt="" />
+                                    : <span className="reading-edit-cover-empty">默认封面</span>}
+                            </div>
+                            <div className="reading-edit-cover-actions">
+                                <button type="button" className="reading-edit-btn" onClick={() => coverInputRef.current?.click()}>
+                                    选择图片
+                                </button>
+                                {editCover && (
+                                    <button type="button" className="reading-edit-btn" onClick={() => setEditCover(undefined)}>
+                                        恢复默认
+                                    </button>
+                                )}
+                                <input
+                                    ref={coverInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={handleCoverPick}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="reading-edit-footer">
+                            <button type="button" className="reading-edit-btn" onClick={closeEditor}>取消</button>
+                            <button type="button" className="reading-edit-btn reading-edit-btn--primary" onClick={handleSaveEdit}>保存</button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

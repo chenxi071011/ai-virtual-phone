@@ -7,6 +7,8 @@ export type Book = {
     format: "txt" | "epub" | "pdf";
     totalChapters: number;
     createdAt: string;
+    /** 自定义封面（dataURL）。未设置时书架按标题生成渐变封面。 */
+    coverUrl?: string;
 };
 
 export type BookChapter = {
