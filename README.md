@@ -121,11 +121,17 @@ keyPassword=你的口令
 
 ## 换应用图标
 
-图标源图放 `android-shell/resources/icon.png`（建议 1024×1024），
-生成的自适应图标图层与各密度图标在 `android-shell/android/app/src/main/res/mipmap-*/`。
+替换 `android-shell/resources/icon.png`（建议 1024×1024），然后：
+
+```bash
+cd android-shell && node gen-icons.mjs
+```
+
+会生成各密度的传统图标与自适应图标图层到 `android/app/src/main/res/mipmap-*/`。
 
 注意自适应图标的 `background` 图层必须**铺满整块 108dp 画布**，不能加 inset，
 否则被系统裁成圆形后四角会透出去；`foreground` 才需要 16.7% 的 inset（对应 72dp 安全区）。
+底色在 `gen-icons.mjs` 的 `BG` 常量里，换图标时记得跟着改成新图的背景色。
 
 ## License
 
