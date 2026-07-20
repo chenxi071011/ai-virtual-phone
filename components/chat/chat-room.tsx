@@ -6,7 +6,7 @@ import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
 import { parseAIResponse, type ParsedMessagePart } from "@/lib/rich-message-parser";
-import { toyController, maybeExecuteToyControlPart, formatToyControlNotice, formatToyGrantNotice } from "@/lib/toy-ble";
+import { toyController, maybeExecuteToyControlPart, executeLastToyControlInText, stripToyControlTags, formatToyControlNotice, formatToyGrantNotice } from "@/lib/toy-ble";
 import { MessageBubble, MediaDetailModal, prewarmStickerCache, BilingualTextBlock, isStandaloneHtmlPreviewContent, normalizeTextBubbleContent } from "./message-bubble";
 import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
@@ -3582,9 +3582,11 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
         const hasParsedDisplay = Boolean(parsed?.content.trim() || parsed?.summary.trim());
         return {
             userContent: renderDisplayText(turn.userContent, 1, true),
-            assistantContent: hasParsedDisplay
+            // 情趣互动标签只是给设备的指令，正文里不显示（与线上气泡 normalizeTextBubbleContent 一致）；
+            // 存储层保留原标签，喂回历史时模型才能看到正确格式。
+            assistantContent: stripToyControlTags(hasParsedDisplay
                 ? (parsed!.content.trim() || renderDisplayText(turn.assistantContent, 2, true))
-                : renderDisplayText(turn.assistantContent, 2, true),
+                : renderDisplayText(turn.assistantContent, 2, true)),
             summary: hasParsedDisplay
                 ? (parsed!.summary.trim() || renderDisplayText(turn.summary, 2, true))
                 : renderDisplayText(turn.summary, 2, true),
@@ -3716,6 +3718,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 if (!isCurrentOfflineRun()) return;
                 const assistantContent = result.content.trim() || result.rawText.trim();
                 if (!assistantContent) throw new Error("AI 没有返回线下正文");
+                executeLastToyControlInText(assistantContent, !!character?.toyControlEnabled);
                 if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
                 const saved = appendChatOfflineTurn({
                     sessionId: session.id,
@@ -3831,6 +3834,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             if (!isCurrentOfflineRun()) return;
             const assistantContent = result.content.trim() || result.rawText.trim();
             if (!assistantContent) throw new Error("AI 没有返回线下正文");
+            executeLastToyControlInText(assistantContent, !!character?.toyControlEnabled);
             if (!result.summary.trim()) showChatToast(`未提取到 <${result.summaryTag}> 摘要`);
             const saved = appendChatOfflineTurn({
                 sessionId: session.id,

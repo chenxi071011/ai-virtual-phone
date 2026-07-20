@@ -23,6 +23,7 @@ import { loadFollowUpConfig } from "./settings-storage";
 import { parseAIResponse } from "./rich-message-parser";
 import type { ParsedMessagePart } from "./rich-message-parser";
 import { loadCharacters } from "./character-storage";
+import { maybeExecuteToyControlPart, formatToyControlNotice } from "./toy-ble";
 import { bgSetInterval } from "./bg-timer";
 import { dispatchChatMessageNotice } from "./chat-notification-events";
 import { settleShoppingPaymentRequest } from "./shopping-payment-request";
@@ -586,6 +587,12 @@ async function parseAndSaveResponse(
     const charName = resolveFollowUpSenderName(sessionId);
 
     const pokeSysMessages: ChatMessage[] = [];
+    // 追发/定时唤醒/后台回复也可能带情趣互动标签（用的是同一套 prompt）。聊天室不一定开着，
+    // 所以驱动设备和落播报消息都得在这里做，不能指望 UI 层。授权判定与聊天室一致。
+    const toyAuthorized = Boolean(
+        sess && !sess.isGroup
+        && loadCharacters().find(ch => ch.id === sess.contactId)?.toyControlEnabled,
+    );
     const filteredParts = parts.filter(p => {
         if (p.mediaType === "voice_call") { triggerCall = "voice"; return false; }
         if (p.mediaType === "video_call") { triggerCall = "video"; return false; }
@@ -593,6 +600,18 @@ async function parseAndSaveResponse(
             || p.mediaType === "accept_transfer" || p.mediaType === "decline_transfer"
             || p.mediaType === "accept_payment_request" || p.mediaType === "decline_payment_request") {
             handleFollowUpMediaAction(p.mediaType, sessionId, contextMessages);
+            return false;
+        }
+        if (p.mediaType === "toy_control") {
+            maybeExecuteToyControlPart(p, toyAuthorized);
+            pokeSysMessages.push(pushChatMessage({
+                sessionId, role: "system",
+                content: formatToyControlNotice(p.mediaData?.toyPattern || "constant", p.mediaData?.toyIntensity ?? 0, charName),
+                mediaType: "toy_control",
+                mediaData: p.mediaData,
+                responseBatchId: createResponseBatchId(),
+                rawResponseText: `[情趣互动:${p.mediaData?.toyPattern ?? "constant"}:${p.mediaData?.toyIntensity ?? 0}:${p.mediaData?.toyDuration ?? 0}]`,
+            }));
             return false;
         }
         // Poke: convert to system message (resolve "我" to character name)

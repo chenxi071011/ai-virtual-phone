@@ -45,6 +45,11 @@ export interface ParsedAIResponse {
 
 const C = "\\s*[：:]\\s*"; // half-width or full-width colon, allowing surrounding spaces
 
+/** 情趣互动标签的唯一真源。除了本文件的分段解析，toy-ble 里的"整段扫描"入口
+ *  （executeLastToyControlInText）也用它，避免两处正则各写各的而漂移。 */
+export const TOY_CONTROL_TAG_PATTERN =
+    `\\[情趣互动${C}(constant|wave|pulse|ramp|stop)${C}(\\d+)${C}(\\d+(?:\\.\\d+)?)\\]`;
+
 function parseMuteMinutes(num?: string, unit?: string): number {
     const n = parseInt(num || "", 10);
     if (!Number.isFinite(n) || n <= 0) return 10;
@@ -109,7 +114,7 @@ const RICH_PATTERNS: {
     {
         // 情趣玩具控制（仅在角色被授权且设备已连接时，prompt 中才会出现这个工具说明）：
         // [情趣互动:pattern:intensity:duration]，pattern∈constant/wave/pulse/ramp/stop
-        regex: new RegExp(`\\[情趣互动${C}(constant|wave|pulse|ramp|stop)${C}(\\d+)${C}(\\d+(?:\\.\\d+)?)\\]`),
+        regex: new RegExp(TOY_CONTROL_TAG_PATTERN),
         build: (m) => ({
             content: "",
             mediaType: "toy_control" as const,

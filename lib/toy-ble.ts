@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import { TOY_CONTROL_TAG_PATTERN } from "./rich-message-parser";
 
 // 原生蓝牙直连情趣玩具（Lovense / We-Vibe / Svakom / 通用），移植自旧项目的 ToyBle 原生插件。
 // Web 端（非 App 内）没有这个原生插件，所有方法在那种环境下会静默失败/返回未连接。
@@ -283,4 +284,22 @@ export function maybeExecuteToyControlPart(
     if (part.mediaType !== "toy_control" || !part.mediaData?.toyPattern) return;
     if (!authorized) return;
     toyController.play(part.mediaData.toyPattern, part.mediaData.toyIntensity ?? 0, part.mediaData.toyDuration ?? 3);
+}
+
+// 给"不做分段解析"的输出口用（线下模式等）：直接在整段原文里扫标签。
+// 一段回复里出现多条时只执行最后一条 —— 整段剧情是一次性呈现给用户的，
+// 前面几条没有被"依次播放"的时间轴，直接落到终态才符合读到的内容。
+export function executeLastToyControlInText(rawText: string, authorized: boolean): void {
+    if (!authorized || !rawText) return;
+    const re = new RegExp(TOY_CONTROL_TAG_PATTERN, "g");
+    let last: RegExpExecArray | null = null;
+    for (let m = re.exec(rawText); m; m = re.exec(rawText)) last = m;
+    if (!last) return;
+    toyController.play(last[1] as ToyPattern, parseInt(last[2], 10), parseFloat(last[3]));
+}
+
+/** 把标签从展示文本里抹掉。线下正文是整段叙事，没有 message-bubble 那层
+ *  normalizeTextBubbleContent 帮忙清理，得在这里自己剥。 */
+export function stripToyControlTags(text: string): string {
+    return text.replace(new RegExp(TOY_CONTROL_TAG_PATTERN, "g"), "");
 }
