@@ -1456,6 +1456,11 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
                 body: d?.xiaohongshuBody,
                 description: d?.xiaohongshuDescription,
             });
+        case "toy_control":
+            // 必须还原成模型自己产出的那条指令原文。msg.content 是给用户看的中文播报
+            // （"X 开启了…"），把它喂回历史会让模型误以为那才是正确格式，进而不再输出
+            // 可解析的标签。参见 rich-message-parser 里的 [情趣互动:...] 规则。
+            return `[情趣互动:${d?.toyPattern ?? "constant"}:${d?.toyIntensity ?? 0}:${d?.toyDuration ?? 0}]`;
         case "accept_red_packet":
             if (isGroup && d?.claimer && d?.owner) return `[${d.claimer}领取了${d.owner}的红包]`;
             return "[领取红包]";
