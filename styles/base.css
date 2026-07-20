@@ -63,6 +63,12 @@ a {
   background: var(--c-input);
 }
 
+/* 配合 app/layout.tsx 里的同步内联脚本（读 main-app.tsx 写的 sessionStorage 标记）：
+   静态导出页面首次绘制时就直接隐藏开屏节点，避免筑境硬跳转返回时闪一下开屏动画。 */
+html.boot-skip .splash-root {
+  display: none;
+}
+
 .splash-shell-wrap {
   gap: 0;
   width: var(--phone-total-width);

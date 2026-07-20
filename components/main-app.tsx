@@ -148,6 +148,30 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
   await Promise.all(BUILTIN_FONT_LOAD_SPECS.map((spec) => document.fonts.load(spec).catch(() => [])));
 }
 
+// 筑境（World Builder）用整页硬跳转打开/返回（见 desktop-shell.tsx 里 openWorldBuilder
+// 的说明），每次硬跳转都会让这个 SPA 重新从零启动一次，导致返回后又看到一遍开屏动画、
+// 还要再上滑一次才能进去。sessionStorage 在同一个 WebView 会话内的硬跳转之间是保留的，
+// 用它记一次「本次会话已经进过」，返回时就跳过开屏动画。
+// 首帧的隐藏由 app/layout.tsx 里的同步内联脚本 + styles/base.css 的 html.boot-skip 负责。
+const BOOT_ENTERED_SESSION_KEY = "float-boot-entered";
+
+function hasEnteredThisSession(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(BOOT_ENTERED_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markEnteredThisSession(): void {
+  try {
+    window.sessionStorage.setItem(BOOT_ENTERED_SESSION_KEY, "1");
+  } catch {
+    /* 隐私模式下 sessionStorage 可能不可写，失败就退回每次都显示开屏。 */
+  }
+}
+
 /** 在桌面上再按一次返回就退出的时间窗。 */
 const EXIT_CONFIRM_WINDOW_MS = 2000;
 const EXIT_HINT_ID = "app-exit-hint";
@@ -261,7 +285,7 @@ async function prepareDesktopThemeForFirstPaint(): Promise<PreparedDesktopTheme>
 export function MainApp() {
   const [preparedDesktopTheme, setPreparedDesktopTheme] = useState<PreparedDesktopTheme | null>(null);
   const [hydrated, setHydrated] = useState(false);
-  const [splashDismissed, setSplashDismissed] = useState(false);
+  const [splashDismissed, setSplashDismissed] = useState(() => hasEnteredThisSession());
 
   // 安卓返回 / 左滑手势。
   // 这个应用用 React state 导航，不压 History，所以 webView.canGoBack() 恒为 false，
@@ -343,7 +367,7 @@ export function MainApp() {
   return (
     <AccountGate>
       {!splashDismissed ? (
-        <SplashScreen ready={hydrated} onEnter={() => setSplashDismissed(true)} />
+        <SplashScreen ready={hydrated} onEnter={() => { markEnteredThisSession(); setSplashDismissed(true); }} />
       ) : (
         <main className="app-root">
           <MusicProvider>
