@@ -1,0 +1,8 @@
+{
+  "appId": "app.floatphone.shell",
+  "appName": "Float",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  }
+}

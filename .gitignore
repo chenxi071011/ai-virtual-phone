@@ -36,6 +36,15 @@ float-tarot/
 *.jks
 keystore.properties
 
+# 安卓壳：只提交源码，构建产物与同步进来的网页内容都不进库
+android-shell/www/
+android-shell/android/build/
+android-shell/android/app/build/
+android-shell/android/capacitor-cordova-android-plugins/build/
+android-shell/android/app/src/main/assets/public/
+android-shell/android/.gradle/
+android-shell/android/local.properties
+
 # Tailscale serve cert files (written into cwd by `tailscale cert`)
 *.ts.net.crt
 *.ts.net.key
