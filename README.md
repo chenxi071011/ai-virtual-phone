@@ -44,7 +44,7 @@ Capacitor 安卓壳离线运行：
 Libo、Picobong、Lovedistance、ZALO、Leten、Satisfyer、PrettyLove、谜姬等 **386 个具名型号**，
 另加 Lovense 与 Satisfyer 的整条产品线（按 UUID / 名称通配匹配，不逐个列型号）。
 识别以「GATT 服务 + 写特征 UUID」为主键，UUID 撞车时（`0000fff0` 被好几家共用）再用广播名消歧；
-认不出的设备会明确提示「未能识别型号」，而不是假装连上。
+认不出的设备会明确提示「未能识别型号」。
 
 协议数据来自 [Buttplug](https://github.com/buttplugio/buttplug) 公开的设备协议库（BSD-3-Clause），
 归属声明见 [NOTICE](./NOTICE)。要加新设备就往 `ToyProtocols.TABLE` 里加一行；

@@ -300,7 +300,7 @@ public class ToyBlePlugin extends Plugin {
 
         // 4) 都不认识：挑一个可写特征试试 Lovense 的 ASCII 指令（encodeVibrate 的 default 分支）。
         //    多数设备不吃这一套，但比什么都不做强，日志里也已经 dump 了完整 GATT 便于补协议。
-        //    协议名特意报成 unknown 而不是 lovense——否则用户分不清是真识别出来了还是在猜。
+        //    协议名特意报成 unknown：报 lovense 的话，用户分不清是真识别出来了还是在猜。
         for (BluetoothGattService s : g.getServices()) {
             for (BluetoothGattCharacteristic c : s.getCharacteristics()) {
                 if (isWritable(c)) { txChar = c; protocol = "unknown"; maxVibe = 20; return; }
