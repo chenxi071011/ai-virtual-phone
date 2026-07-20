@@ -9,8 +9,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "resources", "icon.png");
 const RES = path.join(here, "android", "app", "src", "main", "res");
 
-// 自适应图标的背景底色。取图标本身的背景色，否则前景 inset 后四周会露出违和的色块。
-const BG = { r: 0xfd, g: 0xf8, b: 0xf6, alpha: 1 };
+// 自适应图标的背景底色：取源图左上角像素。前景 inset 16.7% 后四周会露出这块底，
+// 底色跟图不一致的话，被系统裁成圆形后边缘会有一圈色差。
+// 自动取色是为了让自用版和发布版共用同一份脚本，只靠换 resources/icon.png 区分。
+async function pickBackground(src) {
+  const { data } = await sharp(src)
+    .extract({ left: 0, top: 0, width: 1, height: 1 })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  // 角落透明时退回白色。透明底铺在自适应图标上会露出系统壁纸。
+  if (data[3] < 128) return { r: 255, g: 255, b: 255, alpha: 1 };
+  return { r: data[0], g: data[1], b: data[2], alpha: 1 };
+}
 
 // 传统图标尺寸（全出血方形 + 圆形），给 Android 8.0 以下的启动器用
 const LEGACY = { ldpi: 36, mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
@@ -26,6 +37,9 @@ if (!(await exists(SRC))) {
   console.error(`找不到 ${SRC}`);
   process.exit(1);
 }
+
+const BG = await pickBackground(SRC);
+console.log(`底色取自源图左上角：rgb(${BG.r}, ${BG.g}, ${BG.b})`);
 
 let count = 0;
 for (const [dens, size] of Object.entries(LEGACY)) {
