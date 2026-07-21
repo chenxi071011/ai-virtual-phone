@@ -668,15 +668,6 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                             onClose={() => setActionMenuFor(null)}
                         />
                     )}
-                    {editingSubtitle && (
-                        <TextExpandModal
-                            title="编辑回复"
-                            value={editingSubtitle.text}
-                            onChange={(v) => handleEditSubtitleSave(editingSubtitle, v)}
-                            onClose={() => setEditingSubtitle(null)}
-                        />
-                    )}
-
                     {/* Interim STT text */}
                     {interimText && callState === "USER_SPEAKING" && (
                         <div className="call-subtitle" data-interim="">
@@ -851,6 +842,17 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 <CallSttWarningDialog
                     onClose={() => setShowSttWarning(false)}
                     onNeverShow={handleNeverShowSttWarning}
+                />
+            )}
+
+            {/* 编辑弹窗放在通话屏根层级：字幕区带顶部渐隐 mask + overflow-auto，
+                嵌在里面会把 modal 顶部（保存按钮）裁掉/渐隐，导致「找不到保存按钮」 */}
+            {editingSubtitle && (
+                <TextExpandModal
+                    title="编辑回复"
+                    value={editingSubtitle.text}
+                    onChange={(v) => handleEditSubtitleSave(editingSubtitle, v)}
+                    onClose={() => setEditingSubtitle(null)}
                 />
             )}
 

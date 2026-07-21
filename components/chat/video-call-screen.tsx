@@ -694,14 +694,6 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                         onClose={() => setActionMenuFor(null)}
                     />
                 )}
-                {editingSubtitle && (
-                    <TextExpandModal
-                        title="编辑回复"
-                        value={editingSubtitle.text}
-                        onChange={(v) => handleEditSubtitleSave(editingSubtitle, v)}
-                        onClose={() => setEditingSubtitle(null)}
-                    />
-                )}
                 {interimText && callState === "USER_SPEAKING" && (
                     <div
                         className="call-subtitle"
@@ -963,6 +955,18 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 <CallSttWarningDialog
                     onClose={() => setShowSttWarning(false)}
                     onNeverShow={handleNeverShowSttWarning}
+                />
+            )}
+
+            {/* 编辑弹窗放在通话屏根层级：字幕区是 absolute + overflow-auto 的窄滚动盒，
+                根容器 call-keyboard-shift 带 transform 会给 fixed modal 建立包含块，
+                嵌在字幕盒里会把 modal 顶部（保存按钮）裁掉，导致「找不到保存按钮」 */}
+            {editingSubtitle && (
+                <TextExpandModal
+                    title="编辑回复"
+                    value={editingSubtitle.text}
+                    onChange={(v) => handleEditSubtitleSave(editingSubtitle, v)}
+                    onClose={() => setEditingSubtitle(null)}
                 />
             )}
 
