@@ -6543,6 +6543,8 @@
   background: var(--reading-warm-brown, #8a5a2b);
   border-color: var(--reading-warm-brown, #8a5a2b);
   color: #fff;
+}
+
 /* ── 思维链（Claude app 风格：触发条 + 底部弹窗） ── */
 
 .chat-reasoning-trigger {
