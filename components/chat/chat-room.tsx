@@ -43,7 +43,7 @@ import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp } from "@/lib/follow-up-service";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Gift, HeartPulse, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, HeartPulse, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { scopeSessionCSS } from "@/lib/css-scoper";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -225,6 +225,26 @@ function getChatFlowVisibleContent(msg: ChatMessage, displayContent?: string): s
 
 function isChatVisualMedia(msg: ChatMessage): boolean {
     return !!msg.mediaType && CHAT_VISUAL_MEDIA_TYPES.has(msg.mediaType);
+}
+
+/** 思维链触发条的单行摘要：取首个非空行并剥离 markdown 标记（**、`、# 等），避免星号原样显示 */
+function reasoningPreviewLine(text: string): string {
+    for (const rawLine of text.split("\n")) {
+        const line = rawLine
+            .replace(/```+/g, "")
+            .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+            .replace(/\*\*([^*]+)\*\*/g, "$1")
+            .replace(/__([^_]+)__/g, "$1")
+            .replace(/\*([^*]+)\*/g, "$1")
+            .replace(/`([^`]+)`/g, "$1")
+            .replace(/^\s*#{1,6}\s+/, "")
+            .replace(/^\s*>\s+/, "")
+            .replace(/^\s*[-*+]\s+/, "")
+            .replace(/[*`]+/g, "")
+            .trim();
+        if (line) return line;
+    }
+    return "思考过程";
 }
 
 function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boolean {
@@ -1092,7 +1112,8 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
     const [showConfirmMultiDelete, setShowConfirmMultiDelete] = useState(false);
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
     // Chain-of-thought strip above each reply; collapsed until tapped.
-    const [expandedReasoningId, setExpandedReasoningId] = useState<string | null>(null);
+    // 思维链底部弹窗：存当前查看的 reasoning 文本，null = 关闭
+    const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
     const [voiceTextIds, setVoiceTextIds] = useState<Set<string>>(new Set());
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState("");
@@ -4938,11 +4959,18 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                             </button>
                                         ) : null}
                                     </div>
+                                    {/* 思维链触发条（线下模式，Claude app 风格） */}
                                     {turn.reasoning?.trim() && (
-                                        <details className="chat-offline-summary-fold chat-offline-reasoning-fold">
-                                            <summary>思维链</summary>
-                                            <div className="chat-offline-summary-content">{turn.reasoning}</div>
-                                        </details>
+                                        <button
+                                            type="button"
+                                            className="chat-reasoning-trigger"
+                                            onClick={(e) => { e.stopPropagation(); setReasoningSheetText(turn.reasoning || null); }}
+                                            aria-label="查看思考过程"
+                                        >
+                                            <Clock size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                            <span className="chat-reasoning-trigger-text">{reasoningPreviewLine(turn.reasoning)}</span>
+                                            <ChevronRight size={14} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                        </button>
                                     )}
                                     <div
                                         className="chat-offline-text"
@@ -5182,26 +5210,20 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                     </span>
                                 </div>
                             )}
-                            {msg.role !== "user" && !!renderMsg.reasoning?.trim() && (
-                                <div className="chat-reasoning">
+                            {/* 思维链触发条（Claude app 风格）：点击打开底部弹窗 */}
+                            {msg.role !== "user" && uiRole(msg) !== "system" && !!renderMsg.reasoning?.trim() && (
+                                <div className="chat-msg-wrapper" data-role={uiRole(msg)} style={{ marginBottom: -8 }}>
+                                    <div className="w-[40px] shrink-0" />
                                     <button
                                         type="button"
-                                        className="chat-reasoning-toggle"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedReasoningId(prev => prev === msg.id ? null : msg.id);
-                                        }}
-                                        aria-expanded={expandedReasoningId === msg.id}
-                                        {...(expandedReasoningId === msg.id ? { "data-active": "" } : {})}
+                                        className="chat-reasoning-trigger"
+                                        onClick={(e) => { e.stopPropagation(); setReasoningSheetText(renderMsg.reasoning || null); }}
+                                        aria-label="查看思考过程"
                                     >
-                                        <ChevronRight size={12} className="chat-reasoning-chevron" aria-hidden="true" />
-                                        <span>思维链</span>
+                                        <Clock size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                        <span className="chat-reasoning-trigger-text">{reasoningPreviewLine(renderMsg.reasoning)}</span>
+                                        <ChevronRight size={14} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
                                     </button>
-                                    {expandedReasoningId === msg.id && (
-                                        <div className="chat-reasoning-body">
-                                            {renderMsg.reasoning}
-                                        </div>
-                                    )}
                                 </div>
                             )}
                             <div
@@ -5770,6 +5792,37 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     }}
                     onClose={() => setRichModal(null)}
                 />
+            )}
+
+            {/* 思维链底部弹窗（Claude app 风格） */}
+            {reasoningSheetText !== null && (
+                <div
+                    className="modal-overlay modal-overlay-bottom"
+                    data-ui="modal"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="思考过程"
+                    onClick={() => setReasoningSheetText(null)}
+                >
+                    <div className="modal-sheet chat-reasoning-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="chat-reasoning-sheet-handle" />
+                        <div className="chat-reasoning-sheet-header">
+                            <span className="chat-reasoning-sheet-close-spacer" />
+                            <span className="chat-reasoning-sheet-title">思考过程</span>
+                            <button
+                                type="button"
+                                className="chat-reasoning-sheet-close"
+                                onClick={() => setReasoningSheetText(null)}
+                                aria-label="关闭"
+                            >
+                                <X size={18} strokeWidth={2} />
+                            </button>
+                        </div>
+                        <div className="chat-reasoning-sheet-body">
+                            <BilingualTextBlock text={reasoningSheetText} mode="markdown" defaultExpanded />
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Red Packet / Transfer Detail Modal */}

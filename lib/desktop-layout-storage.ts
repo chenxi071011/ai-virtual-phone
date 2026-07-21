@@ -1,14 +1,19 @@
-import { ICONS, PAGE_1_DEFAULT, PAGE_2_DEFAULT, type DesktopIconId, type IconId, type IconPosition } from "@/lib/desktop-config";
+import { DOCK_DEFAULT, ICONS, PAGE_1_DEFAULT, PAGE_2_DEFAULT, PAGE_3_DEFAULT, type DesktopIconId, type IconId, type IconPosition } from "@/lib/desktop-config";
 import { isCustomAppIconId } from "@/lib/custom-app-types";
 import { loadInstalledCustomApps } from "@/lib/custom-app-storage";
 import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, type WidgetInstance } from "@/lib/widget-types";
-import { kvSet, registerKvMigration } from "./kv-db";
+import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
 export const ICON_LAYOUT_STORAGE_KEY = "ai_phone_icon_layout_v2";
 export const ICON_LAYOUT_STORAGE_KEY_V1 = "ai_phone_icon_layout_v1";
+export const DOCK_LAYOUT_STORAGE_KEY = "ai_phone_dock_layout_v1";
+
+/** Max icons the dock can hold. Dragging a page icon in is rejected once full. */
+export const DOCK_MAX = 4;
 
 registerKvMigration(ICON_LAYOUT_STORAGE_KEY);
 registerKvMigration(ICON_LAYOUT_STORAGE_KEY_V1);
+registerKvMigration(DOCK_LAYOUT_STORAGE_KEY);
 
 export type DesktopPageKey = `page${number}`;
 
@@ -101,6 +106,12 @@ export function createDefaultDesktopIconLayout(_widgets: WidgetInstance[] = []):
       row: 4 + Math.floor(i / GRID_COLS),
       col: (i % GRID_COLS) + 1,
     })),
+    // 第三页：水平居中排在中间那行（第 3 行）。单个图标居中于 col2，两个则 col2、col3。
+    page3: PAGE_3_DEFAULT.map((id, i) => ({
+      id,
+      row: 3,
+      col: Math.floor((GRID_COLS - PAGE_3_DEFAULT.length) / 2) + 1 + i,
+    })),
   } as DesktopIconLayout;
 }
 
@@ -166,5 +177,61 @@ export function normalizeDesktopIconLayout(raw: unknown): DesktopIconLayout {
 export function writeDesktopIconLayout(layout: DesktopIconLayout): DesktopIconLayout {
   const normalized = normalizeDesktopIconLayout(layout);
   kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+// ── Dock layout ───────────────────────────────────────
+// The dock is an ordered list of icon ids (max DOCK_MAX). It is stored
+// separately from the paged icon layout, and the two are kept disjoint:
+// an icon lives either on a page or in the dock, never both.
+
+/** Keep only known/installed icons, dedup, cap at DOCK_MAX. */
+export function normalizeDock(raw: unknown): DesktopIconId[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const knownIcons = new Set<string>(Object.keys(ICONS));
+  const customIconIds = getInstalledCustomIconIds();
+  const seen = new Set<DesktopIconId>();
+  const result: DesktopIconId[] = [];
+
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const migratedId = migrateLegacyDesktopIconId(item, customIconIds);
+    if (
+      !migratedId
+      || (!knownIcons.has(migratedId) && !customIconIds.has(migratedId))
+      || seen.has(migratedId)
+    ) {
+      continue;
+    }
+    seen.add(migratedId);
+    result.push(migratedId);
+    if (result.length >= DOCK_MAX) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+/** Read the persisted dock, seeding DOCK_DEFAULT when nothing was ever stored. */
+export function loadDockLayout(): DesktopIconId[] {
+  const raw = kvGet(DOCK_LAYOUT_STORAGE_KEY);
+  if (raw == null) {
+    return normalizeDock(DOCK_DEFAULT);
+  }
+  try {
+    return normalizeDock(JSON.parse(raw));
+  } catch {
+    return normalizeDock(DOCK_DEFAULT);
+  }
+}
+
+export function writeDockLayout(dock: DesktopIconId[]): DesktopIconId[] {
+  const normalized = normalizeDock(dock);
+  kvSet(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(normalized));
   return normalized;
 }

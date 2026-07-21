@@ -840,10 +840,22 @@
           border-bottom: 6px solid var(--ctx-menu-bg, #2c2c2c);
         }
         .story-inline-edit { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-        .story-inline-edit textarea {
+        /* 纯 CSS 自适应高度：隐藏镜像 ::after 与 textarea 叠在同一格，
+           镜像随内容自然撑高。打字过程零 JS 高度写入——逐键改 style.height
+           在 iOS 上会导致光标绘制错位和"把光标卷进视野"的自动滚动。 */
+        .story-grow-wrap { display: grid; width: 100%; }
+        .story-grow-wrap::after {
+          content: attr(data-value) " ";
+          visibility: hidden; pointer-events: none;
+          grid-area: 1 / 1;
+          white-space: pre-wrap; word-break: break-word;
+          font: inherit; line-height: 1.9; min-height: 80px;
+        }
+        .story-grow-wrap textarea {
+          grid-area: 1 / 1;
           width: 100%; min-height: 80px; border: none; outline: none;
           background: transparent; color: inherit; font: inherit;
-          line-height: 1.9; resize: vertical; overflow: auto;
+          line-height: 1.9; resize: none; overflow: hidden;
           -webkit-user-select: text;
           user-select: text;
         }
