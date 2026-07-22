@@ -47,6 +47,8 @@ export type ChatSession = {
     isMuted?: boolean;
     bilingualTranslationEnabled?: boolean;
     collapseBilingualTranslation?: boolean;
+    /** 丢弃角色输出的无效表情包（名称不在角色表情包与内置表情中时直接滤除该消息） */
+    discardInvalidStickers?: boolean;
     bilingualTranslationPrompt?: string;
     offlineBilingualTranslationPrompt?: string;
     nativeExpandedToolSourceIds?: string[];

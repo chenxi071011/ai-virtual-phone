@@ -58,6 +58,31 @@ function setPromptTags(tags: string[]): Partial<Prompt> {
     };
 }
 
+// ── Marker 名称自动识别（手动编辑与桌宠填表共用） ──
+// marker 条目靠 identifier 注入内容，条目名称命中下表时自动补齐 identifier + marker。
+const MARKER_NAMES: Record<string, string> = {
+    "◇ 用户人设": "personaDescription", "◇ 世界书（角色前）": "worldInfoBefore",
+    "◇ 角色描述": "charDescription", "◇ 角色性格": "charPersonality",
+    "◇ 角色关系": "characterRelations",
+    "◇ 世界书（角色后）": "worldInfoAfter",
+    "◇ 日程": "calendarSchedule",
+    "◇ 核心记忆": "memoryCore", "◇ 长期记忆": "memoryLongTerm",
+    "◇ [短期记忆]": "shortTermMemory",
+};
+
+// 宽松匹配：忽略 ◇ 前缀、空白和方括号，"用户人设" / "◇ 用户人设" 都能命中
+function normalizeMarkerName(name: string): string {
+    return name.replace(/[◇\s\[\]]/g, "");
+}
+
+const MARKER_NAMES_NORMALIZED: Record<string, string> = Object.fromEntries(
+    Object.entries(MARKER_NAMES).map(([name, id]) => [normalizeMarkerName(name), id])
+);
+
+function matchMarkerByName(name: string): string | null {
+    return MARKER_NAMES_NORMALIZED[normalizeMarkerName(name)] ?? null;
+}
+
 const MASCOT_PRESET_STORAGE_TOOL_NAMES = new Set([
     "创建剧情预设",
     "克隆内置预设",
@@ -317,18 +342,10 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                         }
                         if (!handled) return prev;
                         // Auto-detect marker by matching fixed names
-                        const MARKER_NAMES: Record<string, string> = {
-                            "◇ 用户人设": "personaDescription", "◇ 世界书（角色前）": "worldInfoBefore",
-                            "◇ 角色描述": "charDescription", "◇ 角色性格": "charPersonality",
-                            "◇ 角色关系": "characterRelations",
-                            "◇ 世界书（角色后）": "worldInfoAfter",
-                            "◇ 日程": "calendarSchedule",
-                            "◇ 核心记忆": "memoryCore", "◇ 长期记忆": "memoryLongTerm",
-                            "◇ [短期记忆]": "shortTermMemory",
-                        };
-                        if (subfield === "name" && MARKER_NAMES[value]) {
+                        const autoMarkerId = subfield === "name" ? matchMarkerByName(value) : null;
+                        if (autoMarkerId && !prompts.some((p, pi) => pi !== promptIdx && p.identifier === autoMarkerId)) {
                             prompt.marker = true;
-                            prompt.identifier = MARKER_NAMES[value];
+                            prompt.identifier = autoMarkerId;
                             prompt.content = "";
                             prompt.injection_depth = 0;
                         }
@@ -916,10 +933,39 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                                 <AutoResizeTextarea
                                                                     value={prompt.name}
                                                                     onChange={(e) => {
+                                                                        const nextName = e.target.value;
+                                                                        // 名称命中 marker 固定名时自动补齐 identifier + marker（与桌宠填表同逻辑）
+                                                                        const markerId = matchMarkerByName(nextName);
+                                                                        if (
+                                                                            markerId
+                                                                            && markerId !== prompt.identifier
+                                                                            && !preset.prompts.some(p => p.identifier === markerId)
+                                                                        ) {
+                                                                            const newOrder = preset.prompt_order?.map(entry =>
+                                                                                entry.identifier === prompt.identifier
+                                                                                    ? { ...entry, identifier: markerId }
+                                                                                    : entry
+                                                                            );
+                                                                            updatePrompt(
+                                                                                preset,
+                                                                                prompt.identifier,
+                                                                                current => ({
+                                                                                    ...current,
+                                                                                    name: nextName,
+                                                                                    identifier: markerId,
+                                                                                    marker: true,
+                                                                                    content: "",
+                                                                                    injection_depth: 0,
+                                                                                }),
+                                                                                newOrder ? { prompt_order: newOrder } : {},
+                                                                            );
+                                                                            setEditingPromptId(markerId);
+                                                                            return;
+                                                                        }
                                                                         updatePrompt(
                                                                             preset,
                                                                             prompt.identifier,
-                                                                            current => ({ ...current, name: e.target.value }),
+                                                                            current => ({ ...current, name: nextName }),
                                                                         );
                                                                     }}
                                                                     placeholder="提示词名称 (例如: 主力 Prompt)"
@@ -946,10 +992,15 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                             </div>
                                                             )}
                                                             <div className="flex flex-col gap-3 p-[10px] rounded-lg bg-[var(--c-input)]">
+                                                                {prompt.marker && (
+                                                                    <div className="menu-desc ts-11">
+                                                                        标记条目的位置由排序与「短期记忆」分界决定，Role 固定为 System——以下「注入方式 / Inject Depth / Role」对标记条目不生效
+                                                                    </div>
+                                                                )}
                                                                 <div className="grid grid-cols-2 gap-3">
-                                                                    <div className="flex flex-col gap-1 min-w-0">
+                                                                    <div className={`flex flex-col gap-1 min-w-0${prompt.marker ? " opacity-40 pointer-events-none" : ""}`}>
                                                                         <label className="menu-desc ts-11">注入方式</label>
-                                                                        <select value={(prompt.injection_position ?? 0) === 0 ? "0" : "1"} onChange={e => {
+                                                                        <select disabled={!!prompt.marker} value={(prompt.injection_position ?? 0) === 0 ? "0" : "1"} onChange={e => {
                                                                             updatePrompt(
                                                                                 preset,
                                                                                 prompt.identifier,
@@ -960,9 +1011,9 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                                             <option value="1">插入聊天</option>
                                                                         </select>
                                                                     </div>
-                                                                    <div className="flex flex-col gap-1 min-w-0">
+                                                                    <div className={`flex flex-col gap-1 min-w-0${prompt.marker ? " opacity-40 pointer-events-none" : ""}`}>
                                                                         <label className="menu-desc ts-11">Inject Depth</label>
-                                                                        <input type="number" value={prompt.injection_depth ?? 0} onChange={e => {
+                                                                        <input type="number" disabled={!!prompt.marker} value={prompt.injection_depth ?? 0} onChange={e => {
                                                                             updatePrompt(
                                                                                 preset,
                                                                                 prompt.identifier,
@@ -972,9 +1023,10 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                                     </div>
                                                                 </div>
                                                                 <div className="grid grid-cols-2 gap-3">
-                                                                    <div className="flex flex-col gap-[2px] min-w-0">
+                                                                    <div className={`flex flex-col gap-[2px] min-w-0${prompt.marker ? " opacity-40 pointer-events-none" : ""}`}>
                                                                         <label className="menu-desc ts-11 ml-[2px]">Role</label>
                                                                         <select
+                                                                            disabled={!!prompt.marker}
                                                                             value={prompt.role}
                                                                             onChange={(e) => {
                                                                                 updatePrompt(

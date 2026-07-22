@@ -6633,3 +6633,32 @@
   color: var(--c-text-title, var(--c-text));
   overflow-wrap: break-word;
 }
+.chat-reasoning-translation {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.15);
+}
+.chat-reasoning-view-switch {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.chat-reasoning-view-btn {
+  padding: 3px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  color: var(--c-icon);
+}
+.chat-reasoning-view-btn[data-active] {
+  color: var(--c-icon-active, #e5484d);
+  border-color: currentColor;
+}
+.chat-reasoning-translate-error {
+  margin-bottom: 12px;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  color: var(--c-danger, #e5484d);
+}

@@ -771,6 +771,41 @@
           line-height: 1.8;
           font-size: calc(13px*var(--app-text-scale,1));
         }
+        .story-fold-translate-btn {
+          float: right;
+          margin-left: 8px;
+          padding: 1px 8px;
+          border: 1px solid var(--c-story-border, rgba(100, 116, 139, 0.3));
+          border-radius: 999px;
+          background: none;
+          cursor: pointer;
+          font-size: calc(10px*var(--app-text-scale,1));
+          letter-spacing: 0.05em;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        .story-fold-view-switch {
+          float: right;
+          display: inline-flex;
+          gap: 4px;
+        }
+        .story-fold-view-switch .story-fold-translate-btn {
+          float: none;
+          margin-left: 0;
+        }
+        .story-fold-translate-btn[data-active] {
+          color: var(--c-story-accent, #e5484d);
+          border-color: currentColor;
+        }
+        .story-fold-translation {
+          margin-bottom: 12px;
+          padding-bottom: 12px;
+          border-bottom: 1px dashed var(--c-story-border, rgba(100, 116, 139, 0.3));
+        }
+        .story-fold-translate-error {
+          margin-bottom: 10px;
+          font-size: calc(11px*var(--app-text-scale,1));
+          color: #e5484d;
+        }
         .story-richtext details summary + * {
           margin-top: 0 !important;
           padding-top: 0 !important;

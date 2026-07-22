@@ -237,6 +237,8 @@ export type BindingConfig = {
     embeddingApiConfigId?: string;
     /** Auxiliary API: used by the mascot assistant (global, not per-character) */
     mascotApiConfigId?: string;
+    /** Auxiliary API: used to translate reasoning/chain-of-thought text (global, not per-character) */
+    reasoningTranslateApiConfigId?: string;
 };
 
 // --- Chat Toolbox ---

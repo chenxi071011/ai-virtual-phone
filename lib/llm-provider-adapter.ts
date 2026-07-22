@@ -196,6 +196,28 @@ function ensureProviderHasUserMessage(messages: LlmRequestMessage[]): LlmRequest
     return messages;
 }
 
+/**
+ * Anthropic/Gemini 的消息数组不接受 system 角色：开头连续的 system 提取为顶层
+ * system / systemInstruction；插在历史中间的 system（@Depth 注入、系统指令等）
+ * 原位转为 user 角色，保留位置语义，避免被整体挪到最前面。
+ */
+function splitLeadingSystemMessages(messages: LlmRequestMessage[]): { systemText: string; rest: LlmRequestMessage[] } {
+    let leading = 0;
+    while (leading < messages.length && messages[leading].role === "system") leading += 1;
+    const systemText = messages.slice(0, leading)
+        .map((message) => textFromContent(message.content))
+        .filter(Boolean)
+        .join("\n\n");
+    const rest = messages.slice(leading).map((message) => message.role === "system"
+        ? {
+            role: "user" as const,
+            content: message.content,
+            marker: message.marker ? `${message.marker} | protocol:user-from-system` : "protocol:user-from-system",
+        }
+        : message);
+    return { systemText, rest };
+}
+
 /** 把 multipart content 里的图片 part 压平成文本占位（图像识别未启用时使用）。 */
 function stripVisionParts(messages: LlmRequestMessage[]): LlmRequestMessage[] {
     return messages.map((message) => {
@@ -533,12 +555,8 @@ function buildAnthropicRequest(
     messages: LlmRequestMessage[],
     options: ProviderRequestOptions,
 ): LlmRequestPayload {
-    const system = messages
-        .filter((message) => message.role === "system")
-        .map((message) => textFromContent(message.content))
-        .filter(Boolean)
-        .join("\n\n");
-    const bodyMessages = compactAnthropicMessages(messages.filter((message) => message.role !== "system"));
+    const { systemText: system, rest } = splitLeadingSystemMessages(messages);
+    const bodyMessages = compactAnthropicMessages(rest);
     const body: Record<string, unknown> = {
         model: config.defaultModel,
         messages: bodyMessages,
@@ -602,15 +620,11 @@ function buildGeminiRequest(
     messages: LlmRequestMessage[],
     options: ProviderRequestOptions,
 ): LlmRequestPayload {
-    const systemText = messages
-        .filter((message) => message.role === "system")
-        .map((message) => textFromContent(message.content))
-        .filter(Boolean)
-        .join("\n\n");
+    const { systemText, rest } = splitLeadingSystemMessages(messages);
     const headers = buildRequestHeaders(config, baseUrl);
     delete headers.Authorization;
     const body: Record<string, unknown> = {
-        contents: compactGeminiContents(messages.filter((message) => message.role !== "system")),
+        contents: compactGeminiContents(rest),
         generationConfig: {
             temperature: preset?.temperature ?? 0.8,
             topP: preset?.top_p ?? 1,

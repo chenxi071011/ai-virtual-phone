@@ -22,6 +22,7 @@ import { generateChatCompletion, flattenCompletionResult } from "./chat-engine";
 import { loadFollowUpConfig } from "./settings-storage";
 import { parseAIResponse } from "./rich-message-parser";
 import type { ParsedMessagePart } from "./rich-message-parser";
+import { isKnownStickerLabel } from "./sticker-data";
 import { loadCharacters } from "./character-storage";
 import { maybeExecuteToyControlPart, formatToyControlNotice } from "./toy-ble";
 import { bgSetInterval } from "./bg-timer";
@@ -596,6 +597,11 @@ async function parseAndSaveResponse(
     const filteredParts = parts.filter(p => {
         if (p.mediaType === "voice_call") { triggerCall = "voice"; return false; }
         if (p.mediaType === "video_call") { triggerCall = "video"; return false; }
+        // 「丢弃角色输出的无效表情包」开关（主动消息路径）
+        if (p.mediaType === "sticker" && sess?.discardInvalidStickers === true) {
+            const senderIds = sess.isGroup ? (sess.participantIds ?? []) : [sess.contactId];
+            if (!isKnownStickerLabel(p.mediaData?.label || "", senderIds)) return false;
+        }
         if (p.mediaType === "accept_red_packet" || p.mediaType === "decline_red_packet"
             || p.mediaType === "accept_transfer" || p.mediaType === "decline_transfer"
             || p.mediaType === "accept_payment_request" || p.mediaType === "decline_payment_request") {
