@@ -68,6 +68,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <ToyGrantCard msg={msg} charName={charName} />;
         case "sticker":
             return <StickerBubble msg={msg} characterId={characterId} />;
+        case "dice":
+            return <DiceBubble msg={msg} />;
         case "quote":
             return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
         case "music_share":
@@ -1358,6 +1360,58 @@ function HeartPulseIcon() {
             <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" />
             <path d="M3.5 9.5h3l1.5-3 2 6 1.5-3h9" />
         </svg>
+    );
+}
+
+// 骰子点位：3x3 宫格（0-8）中每个点数要点亮的格子
+const DICE_BUBBLE_PIPS: Record<number, number[]> = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8],
+};
+
+// 让指定点数朝向屏幕所需的立方体末态旋转（配合各面的摆放变换）
+const DICE_BUBBLE_ORIENTATIONS: Record<number, [number, number]> = {
+    1: [0, 0],
+    2: [-90, 0],
+    3: [0, -90],
+    4: [0, 90],
+    5: [90, 0],
+    6: [0, 180],
+};
+
+/** 骰子消息：3D 实骰。新消息立方体翻滚约 1.4 秒后定格在掷出的点数；历史消息直接定格 */
+function DiceBubble({ msg }: { msg: ChatMessage }) {
+    const face = Math.min(6, Math.max(1, Number(msg.mediaData?.diceFace) || 1));
+    // 挂载瞬间判定一次：只有刚发出的消息播翻滚动画
+    const rollingRef = useRef(Date.now() - new Date(msg.createdAt).getTime() < 6000);
+    const [rx, ry] = DICE_BUBBLE_ORIENTATIONS[face];
+
+    return (
+        <div className="dice-bubble3d" aria-label={`骰子 ${face} 点`}>
+            <div className="dice-bubble3d-tilt">
+                <div
+                    className="dice-bubble3d-cube"
+                    {...(rollingRef.current ? { "data-rolling": "" } : {})}
+                    style={{ "--dice-rx": `${rx}deg`, "--dice-ry": `${ry}deg` } as React.CSSProperties}
+                >
+                    {[1, 2, 3, 4, 5, 6].map(f => (
+                        <span key={f} className="dice-bubble3d-face" data-face={f}>
+                            {Array.from({ length: 9 }, (_, cell) => (
+                                <span
+                                    key={cell}
+                                    className="dice-bubble3d-pip"
+                                    {...(DICE_BUBBLE_PIPS[f].includes(cell) ? { "data-on": "" } : {})}
+                                />
+                            ))}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </div>
     );
 }
 

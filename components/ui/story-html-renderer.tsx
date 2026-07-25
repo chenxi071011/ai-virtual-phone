@@ -235,13 +235,12 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode }: HtmlPageProps) 
 
     const srcDoc = useMemo(() => {
         // 高度桥接：照搬黑市剧场那套"按构造稳定"的做法——getBoundingClientRect 测真实
-        // 默认让 html/body overflow:hidden + min-height:0 贴住内容；contained 模式保留 iframe 内部滚动。
         // 内容、能缩回去；MutationObserver + 一堆事件捕捉任何变化(自定义按钮也行)；
         // body 高=内容高，父层改 iframe 高不反馈到内容 → 测出不变 → 天然不循环。
-        const overflowRule = contained
-            ? "overflow:auto!important;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;"
-            : "overflow:hidden!important;";
-        const bridge = `<style>html,body{${overflowRule}min-height:0!important}</style><script>(function(){function measure(){var d=document.documentElement;var b=document.body;if(!b)return 0;var br=b.getBoundingClientRect();var h=Math.max(br.height,b.scrollHeight||0,d?d.scrollHeight||0:0);for(var i=0;i<b.children.length;i++){var r=b.children[i].getBoundingClientRect();if(r.width||r.height)h=Math.max(h,r.bottom-br.top)}return Math.ceil(h)}function send(){window.parent.postMessage({type:"_rhr",h:measure()},"*")}function schedule(){requestAnimationFrame(function(){send();requestAnimationFrame(send)})}window.addEventListener("load",schedule);window.addEventListener("resize",schedule);document.addEventListener("click",function(e){var t=e.target&&e.target.closest&&e.target.closest("[data-action]");if(t){var a=t.getAttribute("data-action");if(a){e.preventDefault();e.stopPropagation();window.parent.postMessage({type:"_rhr_opt",text:a},"*")}}schedule()},true);document.addEventListener("toggle",schedule,true);document.addEventListener("transitionend",schedule,true);document.addEventListener("animationend",schedule,true);if(window.MutationObserver)new MutationObserver(schedule).observe(document.documentElement,{attributes:true,childList:true,subtree:true,characterData:true});if(window.ResizeObserver){var ro=new ResizeObserver(schedule);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}setTimeout(send,80);setTimeout(send,500);setTimeout(send,1600)})();<\/script>`;
+        // iframe 内部永远不滚（iOS 对 iframe 内部文档滚动的手势支持不可靠，生成页里的
+        // fixed/100vh 元素会让整页划不动）；contained 模式改由外层同文档 div 滚动。
+        // height:auto 把生成页常见的 height:100vh 压回内容高，保证测量与手势链正确。
+        const bridge = `<style>html,body{overflow:hidden!important;height:auto!important;min-height:0!important}</style><script>(function(){function measure(){var d=document.documentElement;var b=document.body;if(!b)return 0;var br=b.getBoundingClientRect();var h=Math.max(br.height,b.scrollHeight||0,d?d.scrollHeight||0:0);for(var i=0;i<b.children.length;i++){var c=b.children[i];var r=c.getBoundingClientRect();if(r.width||r.height)h=Math.max(h,r.bottom-br.top,c.scrollHeight||0)}return Math.ceil(h)}function send(){window.parent.postMessage({type:"_rhr",h:measure()},"*")}function schedule(){requestAnimationFrame(function(){send();requestAnimationFrame(send)})}window.addEventListener("load",schedule);window.addEventListener("resize",schedule);document.addEventListener("click",function(e){var t=e.target&&e.target.closest&&e.target.closest("[data-action]");if(t){var a=t.getAttribute("data-action");if(a){e.preventDefault();e.stopPropagation();window.parent.postMessage({type:"_rhr_opt",text:a},"*")}}schedule()},true);document.addEventListener("toggle",schedule,true);document.addEventListener("transitionend",schedule,true);document.addEventListener("animationend",schedule,true);if(window.MutationObserver)new MutationObserver(schedule).observe(document.documentElement,{attributes:true,childList:true,subtree:true,characterData:true});if(window.ResizeObserver){var ro=new ResizeObserver(schedule);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}setTimeout(send,80);setTimeout(send,500);setTimeout(send,1600)})();<\/script>`;
         let h = html;
         // Convert basic markdown inside hidden data divs
         h = h.replace(
@@ -263,7 +262,7 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode }: HtmlPageProps) 
             if (!e.data || typeof e.data !== "object") return;
             if (iframeRef.current && e.source !== iframeRef.current.contentWindow) return;
             if (e.data.type === "_rhr" && typeof e.data.h === "number") {
-                if (!contained) setHeight(Math.max(e.data.h, 50));
+                setHeight(Math.max(e.data.h, 50));
             }
             if (e.data.type === "_rhr_opt" && typeof e.data.text === "string") {
                 onOptionSelect?.(e.data.text);
@@ -271,21 +270,37 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode }: HtmlPageProps) 
         };
         window.addEventListener("message", handler);
         return () => window.removeEventListener("message", handler);
-    }, [onOptionSelect, contained]);
+    }, [onOptionSelect]);
 
-    return (
+    const frame = (
         <iframe
             ref={iframeRef}
             srcDoc={srcDoc}
             title="HTML content"
             style={{
                 width: "100%",
-                height: contained ? "min(68dvh, 560px)" : height,
+                height,
                 border: "none",
                 display: "block",
                 borderRadius: 12,
             }}
         />
+    );
+
+    if (!contained) return frame;
+
+    // contained：iframe 按内容全高撑开，滚动交给这个同文档的外层容器
+    // （iOS 上 iframe 内部滚动手势不可靠，同文档滚动器则始终可靠）
+    return (
+        <div style={{
+            maxHeight: "min(68dvh, 560px)",
+            overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+            borderRadius: 12,
+        }}>
+            {frame}
+        </div>
     );
 }
 

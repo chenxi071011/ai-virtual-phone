@@ -1,6 +1,7 @@
 // lib/chat-engine.ts
 
 import { loadCharacters } from "./character-storage";
+import { buildScreenEffectPromptHint } from "./chat-screen-effects";
 import type { Character } from "./character-types";
 import {
     ChatSession,
@@ -1795,7 +1796,7 @@ export async function buildChatPromptMessages(
     const scheduleSummary = buildCalendarScheduleMarker("character", character.id, getWeekStartIso(now));
     const currentSchedule = getCurrentCalendarScheduleForPrompt("character", character.id, now);
     const musicOnlineHint = isNeteaseConfigured() ? "- 你可以推荐任何歌曲，系统会在线搜索并播放。不局限于用户本地音乐库。\n" : "\n";
-    const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt();
+    const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt() + buildScreenEffectPromptHint();
     const toolsPrompt = toolsEnabled && !usesNativeActions ? formatToolsForPrompt(enabledTools) : "";
     const chatBilingualInstruction = !session.isGroup
         ? buildChatBilingualInstruction(session.bilingualTranslationEnabled !== false, "single", session.bilingualTranslationPrompt)

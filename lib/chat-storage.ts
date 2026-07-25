@@ -88,7 +88,7 @@ export type ChatMessage = {
     isRetracted?: boolean;
     mediaType?: "image" | "audio" | "video"
         | "red_packet" | "transfer" | "location"
-        | "poke" | "sticker" | "quote"
+        | "poke" | "sticker" | "quote" | "dice"
         | "voice_call" | "video_call"
         | "accept_red_packet" | "decline_red_packet" | "accept_transfer" | "decline_transfer"
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
@@ -117,6 +117,7 @@ export type ChatMessage = {
         quotePreview?: string;    // 引用消息预览文本
         quoteRole?: ChatMessageRole; // 引用消息的 role
         stickerUrl?: string;      // 表情包图片路径
+        diceFace?: number;        // 骰子点数（1-6），气泡翻滚后定格并与全屏动效一致
         pokeSender?: string;      // 拍一拍发起人名字
         pokeTarget?: string;      // 拍一拍目标名字
         contactCardName?: string; // 名片被推荐人名字（渲染时按推荐人同世界实时解析，未建档也可成卡）
@@ -261,7 +262,7 @@ export const CHAT_REQUEST_REPLY_EVENT = "chat-request-reply";
 const MEDIA_PREVIEW_MAP: Record<string, string> = {
     image: "[图片]", audio: "[语音]", video: "[视频]",
     red_packet: "[红包]", transfer: "[转账]", location: "[位置]",
-    poke: "[拍了拍你]", sticker: "[表情]", quote: "[引用]",
+    poke: "[拍了拍你]", sticker: "[表情]", quote: "[引用]", dice: "[掷骰子]",
     gift: "[礼物]",
     contact_card: "[名片]",
     payment_request: "[代付请求]",

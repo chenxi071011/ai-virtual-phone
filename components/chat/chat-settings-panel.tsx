@@ -36,7 +36,7 @@ import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Trash2, Smile, type LucideIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Trash2, Smile, Sparkles, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -51,6 +51,7 @@ import {
 } from "@/lib/bilingual-prompt-defaults";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { MessageBubble, isStandaloneHtmlPreviewContent } from "./message-bubble";
+import { ScreenEffectSettingsModal } from "./screen-effect-settings-modal";
 
 type ChatSettingsPanelProps = {
     session: ChatSession;
@@ -189,6 +190,7 @@ export function ChatSettingsPanel({
     const [editingAlias, setEditingAlias] = useState(false);
     const [editingBilingualPrompt, setEditingBilingualPrompt] = useState(false);
     const [editingCSS, setEditingCSS] = useState(false);
+    const [showScreenEffects, setShowScreenEffects] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
@@ -790,6 +792,16 @@ export function ChatSettingsPanel({
                                 />
                             </div>
                         </div>
+                        <button className="menu-item" onClick={() => setShowScreenEffects(true)}>
+                            <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">全屏特效</span>
+                                <span className="menu-desc">消息包含触发词时播放表情雨/礼花，全局生效</span>
+                            </div>
+                            <div className="menu-right">
+                                <ChevronRight size={16} />
+                            </div>
+                        </button>
                     </>
                 </div>
 
@@ -1088,6 +1100,9 @@ export function ChatSettingsPanel({
                     </div>
                 </div>
             )}
+
+            {/* Modal: Screen Effects */}
+            {showScreenEffects && <ScreenEffectSettingsModal onClose={() => setShowScreenEffects(false)} />}
 
             {/* Modal: Confirm Clear History */}
             {showConfirmClear && (
