@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, FileText, Puzzle, ScrollText, Settings2, Download } from "lucide-react";
 import { PageShell } from "@/components/ui/page-shell";
-import { Toggle, Textarea } from "@/components/ui/form";
+import { Toggle } from "@/components/ui/form";
 import type { ChatPluginSettingField, InstalledChatPlugin } from "@/lib/chat-plugin-types";
 import {
     CHAT_PLUGINS_CHANGED_EVENT,
@@ -34,13 +34,15 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
     const [plugins, setPlugins] = useState<InstalledChatPlugin[]>(() => loadChatPlugins());
     const [errors, setErrors] = useState(() => loadChatPluginErrors());
     const [safeMode, setSafeMode] = useState(() => isChatPluginSafeMode());
-    const [showImport, setShowImport] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
     const [showErrors, setShowErrors] = useState(false);
-    const [importText, setImportText] = useState("");
     const [installing, setInstalling] = useState(false);
     const [hint, setHint] = useState<{ ok: boolean; text: string } | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    const [updateHint, setUpdateHint] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+    const [updating, setUpdating] = useState(false);
+    /** 隐藏文件选择框当前服务的目标："import"（导入面板）或某个插件 id（更新） */
+    const fileTargetRef = useRef<string>("import");
     const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null);
     const [docCopied, setDocCopied] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,8 +85,15 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
         try {
             const result = await installChatPluginFromCode(code);
             if (result.ok) {
-                setHint({ ok: true, text: `已安装「${result.name}」` });
-                setImportText("");
+                const vers = result.upgraded && result.fromVersion && result.toVersion && result.fromVersion !== result.toVersion
+                    ? ` v${result.fromVersion} → v${result.toVersion}`
+                    : "";
+                setHint({
+                    ok: true,
+                    text: result.upgraded
+                        ? `已升级「${result.name}」${vers}，配置与数据已保留`
+                        : `已安装「${result.name}」`,
+                });
             } else {
                 setHint({ ok: false, text: result.error || "安装失败" });
             }
@@ -93,13 +102,38 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
         }
     };
 
-    const handlePickFile = () => fileInputRef.current?.click();
+    const handlePickFile = (target: string = "import") => {
+        fileTargetRef.current = target;
+        fileInputRef.current?.click();
+    };
 
     const handleFileChosen = async (file: File | undefined) => {
         if (!file) return;
         const text = await file.text();
-        await handleInstall(text);
+        if (fileTargetRef.current === "import") await handleInstall(text);
+        else await handleUpdate(fileTargetRef.current, text);
         if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+
+    /** 就地更新：同 id 覆盖安装（配置与数据保留），并校验源码 id 与本插件一致 */
+    const handleUpdate = async (id: string, code: string) => {
+        if (!code.trim()) return;
+        if (!window.confirm(INSTALL_WARNING)) return;
+        setUpdating(true);
+        try {
+            const result = await installChatPluginFromCode(code, { expectedId: id });
+            if (result.ok) {
+                const vers = result.fromVersion && result.toVersion && result.fromVersion !== result.toVersion
+                    ? ` v${result.fromVersion} → v${result.toVersion}`
+                    : "";
+                setUpdateHint({ id, ok: true, text: `已更新${vers}，配置与数据已保留` });
+                window.setTimeout(() => setUpdateHint(cur => (cur?.id === id && cur.ok ? null : cur)), 5000);
+            } else {
+                setUpdateHint({ id, ok: false, text: result.error || "更新失败" });
+            }
+        } finally {
+            setUpdating(false);
+        }
     };
 
     const handleDelete = (id: string) => {
@@ -182,9 +216,8 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                                                 <span className="menu-label" style={{ fontWeight: 600 }}>
                                                     {p.manifest.name}
                                                     {p.manifest.version && <span style={{ opacity: 0.5, fontWeight: 400, marginLeft: 6 }}>v{p.manifest.version}</span>}
-                                                    {running && <span style={{ color: "var(--c-success)", fontWeight: 400, marginLeft: 6 }}>运行中</span>}
+                                                    {p.manifest.author && <span style={{ opacity: 0.5, fontWeight: 400, marginLeft: 6 }}>{p.manifest.author}</span>}
                                                     {notRunning && <span style={{ color: "var(--c-danger)", fontWeight: 400, marginLeft: 6 }}>未运行</span>}
-                                                    {errorCount > 0 && <span style={{ color: "var(--c-danger)", fontWeight: 400, marginLeft: 6 }}>{errorCount} 次报错</span>}
                                                 </span>
                                                 {p.manifest.description && <span className="menu-desc">{p.manifest.description}</span>}
                                                 {!!p.manifest.permissions?.length && <span className="menu-desc" style={{ opacity: 0.6 }}>声明用途：{p.manifest.permissions.join("、")}</span>}
@@ -225,21 +258,40 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                                             className="chat-plugin-settings-section"
                                         />
 
-                                        {/* 底部：作者 + 卸载 */}
-                                        <div className="menu-item" style={{ cursor: "default" }}>
-                                            <div className="menu-label-group">
-                                                <span className="menu-desc">{p.manifest.author ? `作者：${p.manifest.author}` : "JavaScript 插件"}</span>
+                                        {/* 更新/卸载的行内提示 */}
+                                        {updateHint?.id === p.manifest.id && (
+                                            <div style={{ padding: "10px 16px 0" }}>
+                                                <span className="menu-desc" style={{ color: updateHint.ok ? "var(--c-success)" : "var(--c-danger)" }}>{updateHint.text}</span>
                                             </div>
-                                            <div className="menu-right">
-                                                <button
-                                                    className={`ui-btn ${confirmDeleteId === p.manifest.id ? "ui-btn-danger" : "ui-btn-ghost"}`}
-                                                    style={{ padding: "6px 12px", color: confirmDeleteId === p.manifest.id ? undefined : "var(--c-danger)" }}
-                                                    onClick={() => handleDelete(p.manifest.id)}
-                                                    onBlur={() => setConfirmDeleteId(null)}
-                                                >
-                                                    {confirmDeleteId === p.manifest.id ? "确认卸载" : "卸载"}
-                                                </button>
+                                        )}
+                                        {confirmDeleteId === p.manifest.id && (
+                                            <div style={{ padding: "10px 16px 0" }}>
+                                                <span className="menu-desc" style={{ color: "var(--c-danger)" }}>卸载将清除该插件的配置与数据；只是升级请点「更新」，配置会保留</span>
                                             </div>
+                                        )}
+
+                                        {/* 底部：更新 + 卸载，双按钮撑满一排。更新 = 直接选新版 .js 文件 */}
+                                        <div style={{ display: "flex", gap: 10, padding: "12px 16px 14px" }}>
+                                            <button
+                                                className="ui-btn ui-btn-outline"
+                                                style={{ flex: 1, minHeight: 40, fontWeight: 600 }}
+                                                disabled={updating}
+                                                onClick={() => {
+                                                    setConfirmDeleteId(null);
+                                                    setUpdateHint(null);
+                                                    handlePickFile(p.manifest.id);
+                                                }}
+                                            >
+                                                {updating ? "更新中…" : "更新"}
+                                            </button>
+                                            <button
+                                                className={`ui-btn ${confirmDeleteId === p.manifest.id ? "ui-btn-danger" : "ui-btn-outline"}`}
+                                                style={{ flex: 1, minHeight: 40, fontWeight: 600, ...(confirmDeleteId === p.manifest.id ? {} : { color: "var(--c-danger)", borderColor: "color-mix(in srgb, var(--c-danger) 45%, transparent)" }) }}
+                                                onClick={() => handleDelete(p.manifest.id)}
+                                                onBlur={() => setConfirmDeleteId(null)}
+                                            >
+                                                {confirmDeleteId === p.manifest.id ? "确认卸载" : "卸载"}
+                                            </button>
                                         </div>
                                     </div>
                                 );
@@ -252,36 +304,30 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                 <div>
                     <div className="settings-menu-section-title">安装插件</div>
                     <div className="menu-group" style={{ marginTop: 10 }}>
-                        <button className="menu-item" onClick={() => { setShowImport(v => !v); setHint(null); }}>
+                        <button className="menu-item" disabled={installing} onClick={() => { setHint(null); handlePickFile(); }}>
                             <div className="menu-icon" style={iconWrap("#38bdf8")}>
                                 <Download size={17} strokeWidth={1.6} />
                             </div>
-                            <div className="menu-label-group"><span className="menu-label">导入插件</span><span className="menu-desc">粘贴源码或选择 .js 文件</span></div>
-                            <div className="menu-right">{showImport ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</div>
+                            <div className="menu-label-group"><span className="menu-label">{installing ? "安装中…" : "导入插件"}</span><span className="menu-desc">选择 .js 插件文件</span></div>
+                            <div className="menu-right"><ChevronRight size={16} /></div>
                         </button>
-                        {showImport && (
-                            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-                                <Textarea
-                                    value={importText}
-                                    onChange={e => setImportText(e.target.value)}
-                                    placeholder="粘贴插件 JS 源码（export default { manifest, setup } 的 ES Module）…"
-                                    style={{ height: 150, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}
-                                />
-                                {hint && <div style={{ fontSize: 12, color: hint.ok ? "var(--c-success)" : "var(--c-danger)" }}>{hint.text}</div>}
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                    <button className="ui-btn ui-btn-primary" style={{ flex: 1, minWidth: 120 }} disabled={!importText.trim() || installing} onClick={() => handleInstall(importText)}>
-                                        {installing ? "安装中…" : "安装"}
-                                    </button>
-                                    <button className="ui-btn ui-btn-outline" onClick={handlePickFile}>选择 .js 文件</button>
-                                    <button className="ui-btn ui-btn-outline" onClick={() => setImportText(CHAT_PLUGIN_EXAMPLE_MOOD)}>填入示例</button>
-                                </div>
-                                <input ref={fileInputRef} type="file" accept=".js,.mjs,text/javascript" className="hidden" onChange={e => { void handleFileChosen(e.target.files?.[0]); }} />
-                                <p className="menu-desc" style={{ lineHeight: 1.6 }}>
-                                    插件与应用同环境运行，拥有完整能力（含你的 API 配置与聊天数据）。只安装信任来源的插件；
-                                    出问题时给地址加 <code>?plugin-safe-mode=1</code> 可跳过全部插件启动。
-                                </p>
+                        <button className="menu-item" disabled={installing} onClick={() => { setHint(null); void handleInstall(CHAT_PLUGIN_EXAMPLE_MOOD); }}>
+                            <div className="menu-icon" style={iconWrap("#34d399")}>
+                                <Puzzle size={17} strokeWidth={1.6} />
+                            </div>
+                            <div className="menu-label-group"><span className="menu-label">安装示例插件</span><span className="menu-desc">心情状态小组件，装上即可体验插件玩法</span></div>
+                            <div className="menu-right"><ChevronRight size={16} /></div>
+                        </button>
+                        {hint && (
+                            <div style={{ padding: "10px 16px 0" }}>
+                                <span className="menu-desc" style={{ color: hint.ok ? "var(--c-success)" : "var(--c-danger)" }}>{hint.text}</span>
                             </div>
                         )}
+                        <p className="menu-desc" style={{ lineHeight: 1.6, padding: "10px 16px 14px", margin: 0 }}>
+                            插件与应用同环境运行，拥有完整能力（含你的 API 配置与聊天数据）。只安装信任来源的插件；
+                            出问题时给地址加 <code>?plugin-safe-mode=1</code> 可跳过全部插件启动。
+                        </p>
+                        <input ref={fileInputRef} type="file" accept=".js,.mjs,text/javascript" className="hidden" onChange={e => { void handleFileChosen(e.target.files?.[0]); }} />
                     </div>
                 </div>
 
