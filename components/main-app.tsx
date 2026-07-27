@@ -343,8 +343,12 @@ export function MainApp() {
       }
     })();
 
-    // 安卓全屏兜底：点击屏幕进入全屏模式（iOS 不支持此 API，会自动忽略）
-    const isMobile = window.matchMedia("(max-width: 500px) and (hover: none) and (pointer: coarse)").matches;
+    // 安卓全屏兜底：点击屏幕进入全屏模式（iOS 不支持此 API，会自动忽略）。
+    // 原生壳（Capacitor APK）的全屏已经在 MainActivity 里用系统级 API 兜底了，
+    // 不再靠这里的 matchMedia 猜视口——猜错的机型会连这个点击监听都不挂，
+    // 表现为点了也没反应。isMobile 只用来判断"网页/PWA 里要不要挂这个监听"。
+    const isMobile = Capacitor.isNativePlatform()
+      || window.matchMedia("(max-width: 500px) and (hover: none) and (pointer: coarse)").matches;
     // Edge 改用 minimal-ui 保留原生状态栏，不能再被强制全屏顶掉（仅 Edge 跳过，其它浏览器照旧）
     const isEdge = /Edg/i.test(navigator.userAgent);
     if (!isMobile || isEdge) return () => {

@@ -22,6 +22,8 @@ import { ScanPayCard } from "@/components/chat/scan-pay-card";
 import { payWithWalletBalance } from "@/lib/wallet-storage";
 import { formatShoppingPaymentRequestHistory } from "@/lib/shopping-payment-request";
 import { toCustomAppIconId } from "@/lib/custom-app-types";
+import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
+import { CHAT_PLUGIN_SLOTS_CHANGED_EVENT, getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
 
 interface MessageBubbleProps {
     msg: ChatMessage;
@@ -36,6 +38,43 @@ interface MessageBubbleProps {
     onActionSelect?: (text: string) => void;
     displayContent?: string;
     defaultTranslationExpanded?: boolean;
+}
+
+/** 聊天插件自定义消息气泡：把裸 DOM 容器交给注册了该 kind 的插件渲染 */
+function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [slotVersion, setSlotVersion] = useState(0);
+
+    useEffect(() => {
+        const bump = () => setSlotVersion(v => v + 1);
+        window.addEventListener(CHAT_PLUGIN_SLOTS_CHANGED_EVENT, bump);
+        return () => window.removeEventListener(CHAT_PLUGIN_SLOTS_CHANGED_EVENT, bump);
+    }, []);
+
+    const registration = getChatPluginRuntime().getMessageKindRenderer(kind);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el || !registration) return;
+        let cleanup: (() => void) | void;
+        try {
+            cleanup = registration.renderer(el, msg);
+        } catch { /* 渲染失败按占位处理 */ }
+        return () => {
+            try { if (typeof cleanup === "function") cleanup(); } catch { /* ignore */ }
+            el.replaceChildren();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [registration, slotVersion, msg.id, msg.content, msg.mediaData]);
+
+    if (!registration) {
+        return (
+            <div className="bubble bubble-text opacity-60">
+                <span className="ts-12">[插件消息：{kind}]（对应插件未启用）</span>
+            </div>
+        );
+    }
+    return <div ref={containerRef} data-chat-plugin-kind={kind} />;
 }
 
 /**
@@ -80,8 +119,19 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <XiaohongshuShareBubble msg={msg} />;
         case "audio":
             return <VoiceMessageBubble msg={msg} characterId={characterId} onUpdate={onUpdate} defaultTranslationExpanded={defaultTranslationExpanded} />;
-        default:
-            return <TextBubble content={displayContent ?? msg.content} onActionSelect={onActionSelect} defaultTranslationExpanded={defaultTranslationExpanded} />;
+        default: {
+            // 聊天插件自定义消息类型：mediaType = "plugin:<kind>"，由注册插件渲染
+            if (msg.mediaType?.startsWith("plugin:")) {
+                return <PluginKindBubble msg={msg} kind={msg.mediaType.slice("plugin:".length)} />;
+            }
+            const textBubble = <TextBubble content={displayContent ?? msg.content} onActionSelect={onActionSelect} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            return (
+                <>
+                    {textBubble}
+                    <ChatPluginSlot name="message.footer" slotProps={{ sessionId: msg.sessionId, message: msg }} className="chat-plugin-message-footer" />
+                </>
+            );
+        }
     }
 }, (prev, next) => {
     // Skip function props (onUpdate, onSystemMessage, onShowDetail) — they're inline and always new

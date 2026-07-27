@@ -568,12 +568,17 @@ function buildGeneratedFollowUpImageMessage(
     };
 }
 
-async function parseAndSaveResponse(
+// options.senderCharacterId/senderName：群聊消息的发言角色（单聊不传）。
+export async function parseAndSaveResponse(
     rawText: string,
     sessionId: string,
     currentCount: number,
     followUpIndex: number | undefined,
     contextMessages: ChatMessage[],
+    options?: {
+        senderCharacterId?: string;
+        senderName?: string;
+    },
 ): Promise<{ hasVisible: boolean; newCount: number; stateValues: StateValue[] }> {
     const responseBatchId = createResponseBatchId();
     void contextMessages;
@@ -581,7 +586,7 @@ async function parseAndSaveResponse(
     const sess = sessions.find(s => s.id === sessionId);
     const previousState = sess && !sess.isGroup ? getLatestCharacterStateValues(sess.contactId) : [];
 
-    const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(rawText, previousState);
+    const { parts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(rawText, previousState);
 
     // Detect call triggers and AI media actions, filter them out (not stored as messages)
     let triggerCall: "voice" | "video" | undefined;
@@ -661,6 +666,7 @@ async function parseAndSaveResponse(
                 innerMonologue,
                 reasoning,
                 stateValues: stateValues.length > 0 ? stateValues : undefined,
+                freshStateValues,
                 ...(followUpIndex ? { followUpIndex } : {}),
             });
         }
@@ -688,6 +694,9 @@ async function parseAndSaveResponse(
             innerMonologue: i === 0 && innerMonologue ? innerMonologue : undefined,
             reasoning: i === 0 && reasoning ? reasoning : undefined,
             stateValues: i === 0 && stateValues.length > 0 ? stateValues : undefined,
+            freshStateValues: i === 0 ? freshStateValues : undefined,
+            senderCharacterId: options?.senderCharacterId,
+            senderName: options?.senderName,
             ...(followUpIndex ? { followUpIndex } : {}),
         });
         if (isPendingChatGeneratedImageMessage(saved)) {
@@ -709,21 +718,24 @@ async function parseAndSaveResponse(
 
     // In-app notice for follow-up messages: rotate through multi-bubble replies.
     if (filteredParts.length > 0) {
+        const isGroup = sess?.isGroup === true;
+        const bodyPrefix = isGroup && options?.senderName ? `${options.senderName}: ` : "";
         filteredParts.forEach((part, index) => {
-            const body = (part.content || "").trim()
-                || (part.mediaType === "image" && part.mediaData?.label ? `发了一张照片: ${part.mediaData.label}` : "发来一条消息");
+            const body = bodyPrefix + ((part.content || "").trim()
+                || (part.mediaType === "image" && part.mediaData?.label ? `发了一张照片: ${part.mediaData.label}` : "发来一条消息"));
             window.setTimeout(() => {
                 dispatchChatMessageNotice({
                     sessionId,
                     senderName: charName,
                     body: body.slice(0, 80),
+                    ...(isGroup ? { isGroup: true } : {}),
                 });
             }, index * 1000);
         });
         import("./browser-notification").then(({ sendBrowserNotification }) => {
             const firstPart = filteredParts[0];
-            const body = firstPart.content.trim()
-                || (firstPart.mediaType === "image" && firstPart.mediaData?.label ? `发了一张照片: ${firstPart.mediaData.label}` : "发来一条消息");
+            const body = bodyPrefix + (firstPart.content.trim()
+                || (firstPart.mediaType === "image" && firstPart.mediaData?.label ? `发了一张照片: ${firstPart.mediaData.label}` : "发来一条消息"));
             sendBrowserNotification(charName, { body: body.slice(0, 50) });
         });
     }

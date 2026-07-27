@@ -232,7 +232,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         // Use shared parseAIResponse for full rich media support (stickers, quotes, etc.)
         const previousState = getLatestCharacterStateValues(session.contactId);
 
-        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
+        const { parts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
 
         // Filter out non-chat action types (voice_call, video_call, poke, etc.)
         const chatParts = parts.filter(p =>
@@ -253,6 +253,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                 reasoning,
                 responseBatchId, rawResponseText: aiResponseText,
                 stateValues: stateValues.length > 0 ? stateValues : undefined,
+                freshStateValues,
             });
             messagesRef.current = [...messagesRef.current, aiMsg];
             messageId = aiMsg.id;
@@ -271,6 +272,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                     innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
                     reasoning: idx === 0 && reasoning ? reasoning : undefined,
                     stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
+                    freshStateValues: idx === 0 ? freshStateValues : undefined,
                 })
             );
             messagesRef.current = [...messagesRef.current, ...newMsgs];

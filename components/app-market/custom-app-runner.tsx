@@ -315,6 +315,11 @@ html, body { min-height: 100%; }
       revoke: function(payload){ return request('media.revoke', payload || {}); },
       delete: function(payload){ return request('media.delete', payload || {}); }
     },
+    geo: {
+      get: function(payload){ return request('geo.get', payload || {}); },
+      watch: function(payload){ return request('geo.watch.start', payload || {}); },
+      clearWatch: function(){ return request('geo.watch.stop', {}); }
+    },
     tools: {
       handle: function(name, handler){
         var key = String(name || '').trim();
@@ -701,6 +706,7 @@ export function CustomAppRunner({
 }: CustomAppRunnerProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const subscribedEventsRef = useRef<Set<string>>(new Set());
+  const geoWatchIdRef = useRef<number | null>(null);
   const backgroundEventSentRef = useRef(false);
   const backgroundEventCompletedRef = useRef(false);
   const backgroundToolSentRef = useRef(false);
@@ -839,6 +845,14 @@ export function CustomAppRunner({
     }, "*");
   }, [backgroundEvent, frameId]);
 
+  // APP 关闭/卸载运行器时停掉定位监听，避免后台白耗电
+  useEffect(() => () => {
+    if (geoWatchIdRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(geoWatchIdRef.current);
+    }
+    geoWatchIdRef.current = null;
+  }, []);
+
   const postHostEvent = useCallback((eventName: string, payload: Record<string, unknown>) => {
     if (!subscribedEventsRef.current.has(eventName) && !subscribedEventsRef.current.has("*")) return;
     iframeRef.current?.contentWindow?.postMessage({
@@ -934,6 +948,7 @@ export function CustomAppRunner({
           notifications: ["create", "list", "markRead", "markAllRead", "getBadge", "setBadge", "incrementBadge", "clearBadge"],
           tasks: ["schedule", "list", "cancel"],
           wallet: ["get", "pay"],
+          geo: ["get", "watch", "clearWatch"],
         },
       };
     }
@@ -1390,6 +1405,56 @@ export function CustomAppRunner({
     if (action === "media.save") {
       requirePermission("media.save");
       return saveCustomAppMedia(record);
+    }
+
+    // 定位：沙盒 iframe 是不透明源拿不到 navigator.geolocation 权限，由宿主页面代理
+    if (action === "geo.get") {
+      requirePermission("geo.read");
+      return new Promise((resolve, reject) => {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+          reject(new Error("当前设备或环境不支持定位。"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: pos.timestamp,
+          }),
+          err => reject(new Error(err?.message ? `定位失败：${err.message}` : "定位失败或未授权。")),
+          {
+            enableHighAccuracy: record.highAccuracy !== false,
+            timeout: Math.min(30000, Math.max(1000, Number(record.timeoutMs) || 10000)),
+            maximumAge: Math.max(0, Number(record.maximumAgeMs) || 30000),
+          },
+        );
+      });
+    }
+    if (action === "geo.watch.start") {
+      requirePermission("geo.watch");
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        throw new Error("当前设备或环境不支持定位。");
+      }
+      if (geoWatchIdRef.current != null) navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      geoWatchIdRef.current = navigator.geolocation.watchPosition(
+        pos => postHostEvent("geo.position", {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          timestamp: pos.timestamp,
+        }),
+        err => postHostEvent("geo.error", { message: err?.message ?? "定位失败" }),
+        { enableHighAccuracy: record.highAccuracy !== false, maximumAge: Math.max(0, Number(record.maximumAgeMs) || 5000) },
+      );
+      return { ok: true };
+    }
+    if (action === "geo.watch.stop") {
+      if (geoWatchIdRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      }
+      geoWatchIdRef.current = null;
+      return true;
     }
 
     if (action === "characters.list") {

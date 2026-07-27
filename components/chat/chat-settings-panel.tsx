@@ -111,6 +111,7 @@ function getSearchResultRole(msg: ChatMessage): SearchResultRole {
 
 function isSearchHiddenMessage(msg: ChatMessage): boolean {
     return msg.role === "tool"
+        || msg.mediaType === "tool_call"
         || msg.mediaType === "tool_result"
         || msg.mediaType === "tool_notice"
         || msg.mediaType === "memory_write_request"

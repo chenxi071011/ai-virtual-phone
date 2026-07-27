@@ -1,10 +1,13 @@
 // lib/group-chat-engine.ts
 // Group chat engine: single API call for all characters.
 
-import { ChatSession, ChatMessage, loadChatAppSettings, createResponseRoundId, loadChatSessions, getLatestCharacterStateValues } from "./chat-storage";
+import { ChatSession, ChatMessage, loadChatAppSettings, createResponseBatchId, createResponseRoundId, createToolExecutionId, loadChatSessions, getLatestCharacterStateValues } from "./chat-storage";
+import { extractTextToolDirectiveText } from "./text-tool-protocol";
 import type { ApiConfig, PresetConfig, RegexConfig } from "./settings-types";
 import { loadCharacters } from "./character-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
+import { runChatPluginTransform } from "./chat-plugin-hooks";
+import { buildChatPluginPromptFragments } from "./chat-plugin-storage";
 import {
     sendLLMRequest,
     sendLLMToolRequest,
@@ -411,7 +414,13 @@ async function buildGroupChatPromptMessages(
         ? activeMemberSchedules.map(item => `${item.name}：${item.schedule}`).join("；")
         : "无";
     const musicOnlineHint = isNeteaseConfigured() ? "- 你可以推荐任何歌曲，系统会在线搜索并播放。不局限于用户本地音乐库。\n" : "\n";
-    const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt({ group: true }) + buildScreenEffectPromptHint();
+    const pluginPrompt = await runChatPluginTransform("prompt.system", {
+        sessionId: session.id,
+        isGroup: true,
+        hint: buildChatPluginPromptFragments(session.id),
+    });
+    const pluginPromptHint = pluginPrompt.hint?.trim() ? `\n\n### 扩展插件\n${pluginPrompt.hint.trim()}\n` : "";
+    const customAppRichMediaDirectives = formatCustomAppChatDirectivesForPrompt({ group: true }) + buildScreenEffectPromptHint() + pluginPromptHint;
     const toolsPrompt = usesNativeActions
         ? "需要动作时使用可用动作接口。"
         : formatToolsForPrompt(enabledTools);
@@ -699,12 +708,14 @@ async function runNativeGroupToolLoop(params: {
             openRouterReasoningDetails: result.openRouterReasoningDetails,
             toolCalls: result.toolCalls,
         });
+        const toolExecutionId = createToolExecutionId();
         for (const outcome of outcomes) {
             throwIfAborted(signal);
             callbacks?.onNativeToolResult?.({
                 toolCallId: outcome.nativeCall.id,
                 name: outcome.nativeCall.name,
                 content: outcome.formattedContent,
+                toolExecutionId,
             });
             requestMessages.push({
                 role: "tool",
@@ -717,7 +728,9 @@ async function runNativeGroupToolLoop(params: {
         const resultsForHistory = realResults.filter(result => result.persistToHistory !== false);
         const toolResultContent = resultsForHistory.length > 0 ? formatToolResults(resultsForHistory) : "";
         throwIfAborted(signal);
-        if (realResults.length > 0) callbacks?.onToolExecution?.(realResults, toolResultContent || undefined);
+        if (realResults.length > 0) {
+            callbacks?.onToolExecution?.(realResults, toolResultContent || undefined, { toolExecutionId });
+        }
 
         await appendNativeMediaContext(requestMessages, realResults, config.enableImageRecognition, signal);
 
@@ -814,12 +827,25 @@ export async function generateGroupChatCompletion(
             for (const r of intermediateResults) {
                 throwIfAborted(options?.signal);
                 if (r.responseText.trim()) {
+                    const responseBatchId = createResponseBatchId();
                     await callbacks.onTextPart(r.responseText, {
                         characterId: r.characterId,
                         characterName: r.characterName,
                         responseRoundId,
                         editableResponseText,
-                    }, { promptHidden: true });
+                    }, {
+                        responseBatchId,
+                        rawResponseText: r.responseText,
+                    });
+                    const directiveText = extractTextToolDirectiveText(r.responseText);
+                    if (directiveText) {
+                        callbacks.onToolAssistantTurn?.(directiveText, {
+                            responseBatchId,
+                            responseRoundId,
+                            senderCharacterId: r.characterId,
+                            senderName: r.characterName,
+                        });
+                    }
                 }
             }
         }
@@ -895,11 +921,12 @@ export async function generateGroupChatCompletion(
             const resultsForContinuation = results.filter(r => r.continueConversation !== false);
             const toolResultContent = resultsForHistory.length > 0 ? formatToolResults(resultsForHistory) : "";
             throwIfAborted(options?.signal);
-            callbacks?.onToolExecution?.(results, toolResultContent || undefined);
+            const toolExecutionId = createToolExecutionId();
+            callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });
 
             if (toolResultContent && resultsForContinuation.length > 0) {
                 throwIfAborted(options?.signal);
-                callbacks?.onToolResult?.(toolResultContent);
+                callbacks?.onToolResult?.(toolResultContent, { toolExecutionId });
                 const idx = findInsertIdx();
                 llmMessages.splice(idx, 0,
                     { role: "assistant", content: assistantForToolContext, _debugMeta: { _fromHistory: true } },
@@ -1052,8 +1079,9 @@ export async function previewGroupPromptPayload(
 export async function previewGroupPromptRequestSnapshot(
     session: ChatSession,
     history: ChatMessage[],
+    options?: GroupChatPromptBuildOptions,
 ): Promise<DebugPromptSnapshot> {
-    const { llmMessages, config, preset, memberNames, enabledTools, userName, appTags } = await buildGroupChatPromptMessages(session, history);
+    const { llmMessages, config, preset, memberNames, enabledTools, userName, appTags } = await buildGroupChatPromptMessages(session, history, options);
     const requestMessages = toLlmRequestMessages(llmMessages);
     const meta = { characterName: `群聊:${session.groupName || "群聊"}`, userName };
 

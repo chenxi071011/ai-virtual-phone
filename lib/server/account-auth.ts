@@ -116,6 +116,21 @@ export function readCookie(request: Request, name: string): string {
   return match ? decodeURIComponent(match.slice(prefix.length)) : "";
 }
 
+export async function updateUserPassword(userId: string, password: string): Promise<void> {
+  const result = await supabaseRestFetch<unknown[]>(
+    `app_users?id=eq.${encodeSupabaseFilter(userId)}&select=id`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        password_hash: hashPassword(password),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  );
+  if (!result.ok) throw new Error(result.error);
+}
+
 export async function findUserByUsername(username: string): Promise<AppUserRecord | null> {
   const result = await supabaseRestFetch<AppUserRecord[]>(
     `app_users?username=eq.${encodeSupabaseFilter(username)}&select=id,username,password_hash,display_name,status,created_at,updated_at&limit=1`,
@@ -291,7 +306,7 @@ const SELF_HOSTED_ACCOUNT: AppAccount = {
 };
 
 export async function getCurrentAccount(request: Request): Promise<AppAccount | null> {
-  if (isSelfHostedModeEnabled()) return SELF_HOSTED_ACCOUNT;
+  if (isSelfHostedModeEnabled()) return { ...SELF_HOSTED_ACCOUNT };
   const token = readCookie(request, ACCOUNT_SESSION_COOKIE);
   if (!token) return null;
   const tokenHash = hashSessionToken(token);

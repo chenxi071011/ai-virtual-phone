@@ -217,7 +217,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
             for (const r of results) {
                 if (stateRef.current === "ENDED") return;
 
-                const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(
+                const { parts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(
                     r.responseText,
                     getLatestCharacterStateValues(r.characterId),
                 );
@@ -234,6 +234,7 @@ export function GroupCallScreen({ type, session, characters, onEnd, initiator = 
                     innerMonologue: innerMonologue || undefined,
                     reasoning: reasoning || undefined,
                     stateValues: stateValues.length > 0 ? stateValues : undefined,
+                    freshStateValues,
                     senderCharacterId: r.characterId,
                     senderName: r.characterName,
                 });

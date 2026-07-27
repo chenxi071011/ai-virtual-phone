@@ -46,6 +46,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   "memory.suggest": "提交记忆建议",
   "media.pick": "选择本地图片或文件",
   "media.save": "保存文件到本地",
+  "geo.read": "获取你的当前位置",
+  "geo.watch": "在 APP 打开期间持续获取你的位置",
   "notifications.read": "读取本 APP 通知",
   "notifications.write": "写入通知和桌面红点",
   "tasks.schedule": "创建后台定时任务",

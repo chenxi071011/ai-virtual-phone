@@ -45,6 +45,8 @@ export type CustomAppPermission =
   | "memory.suggest"
   | "media.pick"
   | "media.save"
+  | "geo.read"
+  | "geo.watch"
   | "notifications.read"
   | "notifications.write"
   | "tasks.schedule"

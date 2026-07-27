@@ -1135,6 +1135,106 @@
   }
 }
 
+/* ── Native shell: always fullscreen, never emulate a phone frame ──
+   上面那套 @media 查询是给网页/PWA 用的，靠猜视口宽度和 hover/pointer
+   特性判断"这是不是手机小屏"。原生壳（Capacitor APK）只会装在手机上跑，
+   不该猜——猜错的机型就会一直卡在带模拟边框的桌面态布局里，即使
+   MainActivity 已经把系统状态栏/导航栏隐藏了，网页内容本身仍然没有
+   铺满。html.cap-native 由 app/layout.tsx 里的同步内联脚本打上
+   （读 window.Capacitor.isNativePlatform()），不依赖视口尺寸/输入设备
+   特性检测。规则内容需要和上面 @media 块保持同步。 */
+html.cap-native {
+  --phone-screen-width: 100vw;
+  --phone-screen-height: 100lvh;
+}
+
+html.cap-native,
+html.cap-native body {
+  overflow: hidden;
+  width: 100%;
+  height: 100lvh;
+  background: var(--c-page-body-bg);
+}
+
+html.cap-native .app-root {
+  width: 100vw;
+  height: 100lvh;
+  padding: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  overflow: hidden;
+  background: var(--c-page-body-bg);
+}
+
+html.cap-native .phone-shell-wrap {
+  --phone-case-padding: 0px;
+  --phone-case-border-size: 0px;
+  --phone-frame-size: 0px;
+  --phone-screen-radius: 0px;
+  --phone-frame-radius: 0px;
+  --phone-case-radius: 0px;
+  width: var(--phone-screen-width);
+  margin-inline: 0;
+  gap: 0;
+  transform-origin: top left;
+  margin-top: calc(-1 * var(--status-bar-drop, 0px));
+  transform: translate3d(0, calc(-1 * var(--mobile-keyboard-lift, 0px)), 0);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+html.cap-native .phone-shell-wrap .phone-case {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.cap-native .phone-shell-wrap .phone-case::before,
+html.cap-native .phone-shell-wrap .phone-case::after {
+  display: none;
+}
+
+html.cap-native .phone-shell-wrap .phone-frame {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.cap-native .phone-shell-wrap .phone-frame::before,
+html.cap-native .phone-shell-wrap .phone-frame::after {
+  display: none;
+}
+
+html.cap-native .app-root.splash-root {
+  width: 100vw;
+  height: 100lvh;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: hidden;
+  background: var(--c-page-body-bg);
+}
+
+html.cap-native .splash-shell-wrap {
+  width: var(--phone-screen-width);
+  transform-origin: top left;
+}
+
+html.cap-native .splash-shell-wrap .phone-case,
+html.cap-native .splash-shell-wrap .phone-frame {
+  width: var(--phone-screen-width);
+}
+
+/* 窄视口等比缩放规则同样不该在原生壳里靠 max-width 猜，改成无条件套用。 */
+html.cap-native .icon-grid,
+html.cap-native .dock {
+  --slot-size: clamp(56px, calc((100vw - 108px) / 4), 66px);
+}
+
 .settings-main-menu,
 .appearance-main-menu {
   padding-bottom: calc(var(--safe-area-bottom, 0px) + 28px);

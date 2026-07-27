@@ -332,7 +332,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
     const processAIResponse = useCallback((aiResponseText: string): { cleanParts: string[]; stateValues: StateValue[]; messageId?: string; responseBatchId: string } => {
         const previousState = getLatestCharacterStateValues(session.contactId);
 
-        const { parts, stateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
+        const { parts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(aiResponseText, previousState);
 
         // Filter out non-chat action types
         const chatParts = parts.filter(p =>
@@ -347,6 +347,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                 sessionId: session.id, role: "assistant", content: "",
                 statusPanel, responseBatchId, rawResponseText: aiResponseText,
                 innerMonologue, reasoning, stateValues: stateValues.length > 0 ? stateValues : undefined,
+                freshStateValues,
             });
             messagesRef.current = [...messagesRef.current, aiMsg];
             messageId = aiMsg.id;
@@ -364,6 +365,7 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
                     innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
                     reasoning: idx === 0 && reasoning ? reasoning : undefined,
                     stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
+                    freshStateValues: idx === 0 ? freshStateValues : undefined,
                 })
             );
             messagesRef.current = [...messagesRef.current, ...newMsgs];

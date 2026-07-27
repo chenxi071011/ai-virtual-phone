@@ -320,6 +320,7 @@ function serializeVoiceConfig(config: VoiceApiConfig): Record<string, unknown> {
     model: config.model,
     sttModel: config.sttModel,
     defaultVoice: config.defaultVoice,
+    languageBoost: config.languageBoost,
     enableTTS: config.enableTTS,
     enableSTT: config.enableSTT,
     customVoices: (config.customVoices ?? []).map(voice => ({
@@ -533,17 +534,36 @@ function normalizeCustomAppGenerateMessages(record: Record<string, unknown>, ses
       ? record.messages
       : null;
   if (!raw) return null;
+  // APP 可在消息上带 image（data:image dataURL）走视觉通道；限量限大小防上下文爆炸。
+  // 用户模型不支持/关闭图像识别时，下游 provider-adapter 会自动降级为 [图片] 文本。
+  let imageCount = 0;
+  const MAX_IMAGES_PER_CALL = 4;
+  const MAX_IMAGE_DATAURL_LENGTH = 2_000_000;
   return raw.map((item, index): ChatMessage | null => {
     const entry = asRecord(item);
     const nativeToolCalls = normalizeCustomAppNativeToolCalls(entry.nativeToolCalls ?? entry.toolCalls);
     const nativeToolResult = normalizeCustomAppNativeToolResult(entry.nativeToolResult ?? entry.toolResult);
     const content = cleanUnboundedText(entry.content ?? entry.text ?? entry.message);
     const rawResponseText = cleanUnboundedText(entry.rawResponseText ?? entry.rawContent);
-    if (!content && !rawResponseText && !nativeToolCalls?.length && !nativeToolResult) return null;
+    const rawImage = entry.image ?? entry.imageDataUrl;
+    let imageUrl: string | undefined;
+    if (
+      typeof rawImage === "string"
+      && /^data:image\//.test(rawImage)
+      && rawImage.length <= MAX_IMAGE_DATAURL_LENGTH
+      && imageCount < MAX_IMAGES_PER_CALL
+    ) {
+      imageUrl = rawImage;
+      imageCount++;
+    }
+    if (!content && !imageUrl && !rawResponseText && !nativeToolCalls?.length && !nativeToolResult) return null;
     const mediaType = cleanText(entry.mediaType ?? entry.type, 80) === "tool_result" || nativeToolResult
       ? "tool_result" as const
-      : undefined;
+      : imageUrl
+        ? "image" as const
+        : undefined;
     return {
+      mediaUrl: imageUrl,
       id: cleanText(entry.id, 160) || `custom-app-history-${Date.now()}-${index}`,
       sessionId: cleanText(entry.sessionId, 160) || sessionId,
       role: normalizeCustomAppGenerateRole(entry.role, Boolean(nativeToolResult)),
@@ -1851,18 +1871,23 @@ export async function generateCustomAppText(app: InstalledCustomApp, record: Rec
   }, {
     onTextPart: (text, _senderInfo, options) => {
       const content = cleanUnboundedText(text);
-      if (!content || options?.promptHidden) return;
-      pushContextMessage({ role: "assistant", content });
+      if (!content) return;
+      pushContextMessage({
+        role: "assistant",
+        content,
+        responseBatchId: options?.responseBatchId,
+        rawResponseText: options?.rawResponseText,
+      });
     },
-    onToolAssistantTurn: (content) => {
+    onToolAssistantTurn: (content, options) => {
       const text = cleanUnboundedText(content);
       if (!text) return;
-      pushContextMessage({ role: "assistant", content: text, mediaType: "tool_result" });
+      pushContextMessage({ role: "assistant", content: text, mediaType: "tool_call", responseBatchId: options?.responseBatchId });
     },
     onToolResult: (content) => {
       const text = cleanUnboundedText(content);
       if (!text) return;
-      pushContextMessage({ role: "user", content: text, mediaType: "tool_result" });
+      pushContextMessage({ role: "tool", content: text, mediaType: "tool_result" });
     },
     onNativeToolAssistantTurn: ({ content, rawContent, reasoning, openRouterReasoningDetails, toolCalls }) => {
       const visibleText = cleanUnboundedText(content);

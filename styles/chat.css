@@ -59,6 +59,31 @@
   z-index: 10;
 }
 
+/* 聊天插件 chat.header 坑位：头部与消息区都是 absolute 浮层，坑位必须自己定位，
+   贴在固定头部正下方。消息区 padding-top 额外加了插件条高度变量，避免遮住首条消息。 */
+.chat-app .chat-room-wrapper .chat-plugin-header {
+  position: absolute;
+  top: calc(var(--safe-area-top, 48px) + var(--page-header-content-height, 42px));
+  left: 0;
+  right: 0;
+  z-index: 9;
+  pointer-events: auto;
+}
+.chat-app .chat-room-wrapper .chat-plugin-header:empty {
+  display: none;
+}
+
+/* 插件自绘设置区（settings.section 坑位）在插件管理卡片内的内边距 */
+.chat-plugin-settings-section {
+  padding: 12px 16px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-plugin-settings-section:empty {
+  display: none;
+}
+
 .chat-app .chat-room-wrapper > .page-body {
   position: absolute;
   top: 0;
@@ -68,7 +93,7 @@
   flex: none;
   min-height: 0;
   overflow-y: auto;
-  padding-top: calc(var(--safe-area-top, 48px) + var(--page-header-content-height, 42px) + 36px);
+  padding-top: calc(var(--safe-area-top, 48px) + var(--page-header-content-height, 42px) + 36px + var(--chat-plugin-header-height, 0px));
   padding-left: 16px;
   padding-right: 16px;
   padding-bottom: 18px;
