@@ -48,7 +48,7 @@ import {
     type LlmToolCallDelta,
     type LlmToolDefinition,
 } from "./llm-provider-adapter";
-import { extractThinkingBlock } from "./thinking-parser";
+import { extractThinkingBlock, mergeReasoningIntoThinkingBlock } from "./thinking-parser";
 import { setDebugPromptSnapshot, type DebugPromptSnapshot } from "./debug-store";
 import { extractFinishReason } from "./api-helpers";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
@@ -927,12 +927,23 @@ export async function sendLLMRequest(
         // 小红书, … — used to render the chain-of-thought as if it were content, because
         // parseProviderResponse only strips timestamps, not reasoning markup.
         // Must run before the includeReasoning re-add below, or story mode would lose it.
-        if (!options?.keepReasoningMarkup) {
-            rawOutput = extractThinkingBlock(rawOutput).cleaned;
+        // Callers that consume it get the provider's native reasoning folded into the
+        // same block, so 原生思维链 and inline <thinking> reach the UI identically.
+        let strippedInlineReasoning = "";
+        if (options?.keepReasoningMarkup) {
+            rawOutput = mergeReasoningIntoThinkingBlock(rawOutput, parsed.reasoning || "");
+        } else {
+            const inline = extractThinkingBlock(rawOutput);
+            rawOutput = inline.cleaned;
+            strippedInlineReasoning = inline.content;
         }
 
-        if (parsed.reasoning) {
-            try { options?.onReasoning?.(parsed.reasoning); } catch { /* 捕获回调异常，不影响主流程 */ }
+        // 本轮完整思维链 = API 原生 + 正文内联，顺序与 mergeReasoningIntoThinkingBlock 一致。
+        // 群聊靠这个回调拿到思维链再挂到消息上——它的正文要先剥干净才能按角色切分，
+        // 没法像单聊那样把标签留在文本里。
+        const roundReasoning = [parsed.reasoning?.trim(), strippedInlineReasoning].filter(Boolean).join("\n\n");
+        if (roundReasoning) {
+            try { options?.onReasoning?.(roundReasoning); } catch { /* 捕获回调异常，不影响主流程 */ }
         }
 
         // Prepend reasoning content as <think> block (only when caller requests it, e.g. story mode)
@@ -1004,7 +1015,10 @@ export async function sendLLMRequest(
 
 export type LLMToolRequestResult = {
     content: string;
+    /** API 原生思维链。协议字段——原样回传给下一轮请求，别混入别的来源。 */
     reasoning?: string;
+    /** 从正文剥下来的 <thinking> 内容，纯展示用（keepReasoningMarkup 时为空，那时它还留在 content 里）。 */
+    inlineReasoning?: string;
     openRouterReasoningDetails?: unknown[];
     toolCalls: LlmToolCall[];
     rawResponse: string;
@@ -1246,10 +1260,15 @@ export async function sendLLMToolRequest(
         const data = await response.json();
         const parsed = parseProviderResponse(request.providerKind, data);
         let rawOutput = parsed.content || "";
-        // 同 sendLLMRequest：只有自己会提取思维链的调用方才保留内联 <thinking>。
-        // 群聊 / 共创保存的 reasoning 来自 API 原生字段，不受这里影响。
-        if (!options?.keepReasoningMarkup) {
-            rawOutput = extractThinkingBlock(rawOutput).cleaned;
+        // 同 sendLLMRequest：只有自己会提取思维链的调用方才保留内联 <thinking>，
+        // 并把 API 原生思维链并进同一个块。
+        let inlineReasoning = "";
+        if (options?.keepReasoningMarkup) {
+            rawOutput = mergeReasoningIntoThinkingBlock(rawOutput, parsed.reasoning || "");
+        } else {
+            const inline = extractThinkingBlock(rawOutput);
+            rawOutput = inline.cleaned;
+            inlineReasoning = inline.content;
         }
         if (options?.includeReasoning && parsed.reasoning) {
             rawOutput = `<think>\n${parsed.reasoning}\n</think>\n\n${rawOutput}`;
@@ -1305,7 +1324,11 @@ export async function sendLLMToolRequest(
 
         return {
             content: rawOutput,
+            // reasoning 是**协议字段**：原样回传给 API（Anthropic/OpenRouter 要求思维链
+            // 附在下一轮 assistant 消息上）。绝不要把内联 <thinking> 混进来，那会破坏回传。
+            // 供 UI 展示的内联部分单独走 inlineReasoning。
             reasoning: parsed.reasoning,
+            inlineReasoning,
             openRouterReasoningDetails: parsed.openRouterReasoningDetails,
             toolCalls: parsed.toolCalls,
             rawResponse,

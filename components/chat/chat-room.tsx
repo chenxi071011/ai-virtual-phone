@@ -2259,7 +2259,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
 
     // Helper: process group chat AI response parts with media filtering
     const processGroupParts = async (
-        results: { characterId: string; characterName: string; responseText: string }[],
+        results: { characterId: string; characterName: string; responseText: string; reasoning?: string }[],
         msgsSetter: typeof setMessages,
         guard?: GenerationRunGuard,
     ) => {
@@ -2282,7 +2282,10 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             if (!(session.participantIds || []).includes(r.characterId)) continue;
             if (isGroupMuted(session, r.characterId)) continue;
             const responseBatchId = createResponseBatchId();
-            const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
+            const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, reasoning: inlineReasoning } = parseAIResponse(r.responseText, getCurrentStateForCharacter(r.characterId));
+            // 群聊的思维链由 engine 剥离后随结果带回（挂在首个发言者身上）；正文里
+            // 万一还残留 <thinking>，按条提取的结果优先。
+            const reasoning = inlineReasoning || r.reasoning || "";
             const parts = stripInvalidStickerParts(rawParts, r.characterId);
             let attachedState = false;
             let savedAnyPart = false;

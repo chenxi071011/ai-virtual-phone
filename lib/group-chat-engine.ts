@@ -548,6 +548,8 @@ async function runNativeGroupToolLoop(params: {
     appTags: string[];
     signal?: AbortSignal;
     callbacks?: ChatCompletionCallbacks;
+    /** 每轮的思维链（API 原生 + 正文内联），由调用方汇总后挂到消息上 */
+    onRoundReasoning?: (text: string) => void;
 }): Promise<string> {
     const { session, llmMessages, config, preset, regexes, nameToId, memberNames, enabledTools, appTags, signal, callbacks } = params;
     const MAX_TOOL_ROUNDS = 5;
@@ -585,6 +587,11 @@ async function runNativeGroupToolLoop(params: {
             throw err;
         }
         throwIfAborted(signal);
+
+        {
+            const round = [result.reasoning?.trim(), result.inlineReasoning].filter(Boolean).join("\n\n");
+            if (round) params.onRoundReasoning?.(round);
+        }
 
         const assistantForToolContext = stripStateAndInnerForPrompt(result.content);
         if (result.toolCalls.length === 0) {
@@ -751,7 +758,7 @@ export async function generateGroupChatCompletion(
     history: ChatMessage[],
     callbacks?: ChatCompletionCallbacks,
     options?: GroupChatPromptBuildOptions & { signal?: AbortSignal; skipMemorySummarization?: boolean },
-): Promise<{ characterId: string; characterName: string; responseText: string }[]> {
+): Promise<{ characterId: string; characterName: string; responseText: string; reasoning?: string }[]> {
     const { llmMessages, config, preset, regexes, nameToId, memberNames, enabledTools, userName, appTags } = await buildGroupChatPromptMessages(session, history, {
         appTags: options?.appTags,
         disableTools: options?.disableTools,
@@ -765,8 +772,14 @@ export async function generateGroupChatCompletion(
     const meta = { characterName: `群聊:${session.groupName || "群聊"}` };
     let finalRawOutput = "";
 
+    // 群聊的正文必须先剥掉 <thinking> 才能按角色切分，所以思维链走回调收集，
+    // 最后挂到本轮第一条消息上（单聊是把标签留在文本里按条提取，两边最终都到 msg.reasoning）。
+    const reasoningRounds: string[] = [];
+    const collectReasoning = (text: string) => { if (text.trim()) reasoningRounds.push(text.trim()); };
+
     if (nativeToolProtocolForConfig(config) && enabledTools.length > 0) {
         finalRawOutput = await runNativeGroupToolLoop({
+            onRoundReasoning: collectReasoning,
             session,
             llmMessages,
             config,
@@ -797,6 +810,7 @@ export async function generateGroupChatCompletion(
                 appTags,
                 debugSessionId: session.id,
                 signal: options?.signal,
+                onReasoning: collectReasoning,
             });
         } catch (err) {
             if (finalRawOutput) {
@@ -945,6 +959,7 @@ export async function generateGroupChatCompletion(
                         appTags,
                         debugSessionId: session.id,
                         signal: options?.signal,
+                        onReasoning: collectReasoning,
                     });
                     throwIfAborted(options?.signal);
                 } catch {
@@ -960,7 +975,7 @@ export async function generateGroupChatCompletion(
     throwIfAborted(options?.signal);
     const parsed = parseGroupChatResponse(finalRawOutput, nameToId);
 
-    const finalResults: typeof parsed = [];
+    const finalResults: (typeof parsed[number] & { reasoning?: string })[] = [];
     for (const r of parsed) {
         const { cleanText, actions } = parseActionTags(r.responseText);
         if (actions.length > 0) {
@@ -975,6 +990,11 @@ export async function generateGroupChatCompletion(
         if (cleanText.trim()) {
             finalResults.push({ ...r, responseText: cleanText });
         }
+    }
+
+    // 一轮 LLM 调用只产出一份思维链，挂到最先发言的那条上（多工具轮次按顺序合并）。
+    if (finalResults.length > 0 && reasoningRounds.length > 0) {
+        finalResults[0].reasoning = reasoningRounds.join("\n\n");
     }
 
     if (!options?.skipMemorySummarization) {

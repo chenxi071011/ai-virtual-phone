@@ -41,3 +41,23 @@ export function extractThinkingBlock(text: string): ExtractedThinking {
         cleaned: (text.slice(0, open.index) + text.slice(resumeAt)).trim(),
     };
 }
+
+/**
+ * Fold the provider's native chain-of-thought (reasoning_content / thinking /
+ * thought — deepseek-reasoner, Gemini, Claude, OpenRouter) into the same
+ * <thinking> block the reply already carries inline, so every consumer sees one
+ * source of truth regardless of where the model chose to put its reasoning.
+ *
+ * Prepending a separate <think> block would corrupt the reply: extractThinkingBlock
+ * spans the FIRST opening tag to the LAST closing one, so any body text sitting
+ * between the two blocks would be swallowed into the chain-of-thought. Rebuilding
+ * a single block keeps that span unambiguous.
+ */
+export function mergeReasoningIntoThinkingBlock(text: string, nativeReasoning: string): string {
+    const native = nativeReasoning.trim();
+    if (!native) return text;
+
+    const inline = extractThinkingBlock(text);
+    const merged = [native, inline.content].filter(Boolean).join("\n\n");
+    return `<thinking>\n${merged}\n</thinking>\n\n${inline.cleaned}`;
+}
