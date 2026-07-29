@@ -640,6 +640,21 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     const status = extractBracketBlock(actionCleaned, "状态栏");
     const mono = extractBracketBlock(status.cleaned, "内心");
 
+    // 2.05. 心声回捞：思维链是在最前面按「首个 <thinking> → 最后一个 </thinking>」
+    //   整段切走的，所以模型只要把 [内心] 写进思维链里（推理模型常按格式先起草一遍）、
+    //   或输出多段 thinking 把心声夹在中间、或标签没闭合，心声就会连同思维链一起被吞掉，
+    //   内心卡片彻底不出现。正文没抽到心声时，回思维链里再捞一次，并把捞到的部分从
+    //   思维链正文里去掉，避免同一段内容在两处重复显示。
+    let monoContent = mono.content;
+    let reasoning = think.content;
+    if (!monoContent.trim() && reasoning) {
+        const recovered = extractBracketBlock(reasoning, "内心");
+        if (recovered.content) {
+            monoContent = recovered.content;
+            reasoning = recovered.cleaned;
+        }
+    }
+
     // 2.1. Collapse residual blank lines left by tag extraction
     const postCleaned = mono.cleaned.replace(/\n{3,}/g, "\n\n").trim();
 
@@ -677,7 +692,7 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         stateValues,
         freshStateValues: parsedSV.stateValues,
         statusPanel: restore(status.content),
-        innerMonologue: restore(mono.content),
-        reasoning: think.content,
+        innerMonologue: restore(monoContent),
+        reasoning,
     };
 }
