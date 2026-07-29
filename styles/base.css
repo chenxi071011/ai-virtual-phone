@@ -51,7 +51,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100dvh;
+  height: var(--vh-dyn);
   font-size: calc(13.5px*var(--app-text-scale,1));
   color: #9a8a7a;
 }

@@ -543,7 +543,7 @@ export function VnAssetPage({ onNotice }: VnAssetPageProps) {
         .vna-layout-dialog {
           width: min(calc(var(--vna-layout-preview-width, 260px) + 24px), calc(100vw - 48px));
           max-width: calc(100vw - 48px);
-          max-height: calc(100dvh - 72px);
+          max-height: calc(var(--vh-dyn) - 72px);
           padding: 12px;
           gap: 10px;
         }

@@ -1491,7 +1491,7 @@ function CharListView({
             <div className="modal-header" data-ui="modal-header" style={{ padding: '20px 20px 10px' }}>
               <h3 className="modal-title" style={{ margin: 0, fontSize: '16px' }}>转移到其他卷宗</h3>
             </div>
-            <div role="listbox" style={{ maxHeight: '40dvh', padding: '10px 16px', overflowY: 'auto' }}>
+            <div role="listbox" style={{ maxHeight: 'calc(0.40 * var(--vh-dyn))', padding: '10px 16px', overflowY: 'auto' }}>
               {worldGroups.filter(g => g.id !== currentWorldId).map(group => (
                 <button
                   key={group.id}

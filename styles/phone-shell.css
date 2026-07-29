@@ -1045,20 +1045,20 @@
 
   :root {
     --phone-screen-width: 100vw;
-    --phone-screen-height: 100lvh;
+    --phone-screen-height: var(--vh-full);
   }
 
   html,
   body {
     overflow: hidden;
     width: 100%;
-    height: 100lvh;
+    height: var(--vh-full);
     background: var(--c-page-body-bg);
   }
 
   .app-root {
     width: 100vw;
-    height: 100lvh;
+    height: var(--vh-full);
     padding: 0;
     display: flex;
     justify-content: flex-start;
@@ -1114,7 +1114,7 @@
 
   .app-root.splash-root {
     width: 100vw;
-    height: 100lvh;
+    height: var(--vh-full);
     margin: 0;
     padding: 0;
     display: flex;
@@ -1145,20 +1145,20 @@
    特性检测。规则内容需要和上面 @media 块保持同步。 */
 html.cap-native {
   --phone-screen-width: 100vw;
-  --phone-screen-height: 100lvh;
+  --phone-screen-height: var(--vh-full);
 }
 
 html.cap-native,
 html.cap-native body {
   overflow: hidden;
   width: 100%;
-  height: 100lvh;
+  height: var(--vh-full);
   background: var(--c-page-body-bg);
 }
 
 html.cap-native .app-root {
   width: 100vw;
-  height: 100lvh;
+  height: var(--vh-full);
   padding: 0;
   display: flex;
   justify-content: flex-start;
@@ -1209,7 +1209,7 @@ html.cap-native .phone-shell-wrap .phone-frame::after {
 
 html.cap-native .app-root.splash-root {
   width: 100vw;
-  height: 100lvh;
+  height: var(--vh-full);
   margin: 0;
   padding: 0;
   display: flex;

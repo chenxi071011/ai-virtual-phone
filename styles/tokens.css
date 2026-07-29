@@ -178,6 +178,19 @@
   --c-home-pink: rgba(255, 160, 175, 0.5);
   /* 组件装饰粉（心形/引号/符号） */
 
+  /* ═══ 视口高度 ═══
+     lvh/dvh/svh 是 Chrome 108（2022-11）才有的单位。旧 WebView（国内 ROM 不走
+     Play 商店，系统 WebView 常年不更新）上它们是无效值，`height: 100lvh` 会让
+     height 塌成 auto —— 手机壳整个缩成顶部一条，表现为满屏白、只露出一点开机
+     动画且哪里都点不动。
+     兜底不能写成「height:100vh; height:100lvh」两条声明：CSS 压缩器会把前一条
+     当冗余删掉，兜底在生产包里根本不存在。所以统一走自定义属性 + @supports，
+     自定义属性的值压缩器不会动。用到整屏高度的地方一律用这两个变量。 */
+  --vh-full: 100vh;
+  /* 大视口高度（不随地址栏/键盘缩），对应 lvh */
+  --vh-dyn: 100vh;
+  /* 动态视口高度（随地址栏/键盘缩），对应 dvh */
+
   /* ═══ Phone Shell ═══ */
   --phone-screen-width: 390px;
   --phone-screen-height: 844px;
@@ -237,6 +250,19 @@
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-elastic: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-breathe: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* 支持新视口单位时才升级，旧 WebView 保持上面的 100vh */
+@supports (height: 100lvh) {
+  :root {
+    --vh-full: 100lvh;
+  }
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --vh-dyn: 100dvh;
+  }
 }
 
 /* ═══════════════════════════════════════════

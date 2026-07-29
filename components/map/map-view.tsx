@@ -2654,7 +2654,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
             <div
               style={{
                 width: "min(680px, 100%)",
-                height: "min(760px, 88dvh)",
+                height: "min(760px, calc(0.88 * var(--vh-dyn)))",
                 borderRadius: "var(--c-adv-debug-radius)",
                 border: "1px solid var(--c-adv-input-border)",
                 background: "var(--c-adv-debug-panel-bg)",

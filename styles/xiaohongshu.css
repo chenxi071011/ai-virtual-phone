@@ -1013,7 +1013,7 @@
 .xhs-detail-sheet,
 .xhs-form-sheet {
   width: min(360px, 100%);
-  max-height: min(88dvh, 760px);
+  max-height: min(calc(0.88 * var(--vh-dyn)), 760px);
   overflow: auto;
   background: #ffffff;
   color: #17181c;
@@ -1793,7 +1793,7 @@ button.xhs-secondary-btn:hover {
 /* Publish Modal — editorial refinement */
 .xhs-publish-sheet {
   width: min(720px, 95vw);
-  max-height: min(80dvh, 640px);
+  max-height: min(calc(0.80 * var(--vh-dyn)), 640px);
   background: #ffffff;
   border-radius: 14px;
   box-shadow: 0 24px 56px rgba(20, 24, 32, 0.18);
@@ -2213,7 +2213,7 @@ button.xhs-secondary-btn:hover {
    ============================================================ */
 .xhs-profile-edit-sheet {
   width: min(348px, 100%);
-  max-height: min(88dvh, 740px);
+  max-height: min(calc(0.88 * var(--vh-dyn)), 740px);
   display: flex;
   flex-direction: column;
   background: #ffffff;

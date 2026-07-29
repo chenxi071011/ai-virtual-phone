@@ -689,7 +689,7 @@
 
 .char-timezone-sheet {
   width: min(420px, 100%);
-  max-height: min(540px, calc(100dvh - max(28px, env(safe-area-inset-top))));
+  max-height: min(540px, calc(var(--vh-dyn) - max(28px, env(safe-area-inset-top))));
   display: flex;
   flex-direction: column;
   border: 1px solid var(--c-panel-border);

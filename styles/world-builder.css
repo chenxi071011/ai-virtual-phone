@@ -84,9 +84,9 @@
   isolation: isolate;
   width: 100vw;
   height: 100vh;
-  height: 100dvh;
+  height: var(--vh-dyn);
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: var(--vh-dyn);
   display: flex;
   align-items: center;
   justify-content: center;

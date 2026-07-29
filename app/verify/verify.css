@@ -3,7 +3,7 @@
   /* 自己当滚动容器：固定视口高 + 内部滚动，不依赖外层 html/body 的滚动设置 */
   position: fixed;
   inset: 0;
-  height: 100dvh;
+  height: var(--vh-dyn);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;

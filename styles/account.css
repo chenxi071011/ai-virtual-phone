@@ -1,6 +1,6 @@
 .account-gate-root {
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: var(--vh-dyn);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -145,9 +145,9 @@ main.app-root.account-gate-root {
   main.app-root.account-gate-root {
     width: 100vw;
     height: 100vh;
-    height: 100lvh;
+    height: var(--vh-full);
     min-height: 100vh;
-    min-height: 100lvh;
+    min-height: var(--vh-full);
     display: flex;
     align-items: center;
     justify-content: center;

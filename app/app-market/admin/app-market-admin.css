@@ -1,5 +1,5 @@
 .ama-root {
-  min-height: 100dvh;
+  min-height: var(--vh-dyn);
   background: #eef2f7;
   color: #17212b;
   font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;

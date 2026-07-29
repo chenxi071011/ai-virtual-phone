@@ -5074,7 +5074,7 @@
   left: 0;
   right: 0;
   bottom: calc(max(30px, env(safe-area-inset-bottom, 0px)) + 172px);
-  max-height: min(38dvh, 300px);
+  max-height: min(calc(0.38 * var(--vh-dyn)), 300px);
   z-index: 10;
   padding: 22px 20px 12px;
   display: flex;
