@@ -120,6 +120,7 @@ import { parseAIResponse } from "@/lib/rich-message-parser";
 import { requestBackgroundChatReply, scheduleFollowUp } from "@/lib/follow-up-service";
 import { CHAT_MESSAGE_NOTICE_EVENT, CHAT_OPEN_SESSION_EVENT, type ChatMessageNoticeDetail } from "@/lib/chat-notification-events";
 import { setMascotContext } from "@/lib/mascot-context";
+import { DESKTOP_WIDGETS_CHANGED_EVENT } from "@/lib/mascot-events";
 import { useWeixinBridge } from "@/lib/use-weixin-bridge";
 import { startWeixinCloudRealtimeSync } from "@/lib/weixin-cloud-sync";
 import { sendBrowserNotification } from "@/lib/browser-notification";
@@ -670,12 +671,14 @@ function pointerToGridCell(
   const colWidth = colWidths[0] || 66;
   const colGap = parseFloat(computed.columnGap) || 20;
   const rowGap = parseFloat(computed.rowGap) || 0;
+  /* rect 高度是 border-box（含 padding），网格行轨道只占内容盒。 */
+  const padY = (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
   const contentWidth = colWidths.length * colWidth + (colWidths.length - 1) * colGap;
   const originX = rect.left + (rect.width - contentWidth) / 2;
-  const originY = rect.top;
+  const originY = rect.top + (parseFloat(computed.paddingTop) || 0);
   const colStep = colWidth + colGap;
   const totalRowGap = (GRID_ROWS - 1) * rowGap;
-  const rowHeight = (rect.height - totalRowGap) / GRID_ROWS;
+  const rowHeight = (rect.height - padY - totalRowGap) / GRID_ROWS;
   const rowStep = rowHeight + rowGap;
   const col = Math.floor((px - originX) / colStep);
   const row = Math.floor((py - originY) / rowStep);
@@ -2243,7 +2246,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         const colW = parseFloat(cs.gridTemplateColumns.split(/\s+/)[0] || "66");
         const colGap = parseFloat(cs.columnGap) || 20;
         const rowGap = parseFloat(cs.rowGap) || 0;
-        const rowH = (gridEl.getBoundingClientRect().height - (GRID_ROWS - 1) * rowGap) / GRID_ROWS;
+        /* rect 高度是 border-box（含 padding），网格行轨道只占内容盒。 */
+        const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+        const rowH = (gridEl.getBoundingClientRect().height - padY - (GRID_ROWS - 1) * rowGap) / GRID_ROWS;
         grabCellCol = Math.floor((clientX - rect.left) / (colW + colGap));
         grabCellRow = Math.floor((clientY - rect.top) / (rowH + rowGap));
       }
@@ -2826,6 +2831,44 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     });
   }
 
+  // 小卷（内置助手）写入组件/DIY 模板后通知桌面重新水合，实现实时热更新。
+  // 拖拽进行中不能换底层数组（会打断 FLIP 和落点计算），先挂起，退出编辑模式后补一次。
+  const mascotWidgetsDirtyRef = useRef(false);
+  useEffect(() => {
+    const reload = () => {
+      if (editDragRef.current?.active || editDragRef.current?.pending) {
+        mascotWidgetsDirtyRef.current = true;
+        return;
+      }
+      setWidgets(loadWidgets());
+    };
+    window.addEventListener(DESKTOP_WIDGETS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(DESKTOP_WIDGETS_CHANGED_EVENT, reload);
+  }, []);
+  useEffect(() => {
+    if (!editMode && mascotWidgetsDirtyRef.current) {
+      mascotWidgetsDirtyRef.current = false;
+      setWidgets(loadWidgets());
+    }
+  }, [editMode]);
+
+  // DIY code 组件的长按发生在沙箱 iframe 里，宿主收不到指针事件；
+  // 桥接脚本检测到长按后 postMessage，这里代为进入编辑态。
+  // 进入编辑态后 iframe 会放弃指针事件（CSS），后续拖拽走宿主正常链路。
+  useEffect(() => {
+    function handleDiyLongPress(event: MessageEvent) {
+      const data = event.data as { source?: unknown; type?: unknown; widgetId?: unknown } | null;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== "ai-phone-diy-widget" || data.type !== "longPress") return;
+      if (typeof data.widgetId !== "string") return;
+      if (!widgetsRef.current.some((w) => w.id === data.widgetId)) return;
+      setEditMode(true);
+      try { navigator.vibrate?.(30); } catch { /* ignore */ }
+    }
+    window.addEventListener("message", handleDiyLongPress);
+    return () => window.removeEventListener("message", handleDiyLongPress);
+  }, []);
+
   // Build a map of icon skins (icon ID -> data URL) for the theme app preview
   const iconSkinUrls = useMemo(() => {
     const map: Record<string, string | null> = {};
@@ -2876,7 +2919,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
       const computed = window.getComputedStyle(gridEl);
       const rowGap = Number.parseFloat(computed.rowGap || "0");
-      const gridHeight = gridEl.getBoundingClientRect().height;
+      /* rect 高度是 border-box（含 padding），网格行轨道只占内容盒；
+         padding-bottom（--home-grid-bottom-trim）不减掉会让 --slot-row-step
+         虚高 padding/6，跨行组件随之比图标行低。 */
+      const padY =
+        (Number.parseFloat(computed.paddingTop || "0") || 0) +
+        (Number.parseFloat(computed.paddingBottom || "0") || 0);
+      const gridHeight = gridEl.getBoundingClientRect().height - padY;
       const rowHeight = (gridHeight - (GRID_ROWS - 1) * rowGap) / GRID_ROWS;
       const nextRowStep = rowHeight + rowGap;
       if (nextRowStep <= 0) {

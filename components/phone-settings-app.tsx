@@ -258,7 +258,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
             case "binding":
                 return <BindingManager />;
             case "weixin":
-                return <WeixinSettings />;
+                return <WeixinSettings onOpenDataManagement={() => setCurrentPage("data")} />;
             case "toolbox":
                 return <ToolboxSettings />;
             case "moderation":

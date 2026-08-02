@@ -336,14 +336,16 @@
   padding: 0 0 var(--home-grid-bottom-trim);
 }
 
+/* 三种网格模式统一使用 --home-grid-bottom-trim：此前这里硬编码 1px，
+   把变量在首页/组件页架空，导致底部留白只对纯图标翻页生效。 */
 .icon-grid-page1 {
-  padding-bottom: 1px;
+  padding-bottom: var(--home-grid-bottom-trim);
 }
 
 
 /* Explicit grid mode (used when widgets present) */
 .icon-grid-explicit {
-  padding-bottom: 1px;
+  padding-bottom: var(--home-grid-bottom-trim);
 }
 
 .icon-grid .widget-glass {
@@ -463,18 +465,19 @@
 }
 
 /* Base Effects overrides for icon-glyph-box */
+/* 立体打光整体减淡：斜光层次保留，各层高光强度降约四成，凸面感变弱 */
 .phone-shell[data-icon-effect="glass"] .icon-glyph-box {
   background:
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.26),
+      rgba(255, 255, 255, 0.17),
       color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 6%, transparent),
-      rgba(255, 255, 255, 0.1)),
+      rgba(255, 255, 255, 0.07)),
     color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 38%, transparent);
   backdrop-filter: blur(22px) saturate(140%);
   -webkit-backdrop-filter: blur(22px) saturate(140%);
   box-shadow:
-    inset 0 1px 2px rgba(255, 255, 255, 0.4),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 2px rgba(255, 255, 255, 0.28),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05),
     0 8px 32px rgb(0 0 0 / calc(0.15 * var(--desktop-shadow-strength, 0))),
     0 0 18px color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 8%, transparent);
   isolation: isolate;
@@ -491,8 +494,8 @@
   z-index: 1;
   background:
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.35) 0%,
-      rgba(255, 255, 255, 0.1) 42%,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.06) 42%,
       transparent 72%);
   mix-blend-mode: screen;
 }
@@ -507,10 +510,10 @@
   z-index: 3;
   background:
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.7),
-      rgba(255, 255, 255, 0.15) 40%,
+      rgba(255, 255, 255, 0.48),
+      rgba(255, 255, 255, 0.14) 40%,
       rgba(255, 255, 255, 0.12) 62%,
-      rgba(255, 255, 255, 0.2));
+      rgba(255, 255, 255, 0.18));
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -579,6 +582,7 @@
 
 .icon-label {
   font-size: calc(9.9px*var(--app-text-scale,1));
+  font-weight: 500;
   text-align: center;
   color: var(--c-home-label);
   text-shadow: none;
@@ -611,6 +615,11 @@
 .edit-mode .widget-drag-wrap.dragging .widget-glass {
   opacity: 0.25;
   animation: none;
+}
+/* 编辑态下 DIY code 组件的 iframe 放弃指针事件：否则按在 iframe 上的
+   pointerdown 进不了宿主的拖拽处理，组件拖不动 */
+.edit-mode .widget-glass iframe {
+  pointer-events: none;
 }
 /* Dock icons jiggle & drag just like grid icons in edit mode. */
 .dock.edit-mode .dock-item {
@@ -827,19 +836,20 @@
   -webkit-backdrop-filter: blur(calc(var(--ui-blur-heavy) + 0.01px)) saturate(var(--ui-saturate));
 }
 
+/* 立体打光整体减淡：与图标同步降约四成 */
 .phone-shell[data-icon-effect="glass"] .dock:not([data-skinned]) {
   background:
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.22),
+      rgba(255, 255, 255, 0.14),
       color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 5%, transparent),
-      rgba(255, 255, 255, 0.08)),
+      rgba(255, 255, 255, 0.05)),
     color-mix(in srgb, var(--c-home-glass, rgba(255, 255, 255, 0.3)) 55%, transparent);
   border: none;
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   box-shadow:
-    inset 0 1px 2px rgba(255, 255, 255, 0.38),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 2px rgba(255, 255, 255, 0.26),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.04),
     0 8px 32px rgb(0 0 0 / calc(0.14 * var(--desktop-shadow-strength, 0))),
     0 0 22px color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 8%, transparent);
   isolation: isolate;
@@ -854,11 +864,11 @@
   background:
     linear-gradient(90deg,
       transparent 8%,
-      rgba(255, 255, 255, 0.5) 50%,
+      rgba(255, 255, 255, 0.32) 50%,
       transparent 92%) top 0 left 8% / 84% 2px no-repeat,
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.25) 0%,
-      rgba(255, 255, 255, 0.08) 42%,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.05) 42%,
       transparent 74%);
   mix-blend-mode: screen;
 }
@@ -873,10 +883,10 @@
   z-index: 1;
   background:
     linear-gradient(135deg,
-      rgba(255, 255, 255, 0.65),
-      rgba(255, 255, 255, 0.12) 40%,
+      rgba(255, 255, 255, 0.45),
+      rgba(255, 255, 255, 0.11) 40%,
       rgba(255, 255, 255, 0.10) 62%,
-      rgba(255, 255, 255, 0.18));
+      rgba(255, 255, 255, 0.16));
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);

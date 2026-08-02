@@ -5246,6 +5246,10 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                             {showTime && <div className="chat-offline-time">{formatChatUiTime(turn.createdAt)}</div>}
                             <div className="chat-offline-turn">
                                 <div className="chat-offline-entry" data-role="user" style={offlineDisplay.userContent.trim() ? undefined : { display: "none" }}>
+                                    {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
+                                    <div className="chat-offline-avatar" aria-hidden="true">
+                                        {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
+                                    </div>
                                     <div className="chat-offline-label">你</div>
                                     <div
                                         className="chat-offline-text"
@@ -5272,6 +5276,10 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                     </div>
                                 </div>
                                 <div className="chat-offline-entry" data-role="assistant">
+                                    {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
+                                    <div className="chat-offline-avatar" aria-hidden="true">
+                                        {character?.avatar ? <img src={character.avatar} alt="" /> : <ChatFallbackAvatar />}
+                                    </div>
                                     <div className="chat-offline-label-row">
                                         <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (character?.name || "对方")}</div>
                                         {assistantHasHtmlPreview ? (
@@ -5353,6 +5361,10 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                         {(pendingOfflineUserText || isOfflineGenerating) && (
                             <div className="chat-offline-turn">
                                 <div className="chat-offline-entry" data-role="user" style={pendingOfflineUserText ? undefined : { display: "none" }}>
+                                    {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
+                                    <div className="chat-offline-avatar" aria-hidden="true">
+                                        {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
+                                    </div>
                                     <div className="chat-offline-label">你</div>
                                     <div className="chat-offline-text">
                                         <BilingualTextBlock

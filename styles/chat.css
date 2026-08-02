@@ -7023,3 +7023,32 @@
 @keyframes diceAsideReveal {
   to { opacity: 1; }
 }
+
+/* ── 台词 <q> 标签 ──
+   消息渲染时会自动把引号内对话包进 <q>（见 message-bubble.tsx 的 wrapQuotedDialogue）。
+   这里关掉浏览器默认附加的引号，保证默认无视觉变化；
+   用户可在自定义 CSS 里用 q { ... } 单独给台词上样式。 */
+.chat-markdown q,
+.chat-offline-text q {
+  quotes: none;
+  font-style: inherit;
+}
+.chat-markdown q::before,
+.chat-markdown q::after,
+.chat-offline-text q::before,
+.chat-offline-text q::after {
+  content: none;
+}
+
+/* ── 线下模式头像占位 ──
+   每条 .chat-offline-entry 的第一个子元素，默认隐藏、零布局占用。
+   自定义 CSS 里写 .chat-offline-avatar { display: block; ... } 即可显示。 */
+.chat-offline-avatar {
+  display: none;
+}
+.chat-offline-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}

@@ -35,13 +35,19 @@ export async function putObject(config: CloudBackupConfig, path: string, body: B
   if (!res.ok) throw new Error(await describeError(res));
 }
 
-/** Download an object's bytes. Returns null on 404. */
+/** Download an object's bytes. Returns null if the object doesn't exist.
+ *  Supabase Storage 对不存在的对象返回 400 "Object not found" 而不是 404，
+ *  与 removeObject 相同，两种都视为不存在。 */
 export async function getObject(config: CloudBackupConfig, path: string): Promise<Blob | null> {
   const creds = resolveCreds(config);
   if (!creds) throw new Error("未配置 Supabase 地址或 key。");
   const res = await fetch(objectUrl(creds, path), { headers: authHeaders(creds.key), cache: "no-store" });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await describeError(res));
+  if (!res.ok) {
+    const error = await describeError(res);
+    if (res.status === 400 && /object not found|not found/i.test(error)) return null;
+    throw new Error(error);
+  }
   return await res.blob();
 }
 

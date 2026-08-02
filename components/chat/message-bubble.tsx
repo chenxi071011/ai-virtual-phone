@@ -413,6 +413,26 @@ function stripPaySchemeUrls(text: string): string {
         .replace(/[ \t]{2,}/g, " ");
 }
 
+/**
+ * 台词包裹：渲染前把引号内的对话包进 <q> 标签，
+ * 让自定义 CSS 可以用 `q { ... }` 单独给台词上样式。
+ * - 只处理代码块/行内代码之外的文本
+ * - 跳过 HTML 标签内部，避免命中属性里的引号
+ * - 支持中文弯引号 “…”、直角引号 「…」、英文直引号 "…"（同一行内成对才包）
+ * - 默认无视觉变化（chat.css 已关掉 q 的浏览器默认引号），仅当用户 CSS 写了 q {} 才生效
+ */
+function wrapQuotedDialogue(text: string): string {
+    return mapMarkdownOutsideCode(text, segment =>
+        segment.split(/(<[^>]*>)/g).map(part => {
+            if (part.startsWith("<")) return part;
+            return part
+                .replace(/“([^”\n]+)”/g, "<q>“$1”</q>")
+                .replace(/「([^」\n]+)」/g, "<q>「$1」</q>")
+                .replace(/"([^"\n]+)"/g, "<q>\"$1\"</q>");
+        }).join(""),
+    );
+}
+
 function linkifyBareUrls(text: string): string {
     return mapMarkdownOutsideCode(text, segment => {
         const normalized = segment.replace(
@@ -503,7 +523,7 @@ function MarkdownTextContent({
     if (!hasHtmlBlocks) {
         // Simple path: pure markdown — extract styles only from non-html content
         const { styles, body } = extractStyles(cleaned);
-        const mdCleaned = linkifyBareUrls(stripPaySchemeUrls(body.trim()));
+        const mdCleaned = wrapQuotedDialogue(linkifyBareUrls(stripPaySchemeUrls(body.trim())));
         if (!mdCleaned && !styles && payUrls.length === 0) return null;
         return (
             <div className="chat-markdown hide-scrollbar break-words" ref={containerRef}>
@@ -527,7 +547,7 @@ function MarkdownTextContent({
                 }
                 // Extract styles only from markdown segments (not from html blocks)
                 const { styles, body } = extractStyles(seg.content);
-                const mdContent = linkifyBareUrls(stripPaySchemeUrls(body.trim()));
+                const mdContent = wrapQuotedDialogue(linkifyBareUrls(stripPaySchemeUrls(body.trim())));
                 return (
                     <div key={`md-${i}`}>
                         {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}

@@ -451,38 +451,18 @@ alter table public.game_hall_likes enable row level security;
 alter table public.game_hall_favorites enable row level security;
 alter table public.game_hall_comments enable row level security;
 
-grant select on public.game_hall_games to anon;
-grant select on public.game_hall_likes to anon;
-grant select on public.game_hall_favorites to anon;
-grant select on public.game_hall_comments to anon;
+-- 收回 anon 直读：game_hall_games 含 game_html/picker_html 整套游戏源码，
+-- 开放 anon 会被拿 anon key 绕过服务端 API 匿名批量爬走（likes/favorites 还会泄露用户 ID 关系）。
+-- 站内所有游戏大厅读写都走 Next API + service key，无 anon 直连依赖。
+revoke select on public.game_hall_games from anon;
+revoke select on public.game_hall_likes from anon;
+revoke select on public.game_hall_favorites from anon;
+revoke select on public.game_hall_comments from anon;
 
 drop policy if exists "game_hall_games_public_read" on public.game_hall_games;
-create policy "game_hall_games_public_read"
-  on public.game_hall_games
-  for select
-  to anon
-  using (deleted_at is null);
-
 drop policy if exists "game_hall_likes_public_read" on public.game_hall_likes;
-create policy "game_hall_likes_public_read"
-  on public.game_hall_likes
-  for select
-  to anon
-  using (true);
-
 drop policy if exists "game_hall_favorites_public_read" on public.game_hall_favorites;
-create policy "game_hall_favorites_public_read"
-  on public.game_hall_favorites
-  for select
-  to anon
-  using (true);
-
 drop policy if exists "game_hall_comments_public_read" on public.game_hall_comments;
-create policy "game_hall_comments_public_read"
-  on public.game_hall_comments
-  for select
-  to anon
-  using (deleted_at is null);
 
 alter table public.game_hall_games replica identity full;
 alter table public.game_hall_likes replica identity full;
@@ -604,11 +584,38 @@ create unique index if not exists custom_app_market_apps_name_unique_idx
   on public.custom_app_market_apps (lower(name))
   where deleted_at is null;
 
+-- 包内容 SHA-256（服务端在发布/更新时计算），用于拒绝「原样重传倒卖」他人应用包
+alter table public.custom_app_market_apps
+  add column if not exists package_hash text not null default '';
+
+create index if not exists custom_app_market_apps_package_hash_idx
+  on public.custom_app_market_apps (package_hash)
+  where deleted_at is null and package_hash <> '';
+
+-- 应用包下载留痕：限频依据 + 异常爬取排查（谁、何时、下了哪个包）
+create table if not exists public.custom_app_package_downloads (
+  id text primary key,
+  app_row_id text not null,
+  account_id text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists custom_app_package_downloads_account_idx
+  on public.custom_app_package_downloads (account_id, created_at desc);
+
+create index if not exists custom_app_package_downloads_app_idx
+  on public.custom_app_package_downloads (app_row_id, created_at desc);
+
+alter table public.custom_app_package_downloads enable row level security;
+
+-- 应用包存储桶：私有。下载一律经服务端 /api/app-market/download 校验后
+-- 换发短时签名 URL（登录 + 每小时限频 + 留痕），防匿名批量爬取创作者的包。
+-- 存量对象无需搬迁：翻私有只改桶标志位，文件路径原地不动，service key 照常可读。
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'custom-app-market-packages',
   'custom-app-market-packages',
-  true,
+  false,
   5242880,
   array['application/zip', 'application/octet-stream', 'text/html']
 )
@@ -620,14 +627,11 @@ set
 
 alter table public.custom_app_market_apps enable row level security;
 
-grant select on public.custom_app_market_apps to anon;
+-- 收回 anon 直读：package_url 直链等列不能绕过服务端 API 被批量拉走。
+-- （站内所有市场读写都走 Next API + service key，本无 anon 直连依赖。）
+revoke select on public.custom_app_market_apps from anon;
 
 drop policy if exists "custom_app_market_apps_public_read" on public.custom_app_market_apps;
-create policy "custom_app_market_apps_public_read"
-  on public.custom_app_market_apps
-  for select
-  to anon
-  using (deleted_at is null and review_status = 'approved');
 
 alter table public.custom_app_market_apps replica identity full;
 
@@ -704,14 +708,11 @@ create index if not exists black_market_theaters_tags_idx
 
 alter table public.black_market_theaters enable row level security;
 
-grant select on public.black_market_theaters to anon;
+-- 收回 anon 直读：剧场模板是用户创作内容，开放 anon 会被拿 anon key
+-- 绕过服务端 API 匿名批量爬走。站内读写都走 Next API + service key，无 anon 直连依赖。
+revoke select on public.black_market_theaters from anon;
 
 drop policy if exists "black_market_theaters_public_read" on public.black_market_theaters;
-create policy "black_market_theaters_public_read"
-  on public.black_market_theaters
-  for select
-  to anon
-  using (deleted_at is null);
 
 alter table public.black_market_theaters replica identity full;
 

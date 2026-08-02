@@ -39,7 +39,8 @@ import type { MemoryConfig, MemoryEntry } from "./memory-types";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { prepareShortTermContext, type RecentBlock, type UnifiedRecentItem } from "./short-term-assembler";
-import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
+import { applyEditRegex, assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
+import { MacroEngine } from "./macro-engine";
 import {
   appendEmptyGenerateGuardMessage,
   applyVisionImagePromptLimit,
@@ -50,7 +51,6 @@ import {
 } from "./chat-engine";
 import { nativeToolProtocolForConfig } from "./llm-provider-adapter";
 import { getEnabledTools } from "./tool-storage";
-import { formatToolsForPrompt } from "./tool-prompt";
 import { getCustomStickerExample, getCustomStickerNames, resolveCustomStickerMap } from "./custom-sticker-storage";
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
@@ -60,6 +60,7 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import {
   isCloudBackupConfigured,
   loadCloudBackupConfig,
+  normalizeBackupUrl,
   CLOUD_BACKUP_BUCKET,
   type CloudBackupConfig,
 } from "./cloud-backup/config";
@@ -76,6 +77,8 @@ const WEIXIN_CLOUD_CHAT_APP_TAGS = ["chat", "text"];
 const DEFAULT_MESSAGE_LIMIT = 80;
 const REALTIME_PULL_INTERVAL_MS = 8000;
 const LOCAL_UPLOAD_FLUSH_DELAY_MS = 500;
+const RUNTIME_CONFIG_SYNC_DEBOUNCE_MS = 3000;
+const RUNTIME_AUTO_SYNC_THROTTLE_MS = 60 * 60 * 1000;
 
 registerKvMigration(WEIXIN_CLOUD_CONFIG_KEY);
 
@@ -146,6 +149,8 @@ export type WeixinCloudPromptContext = {
   offlineBilingualInstruction: string;
   offlineSummaryTag: string;
   enableVision: boolean;
+  /** 云端助手是否发送媒体回复（生图/表情包/语音卡）；核心模块按此开关执行 */
+  mediaReply?: boolean;
   timeAware: boolean;
   nativeToolHistory: boolean;
 };
@@ -210,6 +215,9 @@ export type WeixinCloudStoredMessage = {
   createdAt?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** 微信收到的图片（已解密）在备份桶里的存储路径与类型，由助手写入 */
+  imagePath?: string;
+  imageMime?: string;
   raw?: unknown;
   needsReply?: boolean;
   repliedAt?: string;
@@ -258,6 +266,224 @@ export function saveWeixinCloudSyncConfig(config: WeixinCloudSyncConfig): void {
 
 export function isWeixinCloudSupabaseReady(config: CloudBackupConfig = loadCloudBackupConfig()): boolean {
   return isCloudBackupConfigured(config);
+}
+
+// ---- 微信云端助手（Supabase Edge Function 托管自动回复） ----
+
+const WEIXIN_CLOUD_CRON_SECRET_PATH = `${WEIXIN_CLOUD_PREFIX}/cron-secret.json`;
+const WEIXIN_CLOUD_ASSISTANT_STATE_PATH = `${WEIXIN_CLOUD_PREFIX}/state/cloud-assistant.json`;
+
+/** 用户在 Supabase 控制台创建云函数时必须使用的名字（决定函数 URL）。 */
+export const WEIXIN_CLOUD_FUNCTION_SLUG = "weixin-assistant";
+export const WEIXIN_CLOUD_CRON_JOB_NAME = "ai-phone-weixin-assistant";
+
+export type WeixinCloudAssistantHeartbeat = {
+  lastRunAt?: string;
+  lastError?: string;
+  polled?: number;
+  received?: number;
+  stored?: number;
+  sent?: number;
+  elapsedMs?: number;
+  /** bucket = 正在使用小手机同步的最新核心；bundled = 使用函数内置版本 */
+  codeSource?: string;
+};
+
+function requireCloudBackupConfig(): CloudBackupConfig {
+  const config = loadCloudBackupConfig();
+  if (!isCloudBackupConfigured(config)) {
+    throw new Error("请先在数据管理里配置 Supabase 云端备份。");
+  }
+  return config;
+}
+
+export function buildWeixinCloudAssistantFunctionUrl(config: CloudBackupConfig = loadCloudBackupConfig()): string {
+  const base = normalizeBackupUrl(config.url);
+  if (!base) throw new Error("请先在数据管理里配置 Supabase 云端备份。");
+  return `${base}/functions/v1/${WEIXIN_CLOUD_FUNCTION_SLUG}`;
+}
+
+/**
+ * 定时任务调用云函数用的共享密钥。云函数没有独立配置入口，密钥直接存在用户
+ * 自己的备份桶里（云函数用 service_role 读同一对象做比对），小手机负责首次生成。
+ */
+export async function ensureWeixinCloudCronSecret(): Promise<string> {
+  const config = requireCloudBackupConfig();
+  await ensureBucket(config);
+
+  const existing = await getObject(config, WEIXIN_CLOUD_CRON_SECRET_PATH);
+  if (existing) {
+    try {
+      const parsed = JSON.parse(await existing.text()) as { token?: unknown };
+      if (typeof parsed.token === "string" && parsed.token.trim().length >= 16) return parsed.token.trim();
+    } catch {
+      // 内容损坏则重新生成覆盖
+    }
+  }
+
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  await putObject(config, WEIXIN_CLOUD_CRON_SECRET_PATH, JSON.stringify({
+    format: "ai-phone-weixin-cloud-cron-secret",
+    version: 1,
+    token,
+    createdAt: new Date().toISOString(),
+  }, null, 2), "application/json");
+  return token;
+}
+
+/** 生成已填好用户项目 URL 和密钥的定时任务 SQL，粘贴到 Supabase SQL Editor 即可。 */
+export function buildWeixinCloudAssistantCronSql(token: string, config: CloudBackupConfig = loadCloudBackupConfig()): string {
+  const functionUrl = buildWeixinCloudAssistantFunctionUrl(config);
+  return `-- AI Phone 微信云端助手定时任务：每 10 秒轮询一次微信消息并自动回复。
+-- 在 Supabase Dashboard → SQL Editor 里整段执行；重复执行会覆盖同名任务，可安全重跑。
+-- 前提：已在 Edge Functions 里部署名为 ${WEIXIN_CLOUD_FUNCTION_SLUG} 的云函数，并关闭其 JWT 校验。
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select cron.schedule('${WEIXIN_CLOUD_CRON_JOB_NAME}', '10 seconds', $CRON$
+  select net.http_post(
+    url     := '${functionUrl}',
+    headers := jsonb_build_object('Content-Type', 'application/json'),
+    body    := jsonb_build_object('token', '${token}', 'bucket', '${CLOUD_BACKUP_BUCKET}'),
+    timeout_milliseconds := 8000
+  );
+$CRON$);
+
+-- 停用云端助手时执行：
+-- select cron.unschedule('${WEIXIN_CLOUD_CRON_JOB_NAME}');
+`;
+}
+
+/** 读取云函数每次运行后写回的心跳状态；null 表示云函数从未成功运行过。 */
+export async function fetchWeixinCloudAssistantHeartbeat(): Promise<WeixinCloudAssistantHeartbeat | null> {
+  const config = requireCloudBackupConfig();
+  const blob = await getObject(config, WEIXIN_CLOUD_ASSISTANT_STATE_PATH);
+  if (!blob) return null;
+  try {
+    const parsed = JSON.parse(await blob.text()) as WeixinCloudAssistantHeartbeat & { format?: string };
+    if (parsed?.format !== "ai-phone-weixin-cloud-assistant-state") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 通过 Supabase 管理 API 一键部署云函数（等价于 supabase functions deploy --use-api）。
+ * 需要用户提供账号 Access Token（supabase.com/dashboard/account/tokens 生成）；
+ * token 只在本次请求中使用，不做任何持久化。部署时直接指定 verify_jwt=false，
+ * 用户无需再去函数设置里关 JWT 开关。
+ */
+export async function deployWeixinCloudFunction(accessToken: string): Promise<void> {
+  const config = requireCloudBackupConfig();
+  const token = accessToken.trim();
+  if (!token) throw new Error("请先粘贴 Supabase Access Token。");
+
+  const base = normalizeBackupUrl(config.url);
+  const ref = (() => {
+    try {
+      return new URL(base).hostname.split(".")[0] || "";
+    } catch {
+      return "";
+    }
+  })();
+  if (!ref) throw new Error("无法从云端备份地址解析项目标识，请检查数据管理里的 Supabase URL。");
+
+  const codeRes = await fetch("/weixin-local-assistant/cloud-function.mjs", { cache: "no-store" });
+  if (!codeRes.ok) throw new Error("获取云函数代码失败，请刷新页面重试。");
+  const code = await codeRes.text();
+
+  // 经站点服务端代理转发（/api/weixin/deploy-function）：api.supabase.com
+  // 不对第三方站点来源返回 CORS 放行头，浏览器直连会被拦截，与 iLink
+  // 走 /api/weixin 代理是同一类问题。token 仅透传，服务端不存储不记录。
+  let res: Response;
+  try {
+    res = await fetch("/api/weixin/deploy-function", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ref, token, code }),
+    });
+  } catch {
+    throw new Error("无法访问站点部署接口，请检查网络后重试；也可改用下方「手动部署方式」。");
+  }
+  if (res.status === 502) {
+    throw new Error("服务器暂时连不上 Supabase 管理接口，请稍后重试；也可改用下方「手动部署方式」。");
+  }
+
+  if (res.status === 401) {
+    throw new Error("Access Token 无效或已过期，请到 supabase.com → Account → Access Tokens 重新生成。");
+  }
+  if (res.status === 403) {
+    throw new Error("这个 Access Token 没有该项目的权限，请确认它来自和云端备份同一个 Supabase 账号。");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`部署失败（HTTP ${res.status}）：${text.slice(0, 200) || "未知错误"}`);
+  }
+}
+
+/** 在线开启/停用云端定时轮询：由云函数直连数据库执行 cron.schedule / cron.unschedule。 */
+export async function setWeixinCloudAssistantScheduled(enabled: boolean): Promise<{ scheduled: boolean }> {
+  const config = requireCloudBackupConfig();
+  const token = await ensureWeixinCloudCronSecret();
+  const url = buildWeixinCloudAssistantFunctionUrl(config);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, bucket: CLOUD_BACKUP_BUCKET, action: enabled ? "enable" : "disable" }),
+    });
+  } catch {
+    throw new Error("无法访问云函数。请先完成①②两步（部署 weixin-assistant 函数并关闭 JWT 校验）。");
+  }
+
+  const data = await res.json().catch(() => null) as { ok?: boolean; scheduled?: boolean; error?: string } | null;
+  if (res.status === 401) {
+    throw new Error(data?.error === "invalid_token"
+      ? "云函数密钥不匹配，请重新部署最新的云函数代码后重试。"
+      : "云函数拒绝访问（401）。请在函数的 Settings 里关掉「Verify JWT with legacy secret」（部分版本叫 Enforce JWT verification）并保存后重试。");
+  }
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `云函数返回 HTTP ${res.status}`);
+  }
+  if (typeof data.scheduled !== "boolean") {
+    throw new Error("云函数版本较旧，不支持在线开关。请点「复制云函数代码」，到函数的 Code 标签替换为最新代码重新部署；或使用「复制定时 SQL」手动操作。");
+  }
+  return { scheduled: data.scheduled };
+}
+
+/** 从浏览器直接调用一次云函数，验证部署是否成功。 */
+export async function testWeixinCloudAssistantOnce(): Promise<{ ok: boolean; sent: number; error?: string }> {
+  const config = requireCloudBackupConfig();
+  const token = await ensureWeixinCloudCronSecret();
+  const url = buildWeixinCloudAssistantFunctionUrl(config);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, bucket: CLOUD_BACKUP_BUCKET }),
+    });
+  } catch {
+    throw new Error("无法访问云函数。请确认已部署名为 weixin-assistant 的 Edge Function，并已关闭该函数的 JWT 校验。");
+  }
+
+  const data = await res.json().catch(() => null) as { ok?: boolean; sent?: number; error?: string } | null;
+  if (res.status === 401) {
+    throw new Error(data?.error === "invalid_token"
+      ? "云函数密钥不匹配，请重新复制定时 SQL 并在 SQL Editor 里重新执行。"
+      : "云函数拒绝访问（401）。请在函数的 Settings 里关掉「Verify JWT with legacy secret」（部分版本叫 Enforce JWT verification）并保存后重试。");
+  }
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `云函数返回 HTTP ${res.status}`);
+  }
+  return { ok: true, sent: Number(data.sent) || 0, error: data.error };
 }
 
 export function buildWeixinLocalAssistantConfigCode(
@@ -634,9 +860,10 @@ async function buildWeixinCloudPromptContext(params: {
   ]);
 
   const now = new Date();
-  const toolsPrompt = usesNativeActions
-    ? "<available_actions>\n需要动作时，可展开对应类别的动作说明；已有具体动作说明时，直接调用具体动作。\n</available_actions>"
-    : formatToolsForPrompt(enabledTools);
+  // 微信链路没有工具执行引擎（原生 tool_calls 不解析、文本指令会被清理），
+  // 不下发工具清单/动作横幅，改为明确声明不可用；历史中的工具调用回合
+  // 保留在上下文里（承载剧情连续性），靠声明约束模型不去模仿。
+  const toolsPrompt = "<tool_availability>当前对话正通过微信进行：工具/动作系统不可用。不要输出「获取指令」「执行动作」或任何工具调用格式的内容，也不要模仿历史消息中的工具调用记录，直接以普通对话完成回应。</tool_availability>";
 
   const promptContext: WeixinCloudPromptContext = {
     appId,
@@ -677,6 +904,7 @@ async function buildWeixinCloudPromptContext(params: {
       ),
     offlineSummaryTag: params.preset?.story_summary_tag?.trim() || "summary",
     enableVision: params.apiConfig.enableImageRecognition === true,
+    mediaReply: true,
     timeAware: params.chatAppSettings.timeAware !== false,
     nativeToolHistory: usesNativeActions,
   };
@@ -779,13 +1007,30 @@ export async function syncAllWeixinBotRuntimesToCloud(
   for (const bot of bots) {
     results.push(await syncWeixinBotRuntimeToCloud(bot.id, options));
   }
+  // 顺带把最新核心逻辑传到桶里：云函数的自更新加载器会优先使用它，
+  // 这样函数部署一次之后，逻辑更新随同步自动生效。失败不阻塞运行包同步。
+  await syncWeixinCloudFunctionCore(options?.cloudConfig).catch(() => {});
   return results;
+}
+
+const WEIXIN_CLOUD_CORE_CODE_PATH = `${WEIXIN_CLOUD_PREFIX}/function-core.mjs`;
+
+/** 把站点携带的 assistant-core.mjs 上传到备份桶，供云函数运行时动态加载。 */
+export async function syncWeixinCloudFunctionCore(cloudConfig?: CloudBackupConfig): Promise<void> {
+  if (typeof window === "undefined") return;
+  const config = cloudConfig ?? loadCloudBackupConfig();
+  if (!isCloudBackupConfigured(config)) return;
+  const res = await fetch("/weixin-local-assistant/assistant-core.mjs", { cache: "no-store" });
+  if (!res.ok) return;
+  const code = await res.text();
+  if (!code.includes("export async function pollOnce")) return;
+  await putObject(config, WEIXIN_CLOUD_CORE_CODE_PATH, code, "text/javascript");
 }
 
 export async function pullWeixinCloudMessagesFromCloud(
   options?: { cloudConfig?: CloudBackupConfig; botId?: string; limitPerBot?: number },
 ): Promise<WeixinCloudMessagePullResult> {
-  await hydrateChatStorage();
+  await Promise.all([hydrateChatStorage(), ensureSettingsStorageHydrated()]);
   const cloudConfig = options?.cloudConfig ?? loadCloudBackupConfig();
   if (!isCloudBackupConfigured(cloudConfig)) {
     throw new Error("请先在数据管理里配置 Supabase 云端备份。");
@@ -839,17 +1084,16 @@ export async function pullWeixinCloudMessagesFromCloud(
       }
     }
 
-    storedMessages
-      .sort((a, b) => cloudStoredMessageTime(a).localeCompare(cloudStoredMessageTime(b)))
-      .forEach((stored) => {
-        const imported = importCloudStoredMessage(stored);
-        if (imported.inserted) {
-          result.added += 1;
-          touchedSessionIds.add(imported.sessionId);
-        } else {
-          result.skipped += 1;
-        }
-      });
+    storedMessages.sort((a, b) => cloudStoredMessageTime(a).localeCompare(cloudStoredMessageTime(b)));
+    for (const stored of storedMessages) {
+      const imported = await importCloudStoredMessage(cloudConfig, stored);
+      if (imported.inserted) {
+        result.added += 1;
+        touchedSessionIds.add(imported.sessionId);
+      } else {
+        result.skipped += 1;
+      }
+    }
   }
 
   for (const sessionId of touchedSessionIds) {
@@ -954,8 +1198,41 @@ export function startWeixinCloudRealtimeSync(): () => void {
     });
   };
 
+  // ── 运行包自动同步 ──
+  // Bot 配置变化（添加/删除/启停/重扫码）后 3 秒内自动同步运行包，
+  // 否则云端/本地助手会一直拿着旧 token 和旧配置轮询；
+  // 回到前台和启动时按 1 小时节流做兜底刷新（顺带覆盖 API/预设等变更）。
+  let runtimeSyncInFlight = false;
+  let lastRuntimeSyncAt = 0;
+  let runtimeSyncTimer: number | null = null;
+
+  const syncRuntimesNow = async (force = false) => {
+    if (stopped || runtimeSyncInFlight || !shouldRun()) return;
+    if (!force && Date.now() - lastRuntimeSyncAt < RUNTIME_AUTO_SYNC_THROTTLE_MS) return;
+    runtimeSyncInFlight = true;
+    try {
+      await syncAllWeixinBotRuntimesToCloud();
+      lastRuntimeSyncAt = Date.now();
+    } catch (err) {
+      console.warn("[WeixinCloudSync] runtime auto sync failed:", err);
+    } finally {
+      runtimeSyncInFlight = false;
+    }
+  };
+
+  const scheduleRuntimeSync = () => {
+    if (runtimeSyncTimer) window.clearTimeout(runtimeSyncTimer);
+    runtimeSyncTimer = window.setTimeout(() => {
+      runtimeSyncTimer = null;
+      void syncRuntimesNow(true);
+    }, RUNTIME_CONFIG_SYNC_DEBOUNCE_MS);
+  };
+
   const onVisibility = () => {
-    if (document.visibilityState === "visible") void pullNow(true);
+    if (document.visibilityState === "visible") {
+      void pullNow(true);
+      void syncRuntimesNow(false);
+    }
   };
 
   const onFocus = () => {
@@ -963,7 +1240,9 @@ export function startWeixinCloudRealtimeSync(): () => void {
   };
 
   const onConfigChanged = () => {
-    if (shouldRun()) void pullNow(true);
+    if (!shouldRun()) return;
+    void pullNow(true);
+    scheduleRuntimeSync();
   };
 
   window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, onMessagePushed);
@@ -976,11 +1255,13 @@ export function startWeixinCloudRealtimeSync(): () => void {
     void pullNow(false);
   }, REALTIME_PULL_INTERVAL_MS);
   void pullNow(true);
+  void syncRuntimesNow(false);
 
   return () => {
     stopped = true;
     window.clearInterval(interval);
     if (uploadFlushTimer) window.clearTimeout(uploadFlushTimer);
+    if (runtimeSyncTimer) window.clearTimeout(runtimeSyncTimer);
     window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, onMessagePushed);
     window.removeEventListener(CHAT_MESSAGES_DELETED_EVENT, onMessagesDeleted);
     document.removeEventListener("visibilitychange", onVisibility);
@@ -1110,7 +1391,10 @@ function sanitizePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function importCloudStoredMessage(stored: WeixinCloudStoredMessage): { inserted: boolean; sessionId: string } {
+async function importCloudStoredMessage(
+  cloudConfig: CloudBackupConfig,
+  stored: WeixinCloudStoredMessage,
+): Promise<{ inserted: boolean; sessionId: string }> {
   if (!isCloudStoredMessage(stored)) return { inserted: false, sessionId: "" };
   if (isLocalUploadedCloudMessage(stored)) return { inserted: false, sessionId: "" };
   const session = createOrGetSession(stored.characterId);
@@ -1122,11 +1406,19 @@ function importCloudStoredMessage(stored: WeixinCloudStoredMessage): { inserted:
     return importCloudAssistantMessage(stored, session, createdAt);
   }
   const id = cloudMessageId(stored);
+  if (loadChatMessages(session.id).some(message => message.id === id)) {
+    return { inserted: false, sessionId: session.id };
+  }
+  // 微信收到的图片：去重之后才下载，转成 data URL 以图片气泡展示
+  const imageDataUrl = stored.imagePath
+    ? await loadCloudStoredMessageImage(cloudConfig, stored).catch(() => undefined)
+    : undefined;
   const msg: ChatMessage = {
     id,
     sessionId: session.id,
     role: stored.role,
-    content: stored.content,
+    content: imageDataUrl ? "" : stored.content,
+    ...(imageDataUrl ? { mediaType: "image" as const, mediaUrl: imageDataUrl } : {}),
     status: "sent",
     createdAt,
     cloudSync: {
@@ -1138,6 +1430,41 @@ function importCloudStoredMessage(stored: WeixinCloudStoredMessage): { inserted:
     },
   };
   return { inserted: upsertImportedChatMessage(msg).inserted, sessionId: session.id };
+}
+
+async function loadCloudStoredMessageImage(
+  cloudConfig: CloudBackupConfig,
+  stored: WeixinCloudStoredMessage,
+): Promise<string | undefined> {
+  if (!stored.imagePath || !stored.imagePath.startsWith("weixin-cloud/media/")) return undefined;
+  const blob = await getObject(cloudConfig, stored.imagePath);
+  if (!blob) return undefined;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (bytes.length === 0) return undefined;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  const mime = stored.imageMime || blob.type || "image/jpeg";
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
+/** 导入前按角色绑定的正则脚本整形（编辑类、placement=2），与聊天室生成/编辑路径同一套处理。 */
+function normalizeCloudAssistantContentForImport(stored: WeixinCloudStoredMessage, characterName: string): string {
+  const content = stored.content;
+  try {
+    const bindings = loadBindingConfig();
+    const slot = resolveBinding(bindings, stored.characterId, "chat");
+    const allRegexes = loadRegexes();
+    const regexes = (slot.regexIds || [])
+      .map(id => allRegexes.find(item => item.id === id))
+      .filter((item): item is RegexConfig => Boolean(item));
+    if (regexes.length === 0) return content;
+    const macroEngine = new MacroEngine(characterName, resolveUserIdentity(stored.characterId)?.name || "你");
+    return applyEditRegex(content, regexes, 2, { macroEngine, activeTags: ["chat", "text"] });
+  } catch {
+    return content;
+  }
 }
 
 function importCloudAssistantMessage(
@@ -1153,7 +1480,10 @@ function importCloudAssistantMessage(
   if (existing) return { inserted: false, sessionId: session.id };
 
   const characterName = loadCharacters().find(item => item.id === stored.characterId)?.name || "对方";
-  const parsed = parseAIResponse(stored.content, getLatestCharacterStateValues(stored.characterId));
+  // 与聊天室编辑/生成路径保持一致：先跑角色绑定的编辑类正则整形，再解析。
+  // 否则状态栏等内容与正则美化脚本期望的格式对不上（导入的消息会显示成纯文本）。
+  const normalizedContent = normalizeCloudAssistantContentForImport(stored, characterName);
+  const parsed = parseAIResponse(normalizedContent, getLatestCharacterStateValues(stored.characterId));
   const visibleParts = parsed.parts.filter(part =>
     part.mediaType !== "voice_call"
     && part.mediaType !== "video_call"
@@ -1205,7 +1535,7 @@ function importCloudAssistantMessage(
   if (messages.length === 0) {
     messages.push(makeCloudImportedMessage(stored, session.id, createdAt, 0, {
       role: "assistant",
-      content: stored.content,
+      content: normalizedContent,
     }));
   }
 
@@ -1230,6 +1560,10 @@ function makeCloudImportedMessage(
     sessionId,
     status: "sent",
     createdAt: new Date(safeTime + index).toISOString(),
+    // 同一条云端回复的所有分段共享批次：长按编辑时可以像普通消息一样
+    // 编辑整个批次的原始输出（含状态栏），保存后重新分段。
+    responseBatchId: `wxcloud_batch_${cloudMessageId(stored)}`,
+    rawResponseText: stored.content,
     ...patch,
     cloudSync: {
       source: "weixin-cloud",

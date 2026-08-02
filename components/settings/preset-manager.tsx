@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useContext, useCallback, useMemo } from "react";
-import { Plus, Upload, Download, Trash2, RotateCcw, ChevronLeft, ChevronDown, GripVertical, MessageSquare, AlertCircle, Maximize2, Copy } from "lucide-react";
+import { Plus, Upload, Download, Trash2, RotateCcw, ChevronLeft, ChevronDown, GripVertical, MessageSquare, AlertCircle, Maximize2, Copy, Replace } from "lucide-react";
 import {
     loadPresets,
     savePresets,
@@ -22,7 +22,8 @@ import { buildCustomAppTagGroups, findTagGroupForTags, flattenTagGroups } from "
 import { CUSTOM_APPS_UPDATED_EVENT, loadInstalledCustomApps } from "@/lib/custom-app-storage";
 import type { InstalledCustomApp } from "@/lib/custom-app-types";
 import { SettingsContext } from "../phone-settings-app";
-import { ConfirmDialog, TextExpandModal } from "@/components/ui/modal";
+import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/modal";
+import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { useTouchSort } from "@/lib/use-touch-sort";
 
@@ -476,6 +477,171 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
 
     const { containerRef: promptListRef, onTouchStart: onPromptTouchStart, onTouchMove: onPromptTouchMove, onTouchEnd: onPromptTouchEnd } = useTouchSort(handlePromptReorder);
 
+    // ── 条目左滑操作（微信式：左滑露出「新增/删除」） ──
+    const swipe = useSwipeActions();
+
+    const insertPromptAfter = (preset: PresetConfig, afterIdentifier: string) => {
+        const newPrompt = {
+            identifier: `prompt-${Date.now()}`,
+            name: "新提示词",
+            role: "system" as const,
+            content: "",
+            injection_depth: 0,
+            enabled: true,
+        };
+        // 与渲染一致的显示顺序（prompt_order + 孤儿条目）
+        const ordered = preset.prompt_order && preset.prompt_order.length > 0
+            ? preset.prompt_order.map(entry => preset.prompts.find(p => p.identifier === entry.identifier)).filter((p): p is Prompt => !!p)
+            : [...(preset.prompts || [])];
+        const orderedIds = new Set(ordered.map(p => p.identifier));
+        const orphans = (preset.prompts || []).filter(p => !orderedIds.has(p.identifier));
+        const displayed = [...ordered, ...orphans];
+        const idx = displayed.findIndex(p => p.identifier === afterIdentifier);
+        if (idx >= 0) displayed.splice(idx + 1, 0, newPrompt);
+        else displayed.push(newPrompt);
+        const newOrder = displayed.map(p => ({
+            identifier: p.identifier,
+            enabled: p.identifier === newPrompt.identifier
+                ? true
+                : (preset.prompt_order
+                    ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
+                    : p.enabled),
+        }));
+        updatePreset(preset.id, { prompts: displayed, prompt_order: newOrder });
+        swipe.close();
+        setEditingPromptId(newPrompt.identifier);
+        window.setTimeout(() => {
+            promptListRef.current
+                ?.querySelector(`[data-swipe-id="${newPrompt.identifier}"]`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+    };
+
+    // ── 条目级导入/导出（左滑「替换/导出」+ 底部「添加条目」菜单） ──
+    const [addEntryMenuOpen, setAddEntryMenuOpen] = useState(false);
+    const entryFileInputRef = useRef<HTMLInputElement>(null);
+    const entryImportModeRef = useRef<{ mode: "append" } | { mode: "replace"; identifier: string } | null>(null);
+
+    const sanitizePromptImport = (raw: unknown, fallbackIdentifier: string): Prompt | null => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+        const obj = raw as Record<string, unknown>;
+        if (typeof obj.name !== "string" && typeof obj.content !== "string" && typeof obj.identifier !== "string") return null;
+        const role = obj.role === "user" || obj.role === "assistant" || obj.role === "system" ? obj.role : "system";
+        const prompt: Prompt = {
+            identifier: typeof obj.identifier === "string" && obj.identifier ? obj.identifier : fallbackIdentifier,
+            name: typeof obj.name === "string" ? obj.name : "",
+            role,
+            content: typeof obj.content === "string" ? obj.content : "",
+            injection_depth: typeof obj.injection_depth === "number" ? obj.injection_depth : 0,
+            injection_position: typeof obj.injection_position === "number" ? obj.injection_position : 0,
+            enabled: obj.enabled !== false,
+            marker: !!obj.marker,
+            system_prompt: !!obj.system_prompt,
+            forbid_overrides: !!obj.forbid_overrides,
+        };
+        if (Array.isArray(obj.tags)) prompt.tags = obj.tags.filter((t): t is string => typeof t === "string");
+        if (typeof obj.featureTag === "string") prompt.featureTag = obj.featureTag;
+        if (typeof obj.followUpOnly === "boolean") prompt.followUpOnly = obj.followUpOnly;
+        return prompt;
+    };
+
+    const createPromptAtEnd = (preset: PresetConfig) => {
+        const newPrompt = {
+            identifier: `prompt-${Date.now()}`,
+            name: "新提示词",
+            role: "system" as const,
+            content: "",
+            injection_depth: 0,
+            enabled: true,
+        };
+        const newPrompts = [...(preset.prompts || []), newPrompt];
+        const newOrder = newPrompts.map(p => ({
+            identifier: p.identifier,
+            enabled: preset.prompt_order
+                ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
+                : p.enabled,
+        }));
+        updatePreset(preset.id, { prompts: newPrompts, prompt_order: newOrder });
+    };
+
+    const appendImportedPrompts = (preset: PresetConfig, raws: unknown[]) => {
+        const base = Date.now();
+        const sanitized = raws
+            .map((raw, i) => sanitizePromptImport(raw, `prompt-${base + i}`))
+            .filter((p): p is Prompt => !!p);
+        if (sanitized.length === 0) {
+            setImportError("JSON 里没有可识别的条目内容。");
+            return;
+        }
+        const used = new Set((preset.prompts || []).map(p => p.identifier));
+        const appended = sanitized.map(p => {
+            let id = p.identifier;
+            let n = 1;
+            while (used.has(id)) id = `${p.identifier}_${n++}`;
+            used.add(id);
+            return { ...p, identifier: id };
+        });
+        const newPrompts = [...(preset.prompts || []), ...appended];
+        const newOrder = newPrompts.map(p => ({
+            identifier: p.identifier,
+            enabled: preset.prompt_order
+                ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
+                : p.enabled,
+        }));
+        updatePreset(preset.id, { prompts: newPrompts, prompt_order: newOrder });
+        if (appended.length === 1) setEditingPromptId(appended[0].identifier);
+        window.setTimeout(() => {
+            promptListRef.current
+                ?.querySelector(`[data-swipe-id="${CSS.escape(appended[0].identifier)}"]`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+    };
+
+    const replaceImportedPrompt = (preset: PresetConfig, targetIdentifier: string, raw: unknown) => {
+        const sanitized = sanitizePromptImport(raw, targetIdentifier);
+        if (!sanitized) {
+            setImportError("JSON 里没有可识别的条目内容。");
+            return;
+        }
+        // 导入的 identifier 与其它条目冲突时保留原 identifier，避免顶掉别的条目
+        const finalId = sanitized.identifier !== targetIdentifier && preset.prompts.some(p => p.identifier === sanitized.identifier)
+            ? targetIdentifier
+            : sanitized.identifier;
+        const finalPrompt = { ...sanitized, identifier: finalId };
+        const newPrompts = preset.prompts.map(p => p.identifier === targetIdentifier ? finalPrompt : p);
+        const newOrder = preset.prompt_order?.map(o => o.identifier === targetIdentifier ? { ...o, identifier: finalId } : o);
+        updatePreset(preset.id, { prompts: newPrompts, ...(newOrder ? { prompt_order: newOrder } : {}) });
+        if (editingPromptId === targetIdentifier) setEditingPromptId(finalId);
+    };
+
+    const exportPrompt = async (prompt: Prompt) => {
+        const { downloadFile } = await import("@/lib/download-utils");
+        const blob = new Blob([JSON.stringify(prompt, null, 2)], { type: "application/json" });
+        await downloadFile(blob, `${prompt.name || prompt.identifier || "prompt"}.json`);
+    };
+
+    const handleEntryImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        const mode = entryImportModeRef.current;
+        entryImportModeRef.current = null;
+        if (entryFileInputRef.current) entryFileInputRef.current.value = "";
+        if (!file || !mode) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const preset = presets.find(p => p.id === editingId);
+            if (!preset) return;
+            try {
+                const parsed = JSON.parse(event.target?.result as string);
+                const items = Array.isArray(parsed) ? parsed : [parsed];
+                if (mode.mode === "replace") replaceImportedPrompt(preset, mode.identifier, items[0]);
+                else appendImportedPrompts(preset, items);
+            } catch {
+                setImportError("无法解析条目文件，格式不正确。");
+            }
+        };
+        reader.readAsText(file);
+    };
+
     const removePreset = (id: string) => {
         const remaining = presets.filter(p => p.id !== id);
         persist(remaining);
@@ -524,6 +690,7 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     return (
         <div ref={containerRef} className="flex flex-col gap-[24px] h-full">
             <input type="file" accept=".json" className="hidden" ref={fileInputRef} onChange={handleImport} />
+            <input type="file" accept=".json" className="hidden" ref={entryFileInputRef} onChange={handleEntryImportFile} />
             {viewMode === "list" ? (
                 <>
                     <div className="flex items-center">
@@ -826,9 +993,64 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                             const selectedTagMinor = matchedTagGroup ? getPromptTagMinor(prompt, selectedTagGroup) : selectedTagGroup.minors[0];
 
                                             return (
-                                                <div
+                                                <SwipeActionRow
                                                     key={prompt.identifier}
+                                                    controller={swipe}
+                                                    id={prompt.identifier}
+                                                    disabled={isEditing}
                                                     onTouchStart={isEditing ? undefined : (e) => onPromptTouchStart(index, e)}
+                                                    actions={
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                className="ui-swipe-action"
+                                                                data-variant="insert"
+                                                                onClick={() => insertPromptAfter(preset, prompt.identifier)}
+                                                            >
+                                                                <Plus size={18} strokeWidth={2} />
+                                                                <span>新增</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="ui-swipe-action"
+                                                                data-variant="replace"
+                                                                onClick={() => {
+                                                                    entryImportModeRef.current = { mode: "replace", identifier: prompt.identifier };
+                                                                    entryFileInputRef.current?.click();
+                                                                    swipe.close();
+                                                                }}
+                                                            >
+                                                                <Replace size={18} strokeWidth={2} />
+                                                                <span>替换</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="ui-swipe-action"
+                                                                data-variant="export"
+                                                                onClick={() => {
+                                                                    exportPrompt(prompt);
+                                                                    swipe.close();
+                                                                }}
+                                                            >
+                                                                <Download size={18} strokeWidth={2} />
+                                                                <span>导出</span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="ui-swipe-action"
+                                                                data-variant="delete"
+                                                                onClick={() => {
+                                                                    setConfirmDeleteEntry(prompt.identifier);
+                                                                    swipe.close();
+                                                                }}
+                                                            >
+                                                                <Trash2 size={18} strokeWidth={2} />
+                                                                <span>删除</span>
+                                                            </button>
+                                                        </>
+                                                    }
+                                                >
+                                                    <div
                                                     className="ui-entry-card"
                                                     data-active={isEditing}
                                                     data-disabled={!effectiveEnabled}
@@ -840,7 +1062,14 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                 >
                                                     {/* Summary Row */}
                                                     <div
-                                                        onClick={() => setEditingPromptId(isEditing ? null : prompt.identifier)}
+                                                        onClick={() => {
+                                                            if (swipe.consumeClickSuppression()) return;
+                                                            if (swipe.openId || swipe.swipingId) {
+                                                                swipe.close();
+                                                                return;
+                                                            }
+                                                            setEditingPromptId(isEditing ? null : prompt.identifier);
+                                                        }}
                                                         className="flex justify-between items-start gap-2 cursor-pointer"
                                                     >
                                                         <div className="flex gap-3 flex-1 min-w-0 items-start" style={{ cursor: isEditing ? "default" : "grab" }}>
@@ -914,15 +1143,6 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                                 />
                                                                 <span className="ui-mini-toggle-thumb" />
                                                             </label>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setConfirmDeleteEntry(prompt.identifier);
-                                                                }}
-                                                                className="ui-link-btn p-1" data-variant="danger"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
                                                         </div>
                                                     </div>
 
@@ -1107,7 +1327,8 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                             </div>
                                                         </div>
                                                     )}
-                                                </div>
+                                                    </div>
+                                                </SwipeActionRow>
                                             );
                                         })}
                                         {(!preset.prompts || preset.prompts.length === 0) && (
@@ -1119,24 +1340,7 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
 
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            const newPrompt = {
-                                                identifier: `prompt-${Date.now()}`,
-                                                name: "新提示词",
-                                                role: "system" as const,
-                                                content: "",
-                                                injection_depth: 0,
-                                                enabled: true
-                                            };
-                                            const newPrompts = [...(preset.prompts || []), newPrompt];
-                                            const newOrder = newPrompts.map(p => ({
-                                                identifier: p.identifier,
-                                                enabled: preset.prompt_order
-                                                    ? (preset.prompt_order.find(o => o.identifier === p.identifier)?.enabled ?? p.enabled)
-                                                    : p.enabled,
-                                            }));
-                                            updatePreset(preset.id, { prompts: newPrompts, prompt_order: newOrder });
-                                        }}
+                                        onClick={() => setAddEntryMenuOpen(true)}
                                         className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95 focus:outline-none"
                                     >
                                         <Plus size={15} strokeWidth={1.8} />
@@ -1237,6 +1441,38 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                     onCancel={() => setImportError(null)}
                 />
             )}
+
+            {addEntryMenuOpen && editingId && (() => {
+                const preset = presets.find(p => p.id === editingId);
+                if (!preset) return null;
+                return (
+                    <BottomSheet title="添加条目" onClose={() => setAddEntryMenuOpen(false)}>
+                        <div className="flex flex-col gap-2">
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-primary w-full"
+                                onClick={() => {
+                                    setAddEntryMenuOpen(false);
+                                    createPromptAtEnd(preset);
+                                }}
+                            >
+                                <Plus size={16} /> 直接创建
+                            </button>
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-outline w-full"
+                                onClick={() => {
+                                    setAddEntryMenuOpen(false);
+                                    entryImportModeRef.current = { mode: "append" };
+                                    entryFileInputRef.current?.click();
+                                }}
+                            >
+                                <Upload size={16} /> 从 JSON 文件导入
+                            </button>
+                        </div>
+                    </BottomSheet>
+                );
+            })()}
 
             {expandTarget && editingId && (() => {
                 const preset = presets.find(p => p.id === editingId);
