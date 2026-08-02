@@ -598,6 +598,37 @@ function CharListView({
     }
     setIsEditing(!isEditing);
   }
+
+  /** 恢复视角：把当前世界所有已放置的卡片/道具重新框进可视范围（卡片被拖出画面找不到时用） */
+  function resetViewToFit() {
+    const rect = canvasElRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return;
+    const points: { x: number; y: number }[] = [];
+    for (const c of worldCharacters) {
+      if (c.canvasX !== undefined) points.push({ x: c.canvasX, y: c.canvasY || 0 });
+    }
+    for (const b of worldBgItems) points.push({ x: b.x, y: b.y });
+    let next: { x: number; y: number; zoom: number };
+    if (points.length === 0) {
+      next = { x: 0, y: 0, zoom: 1 };
+    } else {
+      // 卡片以左上角定位，按最大卡片尺寸把包围盒补足，再留出边距
+      const ITEM_W = 170, ITEM_H = 240, PAD = 40;
+      const minX = Math.min(...points.map(p => p.x)) - PAD;
+      const minY = Math.min(...points.map(p => p.y)) - PAD;
+      const maxX = Math.max(...points.map(p => p.x)) + ITEM_W + PAD;
+      const maxY = Math.max(...points.map(p => p.y)) + ITEM_H + PAD;
+      const zoom = Math.min(1, Math.max(0.05, Math.min(rect.width / (maxX - minX), rect.height / (maxY - minY))));
+      next = {
+        x: rect.width / 2 - zoom * ((minX + maxX) / 2),
+        y: rect.height / 2 - zoom * ((minY + maxY) / 2),
+        zoom,
+      };
+    }
+    setPan(next);
+    try { kvSet(worldPanKey(currentWorldId), JSON.stringify(next)); } catch { }
+    onNotice("已恢复视角");
+  }
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, type: 'char' | 'bg' } | null>(null);
   const [deleteConfirmReady, setDeleteConfirmReady] = useState(false);
   const [isAnyDragging, setIsAnyDragging] = useState(false);
@@ -959,17 +990,29 @@ function CharListView({
         }
         className="[&_.page-body]:pb-0"
         rightAction={
-          <button
-            className={`flex items-center justify-center w-[34px] h-[34px] rounded-full transition-colors ${
-              isEditing
-                ? 'bg-[#111111] text-white shadow-md'
-                : 'bg-black/5 text-[#666] hover:bg-black/10'
-            }`}
-            onClick={() => toggleEditing()}
-            aria-label="编辑排版"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {isEditing && (
+              <button
+                className="flex items-center justify-center w-[34px] h-[34px] rounded-full bg-black/5 text-[#666] hover:bg-black/10 transition-colors"
+                onClick={() => resetViewToFit()}
+                aria-label="恢复视角"
+                title="恢复视角"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
+              </button>
+            )}
+            <button
+              className={`flex items-center justify-center w-[34px] h-[34px] rounded-full transition-colors ${
+                isEditing
+                  ? 'bg-[#111111] text-white shadow-md'
+                  : 'bg-black/5 text-[#666] hover:bg-black/10'
+              }`}
+              onClick={() => toggleEditing()}
+              aria-label="编辑排版"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            </button>
+          </div>
         }
         footer={
           <div className="char-bottom-bar flex justify-center pb-8">

@@ -20,6 +20,7 @@
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/local-notifications": "^8.2.0",
     "@gltf-transform/functions": "^4.4.1",
+    "@heroicons/react": "^2.2.0",
     "@mdi/js": "^7.4.47",
     "@phosphor-icons/react": "^2.1.10",
     "@react-three/drei": "^10.7.7",

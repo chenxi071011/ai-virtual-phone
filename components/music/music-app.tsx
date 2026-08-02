@@ -9,7 +9,7 @@ import {
 } from "@/lib/music-storage";
 import { getPlayHistory, type PlayHistoryEntry } from "@/lib/music-history";
 import { useMusicControls, type MusicControlsValue } from "@/lib/music-context";
-import { scopeSessionCSS } from "@/lib/css-scoper";
+import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import {
     isNeteaseConfigured, loadMusicApiConfig, saveMusicApiConfig,
     searchNetease, getNeteasePlayUrl, getNeteaseLyrics, getNeteaseSongDetail,
@@ -253,7 +253,7 @@ export default function MusicApp({ onClose }: Props) {
 
     return (
         <div className="music-app">
-            {customCss && <style dangerouslySetInnerHTML={{ __html: scopeSessionCSS(customCss, ".music-app") }} />}
+            {customCss && <SessionCustomCSS css={customCss} scope=".music-app" />}
             {musicToast && (
                 <div className="music-toast-overlay">
                     <div className="music-toast-chip">

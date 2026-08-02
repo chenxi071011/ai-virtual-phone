@@ -195,6 +195,7 @@
 .widget-preview-mode.widget-1x4 { width: 320px; height: 58px; }
 .widget-preview-mode.widget-2x3 { width: 234px; height: 160px; }
 .widget-preview-mode.widget-3x2 { width: 148px; height: 258px; }
+.widget-preview-mode.widget-3x3 { width: 234px; height: 258px; }
 .widget-preview-mode.widget-2x4 { width: 320px; height: 160px; }
 .widget-preview-mode.widget-3x4 { width: 320px; height: 258px; }
 .widget-preview-mode.widget-4x2 { width: 148px; height: 356px; }
@@ -1300,6 +1301,7 @@
 .wm-cat-size-2x4,
 .wm-cat-size-2x3,
 .wm-cat-size-1x4,
+.wm-cat-size-3x3,
 .wm-cat-size-3x4,
 .wm-cat-size-4x4 {
   width: 100%;
@@ -1364,6 +1366,11 @@
 .wm-cat-size-1x4 .widget-preview-mode {
   width: 320px;
   height: 58px;
+}
+
+.wm-cat-size-3x3 .widget-preview-mode {
+  width: 234px;
+  height: 258px;
 }
 
 .wm-cat-size-3x4 .widget-preview-mode {

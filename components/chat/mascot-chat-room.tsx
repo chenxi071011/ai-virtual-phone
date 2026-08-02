@@ -8,7 +8,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { Input } from "@/components/ui/form";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
-import { scopeSessionCSS } from "@/lib/css-scoper";
+import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import {
     clearMascotToolHistoryMessages,
@@ -839,7 +839,7 @@ export function MascotChatRoom({ onBack, onDeleted }: MascotChatRoomProps) {
             {...(!initialScrollReady ? { "data-initial-scroll-pending": "" } : {})}
         >
             {settings.chatCustomCSS && (
-                <style dangerouslySetInnerHTML={{ __html: scopeSessionCSS(settings.chatCustomCSS, ".mascot-chat-session") }} />
+                <SessionCustomCSS css={settings.chatCustomCSS} scope=".mascot-chat-session" />
             )}
             <style>{`
                 .mascot-chat-session > .page-body {

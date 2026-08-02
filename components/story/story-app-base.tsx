@@ -2,7 +2,39 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, Menu, ArrowUp, Square, UserRound, MessageSquareText, Clock3, Sparkles, Eye, EyeOff, Paintbrush, X } from "lucide-react";
+import { Sparkles } from "lucide-react";
+import {
+  PaintBrushIcon,
+  PaperAirplaneIcon,
+  StopIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/solid";
+
+/* 三条粗横条的实心菜单图标，与实心图标集的笔画粗细一致 */
+function SolidMenuIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="3" y="4.6" width="18" height="2.8" />
+      <rect x="3" y="10.6" width="18" height="2.8" />
+      <rect x="3" y="16.6" width="18" height="2.8" />
+    </svg>
+  );
+}
+
+/* 粗笔画「‹」返回图标，笔画粗细与菜单横条一致 */
+function SolidBackIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M15 5 L8 12 L15 19"
+        stroke="currentColor"
+        strokeWidth={2.8}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+      />
+    </svg>
+  );
+}
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer } from "@/components/ui/story-html-renderer";
@@ -28,7 +60,7 @@ import {
   type StorySession,
   updateStorySession,
 } from "@/lib/story-storage";
-import { scopeSessionCSS } from "@/lib/css-scoper";
+import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { STORY_CSS_EXAMPLE } from "@/lib/css-examples";
 import { applyEditOutputRegex } from "@/lib/llm-prompt-assembler";
 import { MacroEngine } from "@/lib/macro-engine";
@@ -123,15 +155,9 @@ const STORY_LOAD_MORE_COUNT = 10;
 function StoryGeneratingIndicator({
   characterName,
   avatar,
-  hideAvatar,
-  hideTimestamp,
-  hideBubble,
 }: {
   characterName: string;
   avatar?: string;
-  hideAvatar: boolean;
-  hideTimestamp: boolean;
-  hideBubble: boolean;
 }) {
   const [statusIndex, setStatusIndex] = useState(0);
   const status = STORY_GENERATION_STATUS[statusIndex % STORY_GENERATION_STATUS.length];
@@ -144,19 +170,17 @@ function StoryGeneratingIndicator({
   }, []);
 
   return (
-    <article className="story-row" data-role="assistant" data-hide-bubble={hideBubble ? "true" : undefined}>
-      {!hideAvatar ? (
+    <article className="story-row" data-role="assistant">
+      <div className="story-msg-head">
         <div className="story-avatar-wrap">
           <Avatar src={avatar || undefined} name={characterName} size="md" />
         </div>
-      ) : null}
+        <div className="story-msg-meta">
+          <span className="story-msg-name">{characterName}</span>
+          <span className="story-msg-time story-generating-head">{status}</span>
+        </div>
+      </div>
       <div className="story-bubble-wrap">
-        {(!hideAvatar || !hideTimestamp) ? (
-          <div className="story-bubble-head">
-            {!hideAvatar ? <span>{characterName}</span> : null}
-            {!hideAvatar && !hideTimestamp ? <span className="story-generating-head">{status}</span> : null}
-          </div>
-        ) : null}
         <div className="story-bubble story-generating-bubble" aria-label="正在生成剧情">
           <span className="story-generating-copy">{status}</span>
           <span className="story-generating-dots" aria-hidden="true">
@@ -240,7 +264,7 @@ const StoryComposer = memo(function StoryComposer({
         title={isGenerating ? "停止剧情生成" : "发送剧情输入"}
         disabled={!isGenerating && !draft.trim()}
       >
-        {isGenerating ? <Square size={17} /> : <ArrowUp className="story-send-icon" size={18} />}
+        {isGenerating ? <StopIcon width={17} height={17} /> : <PaperAirplaneIcon width={17} height={17} className="story-send-icon" />}
       </button>
     </div>
   );
@@ -259,8 +283,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [foldTagsDraft, setFoldTagsDraft] = useState("");
   const [contextExcludedTagsDraft, setContextExcludedTagsDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [dragStartX, setDragStartX] = useState<number | null>(null);
-  const [dragDeltaX, setDragDeltaX] = useState(0);
+  // 抽屉滑动手势用 ref 而不是 state：手指按住时 touchmove 每帧都在触发，
+  // 逐帧 setState 会让整个剧情页以事件频率重渲染（iOS 上拉到顶/底按住不动时
+  // 表现为持续的重排/闪烁）
+  const dragStartXRef = useRef<number | null>(null);
+  const dragDeltaXRef = useRef(0);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [contextMenuPoint, setContextMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -362,6 +389,10 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (editingMessageIdRef.current) return; // 段落编辑期间任何路径都不允许自动贴底
     const node = scrollRef.current;
     if (!node) return;
+    // 已经贴底（或 iOS 橡皮筋回弹超出底部）时不再强写 scrollTop：
+    // 否则 ResizeObserver → 贴底 → scroll 事件 → 再贴底会形成每帧循环，
+    // 并和 iOS 的回弹动画互相打架
+    if (node.scrollHeight - node.scrollTop - node.clientHeight < 1) return;
     const prevBehavior = node.style.scrollBehavior;
     node.style.scrollBehavior = "auto";
     node.scrollTop = node.scrollHeight;
@@ -535,7 +566,10 @@ export function StoryApp({ onClose }: StoryAppProps) {
         cacheRefreshKeyRef.current = null;
       }
     };
-  }, [ready, activeCharacterId, currentSession, messages, isGenerating]);
+    // 依赖用 id/foldTags 原始值而不是 session 对象：会话缓存归一化会更换对象
+    // 引用，按对象依赖会让本 effect 在无关渲染中反复重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, activeCharacterId, currentSession?.id, currentSession?.foldTags, messages, isGenerating]);
 
   function applySessionUpdates(updates: Partial<StorySession>) {
     if (!currentSession) return;
@@ -619,16 +653,6 @@ export function StoryApp({ onClose }: StoryAppProps) {
     }
   }
 
-  function handleDrawerToggle(key: keyof NonNullable<StorySession["uiPrefs"]>) {
-    if (!currentSession) return;
-    applySessionUpdates({
-      uiPrefs: {
-        ...uiPrefs,
-        [key]: !uiPrefs[key],
-      },
-    });
-  }
-
   function handleStopGeneration() {
     if (!activeSessionId) return;
     const cancelled = cancelStoryGenerationRun(activeSessionId);
@@ -637,16 +661,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
   }
 
   function handleTouchStart(clientX: number) {
-    setDragStartX(clientX);
-    setDragDeltaX(0);
+    dragStartXRef.current = clientX;
+    dragDeltaXRef.current = 0;
   }
 
   function handleTouchMove(clientX: number) {
-    if (dragStartX == null) return;
-    setDragDeltaX(clientX - dragStartX);
+    if (dragStartXRef.current == null) return;
+    dragDeltaXRef.current = clientX - dragStartXRef.current;
   }
 
   function handleTouchEnd() {
+    const dragStartX = dragStartXRef.current;
+    const dragDeltaX = dragDeltaXRef.current;
     if (dragStartX == null) return;
     // 从右边缘向左滑打开
     const screenW = typeof window !== "undefined" ? window.innerWidth : 400;
@@ -657,8 +683,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (drawerOpen && dragDeltaX > 54) {
       setDrawerOpen(false);
     }
-    setDragStartX(null);
-    setDragDeltaX(0);
+    dragStartXRef.current = null;
+    dragDeltaXRef.current = 0;
   }
 
   // ── Long-press & context menu handlers ──
@@ -814,7 +840,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
             <div className="story-header-content">
               <div className="story-header-left">
                 <button className="story-top-btn" onClick={onClose} aria-label="关闭剧情模式">
-                  <ArrowLeft size={16} />
+                  <SolidBackIcon size={16} />
                 </button>
               </div>
               <div className="story-header-center">Story</div>
@@ -854,14 +880,14 @@ export function StoryApp({ onClose }: StoryAppProps) {
       onTouchEnd={handleTouchEnd}
       onMouseDown={(event) => handleTouchStart(event.clientX)}
       onMouseMove={(event) => {
-        if (dragStartX != null) handleTouchMove(event.clientX);
+        if (dragStartXRef.current != null) handleTouchMove(event.clientX);
       }}
       onMouseUp={handleTouchEnd}
       onMouseLeave={handleTouchEnd}
     >
       {/* Styles moved to styles/story.css */}
       {currentSession.customCSS ? (
-        <style dangerouslySetInnerHTML={{ __html: scopeSessionCSS(currentSession.customCSS, sessionScope) }} />
+        <SessionCustomCSS css={currentSession.customCSS} scope={sessionScope} />
       ) : null}
 
       {drawerOpen ? <div className="story-drawer-overlay" onClick={() => setDrawerOpen(false)} /> : null}
@@ -869,60 +895,25 @@ export function StoryApp({ onClose }: StoryAppProps) {
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">剧情角色</div>
           <div className="story-character-list">
-            {characters.map((character) => {
-              const session = createOrGetStorySession(character.id);
-              const sessionMessages = loadStoryMessages(session.id);
-              return (
-                <button
-                  key={character.id}
-                  className="story-character-chip"
-                  data-active={character.id === activeCharacterId ? "true" : undefined}
-                  onClick={() => {
-                    setActiveCharacterId(character.id);
-                    setDrawerOpen(false);
-                  }}
-                >
-                  <Avatar src={character.avatar || undefined} name={character.name} size="md" />
-                  <div className="text-left" style={{ minWidth: 0, overflow: "hidden", flex: 1 }}>
-                    <div className="font-semibold text-[var(--c-story-text,#4b4335)] truncate">{character.name}</div>
-                    <div className="text-[calc(12px*var(--app-text-scale,1))] text-[var(--c-story-sub,rgba(95,82,61,0.72))] truncate">
-                      {getStoryPreview(sessionMessages)}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+            {characters.map((character) => (
+              <button
+                key={character.id}
+                className="story-character-chip"
+                data-active={character.id === activeCharacterId ? "true" : undefined}
+                onClick={() => {
+                  setActiveCharacterId(character.id);
+                  setDrawerOpen(false);
+                }}
+              >
+                <Avatar src={character.avatar || undefined} name={character.name} size="lg" />
+                <span className="story-character-name">{character.name}</span>
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => handleDrawerToggle("hideBubble")}
-              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 0", borderRadius: 12, border: "1px solid var(--c-story-panel-border, rgba(0,0,0,0.04))", background: uiPrefs.hideBubble ? "var(--c-story-panel-active, rgba(148,163,184,0.12))" : "var(--c-story-panel, rgba(255,255,255,0.5))", fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-text, #3a3b3c)" }}
-            >
-              <MessageSquareText size={18} opacity={uiPrefs.hideBubble ? 0.4 : 1} />
-              <span>气泡</span>
-              {uiPrefs.hideBubble ? <EyeOff size={12} opacity={0.4} /> : <Eye size={12} opacity={0.6} />}
-            </button>
-            <button
-              onClick={() => handleDrawerToggle("hideAvatar")}
-              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 0", borderRadius: 12, border: "1px solid var(--c-story-panel-border, rgba(0,0,0,0.04))", background: uiPrefs.hideAvatar ? "var(--c-story-panel-active, rgba(148,163,184,0.12))" : "var(--c-story-panel, rgba(255,255,255,0.5))", fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-text, #3a3b3c)" }}
-            >
-              <UserRound size={18} opacity={uiPrefs.hideAvatar ? 0.4 : 1} />
-              <span>头像</span>
-              {uiPrefs.hideAvatar ? <EyeOff size={12} opacity={0.4} /> : <Eye size={12} opacity={0.6} />}
-            </button>
-            <button
-              onClick={() => handleDrawerToggle("hideTimestamp")}
-              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 0", borderRadius: 12, border: "1px solid var(--c-story-panel-border, rgba(0,0,0,0.04))", background: uiPrefs.hideTimestamp ? "var(--c-story-panel-active, rgba(148,163,184,0.12))" : "var(--c-story-panel, rgba(255,255,255,0.5))", fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-text, #3a3b3c)" }}
-            >
-              <Clock3 size={18} opacity={uiPrefs.hideTimestamp ? 0.4 : 1} />
-              <span>时间</span>
-              {uiPrefs.hideTimestamp ? <EyeOff size={12} opacity={0.4} /> : <Eye size={12} opacity={0.6} />}
-            </button>
-          </div>
           <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
             <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
               折叠标签
@@ -935,11 +926,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
               placeholder="think,thinking"
               style={{
                 width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 12,
-                border: "1px solid var(--c-story-panel-border, rgba(139, 120, 94, 0.14))",
+                padding: "8px 12px", borderRadius: 0,
+                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
                 background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
                 color: "var(--c-story-text, #4b4335)",
-                font: "calc(13px*var(--app-text-scale,1))/1.6 inherit",
+                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
               }}
             />
             <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
@@ -958,11 +949,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
               placeholder="think,thinking"
               style={{
                 width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 12,
-                border: "1px solid var(--c-story-panel-border, rgba(139, 120, 94, 0.14))",
+                padding: "8px 12px", borderRadius: 0,
+                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
                 background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
                 color: "var(--c-story-text, #4b4335)",
-                font: "calc(13px*var(--app-text-scale,1))/1.6 inherit",
+                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
               }}
             />
             <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
@@ -974,7 +965,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">工具</div>
           <button
-            className="story-character-chip justify-center"
+            className="story-tool-btn"
             onClick={() => {
               const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
               setMessages(rebuilt);
@@ -995,16 +986,16 @@ export function StoryApp({ onClose }: StoryAppProps) {
           <div className="story-header-content">
             <div className="story-header-left">
               <button className="story-top-btn" onClick={onClose} aria-label="关闭剧情模式">
-                <ArrowLeft size={16} />
+                <SolidBackIcon size={16} />
               </button>
             </div>
             <div className="story-header-center">Story</div>
             <div className="story-header-right" style={{ gap: 8 }}>
               <button className="story-top-btn" onClick={() => setCssModalOpen(true)} aria-label="页面样式">
-                <Paintbrush size={16} />
+                <PaintBrushIcon width={16} height={16} />
               </button>
               <button className="story-top-btn" onClick={() => setDrawerOpen(true)} aria-label="打开剧情侧栏">
-                <Menu size={16} />
+                <SolidMenuIcon size={16} />
               </button>
             </div>
           </div>
@@ -1083,7 +1074,6 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       key={message.id}
                       className="story-row"
                       data-role={message.role}
-                      data-hide-bubble={uiPrefs.hideBubble ? "true" : undefined}
                       onPointerDown={(e) => handleMsgPointerDown(e, message.id)}
                       onPointerMove={handleMsgPointerMove}
                       onPointerUp={handleMsgPointerUp}
@@ -1094,18 +1084,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
                         setActiveMessageId(message.id);
                       }}
                     >
-                      {!uiPrefs.hideAvatar ? (
-                        <div className="story-avatar-wrap">
-                          <Avatar src={avatarUrl} name={speakerName} size="md" />
+                      {message.role !== "system" ? (
+                        <div className="story-msg-head">
+                          <div className="story-avatar-wrap">
+                            <Avatar src={avatarUrl} name={speakerName} size="md" />
+                          </div>
+                          <div className="story-msg-meta">
+                            <span className="story-msg-name">{speakerName}</span>
+                            <span className="story-msg-time">{formatStoryTime(message.createdAt)}</span>
+                          </div>
                         </div>
                       ) : null}
                       <div className="story-bubble-wrap" style={{ position: "relative" }}>
-                        {(!uiPrefs.hideAvatar || !uiPrefs.hideTimestamp) ? (
-                          <div className="story-bubble-head">
-                            {!uiPrefs.hideAvatar ? <span>{speakerName}</span> : null}
-                            {!uiPrefs.hideTimestamp ? <span>{formatStoryTime(message.createdAt)}</span> : null}
-                          </div>
-                        ) : null}
                         <div className="story-bubble">
                           {editingMessageId === message.id ? (
                             <div className="story-inline-edit">
@@ -1135,6 +1125,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
                               content={message.renderedContent || message.rawContent}
                               messageId={message.id}
                               onOptionSelect={handleOptionSelect}
+                              serifIframeFallback
                             />
                           )}
                         </div>
@@ -1171,9 +1162,6 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <StoryGeneratingIndicator
                 characterName={currentCharacter.name}
                 avatar={currentCharacter.avatar || undefined}
-                hideAvatar={Boolean(uiPrefs.hideAvatar)}
-                hideTimestamp={Boolean(uiPrefs.hideTimestamp)}
-                hideBubble={Boolean(uiPrefs.hideBubble)}
               />
             ) : null}
           </div>
@@ -1204,7 +1192,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
               页面样式
             </span>
             <button className="story-top-btn" onClick={() => setCssModalOpen(false)}>
-              <X size={16} />
+              <XMarkIcon width={17} height={17} />
             </button>
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: "14px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1221,8 +1209,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       onClick={() => applySessionUpdates({ uiPrefs: { ...uiPrefs, theme: t.id } })}
                       style={{
                         minHeight: 54,
-                        borderRadius: 12,
-                        border: active ? "1px solid var(--c-story-text, #3a3b3c)" : "1px solid var(--c-story-panel-border, rgba(139, 120, 94, 0.14))",
+                        borderRadius: 0,
+                        border: "none",
+                        boxShadow: active ? "var(--story-paper-shadow)" : "var(--story-paper-shadow-soft)",
                         background: active ? "var(--c-story-panel-active, rgba(148,163,184,0.12))" : "var(--c-story-panel, rgba(255,255,255,0.5))",
                         color: "var(--c-story-text, #3a3b3c)",
                         display: "flex",
@@ -1237,10 +1226,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       <span style={{
                         width: 22,
                         height: 22,
-                        borderRadius: "50%",
+                        borderRadius: 0,
                         background: t.color,
-                        border: active ? "2px solid var(--c-story-bg-top, #fdfdfd)" : "2px solid transparent",
-                        boxShadow: active ? "0 0 0 2px var(--c-story-text, #3a3b3c)" : "0 2px 8px rgba(0,0,0,0.1)",
+                        border: "none",
+                        boxShadow: active
+                          ? "inset 0 0 0 2px var(--c-story-bg-top, #fdfdfd), 0 0 0 2px var(--c-story-text, #3a3b3c)"
+                          : "var(--story-paper-shadow-soft)",
                       }} />
                       <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-sub, #94a3b8)", lineHeight: 1.1 }}>{t.name}</span>
                     </button>
@@ -1257,7 +1248,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
             />
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <CSSSchemeBar target="story" currentCSS={customCssDraft} onLoad={setCustomCssDraft} btnStyle={{
-                border: "1px solid var(--c-story-btn-border, rgba(0,0,0,0.08))",
+                border: "none",
+                borderRadius: 0,
+                boxShadow: "var(--story-paper-shadow-soft)",
                 background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))",
                 color: "var(--c-story-text, #3a3b3c)",
               }} modalVars={{
@@ -1272,8 +1265,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <button
                 onClick={() => setCustomCssDraft(CSS_EXAMPLE)}
                 style={{
-                  flex: 1, padding: "12px 0", borderRadius: 12,
-                  border: "1px solid var(--c-story-btn-border, rgba(0,0,0,0.08))",
+                  flex: 1, padding: "12px 0", borderRadius: 0,
+                  border: "none", boxShadow: "var(--story-paper-shadow-soft)",
                   background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))", color: "var(--c-story-text, #3a3b3c)",
                   fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}
@@ -1283,8 +1276,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <button
                 onClick={() => setCustomCssDraft("")}
                 style={{
-                  flex: 1, padding: "12px 0", borderRadius: 12,
-                  border: "1px solid var(--c-story-btn-border, rgba(0,0,0,0.08))",
+                  flex: 1, padding: "12px 0", borderRadius: 0,
+                  border: "none", boxShadow: "var(--story-paper-shadow-soft)",
                   background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))", color: "var(--c-story-text, #3a3b3c)",
                   fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}
@@ -1294,7 +1287,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <button
                 onClick={() => { applySessionUpdates({ customCSS: customCssDraft }); setCssModalOpen(false); }}
                 style={{
-                  flex: 1, padding: "12px 0", borderRadius: 12, border: "none",
+                  flex: 1, padding: "12px 0", borderRadius: 0, border: "none", boxShadow: "var(--story-paper-shadow)",
                   background: "var(--c-story-send-bg-active, #dbe3ea)", color: "var(--c-story-send-color-active, #475569)",
                   fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}

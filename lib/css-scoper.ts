@@ -1,4 +1,27 @@
 /**
+ * 把 CSS 里的 @import 抽出来单独返回。
+ *
+ * @import 不能留在会话 <style> 里：iOS WebKit 在 @import 仍在加载/重试期间
+ * 会把整张样式表的所有规则都挂起。用户常引 Google Fonts，在无法直连的网络
+ * 下该请求反复失败重试，整张自定义 CSS 就会在"生效↔失效"之间来回翻转——
+ * 表现为剧情页拉到顶/底时页面在有 CSS 和无 CSS 之间闪烁。抽成独立的
+ * <link rel="stylesheet"> 后字体加载失败只影响字体本身，其余规则始终生效。
+ */
+export function extractCssImports(raw: string): { imports: string[]; css: string } {
+  const imports: string[] = [];
+  if (!raw || !raw.includes("@import")) return { imports, css: raw };
+  const css = raw.replace(
+    /@import\s+(?:url\(\s*(['"]?)([^'")]+)\1\s*\)|(['"])([^'"]+)\3)[^;]*;/gi,
+    (_match, _q1, urlInParens: string | undefined, _q2, bareUrl: string | undefined) => {
+      const url = (urlInParens || bareUrl || "").trim();
+      if (url) imports.push(url);
+      return "";
+    }
+  );
+  return { imports, css };
+}
+
+/**
  * Scope raw CSS so every rule selector is prefixed with a scope selector.
  * - `body` / `html` / `:root` selectors are replaced with the scope selector.
  * - `@keyframes` / `@font-face` blocks are passed through unchanged.

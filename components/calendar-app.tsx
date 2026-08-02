@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, Droplets, MapPin, Plus, Wand2, Trash2, Bot, Check, Palette, X, HeartPulse, MoreHorizontal } from "lucide-react";
 import { Avatar, EmptyState, GlassCard } from "./ui/primitives";
-import { scopeSessionCSS } from "@/lib/css-scoper";
+import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { Input, Select } from "./ui/form";
 import type { CalendarOwnerType, CalendarScheduleItem, CalendarWeekPlan } from "@/lib/calendar-types";
 import {
@@ -559,7 +559,7 @@ export function PhoneCalendarApp({
 
   return (
     <div className="calendar-app-shell" data-calendar-theme={config.theme}>
-      {appliedCalendarCss && <style dangerouslySetInnerHTML={{ __html: scopeSessionCSS(appliedCalendarCss, ".calendar-app-shell") }} />}
+      {appliedCalendarCss && <SessionCustomCSS css={appliedCalendarCss} scope=".calendar-app-shell" />}
       <div className="calendar-app">
         <header className="calendar-header">
           <div className="calendar-header-left">

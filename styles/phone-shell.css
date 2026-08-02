@@ -400,6 +400,11 @@
   height: calc(var(--slot-icon-height) + (2 * var(--slot-row-step)));
 }
 
+.icon-grid .widget-3x3 {
+  width: calc(var(--slot-icon-width) + (2 * (var(--slot-size) + var(--slot-gap-x))));
+  height: calc(var(--slot-icon-height) + (2 * var(--slot-row-step)));
+}
+
 .icon-grid .widget-4x2 {
   width: calc(var(--slot-icon-width) + var(--slot-size) + var(--slot-gap-x));
   height: calc(var(--slot-icon-height) + (3 * var(--slot-row-step)));
