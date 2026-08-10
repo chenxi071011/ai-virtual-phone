@@ -66,6 +66,8 @@ export type LlmToolCallDelta = {
 type ProviderRequestOptions = {
     stream?: boolean;
     tools?: LlmToolDefinition[];
+    /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用）。不填则沿用预设/各家默认 */
+    maxTokens?: number;
 };
 
 const ANTHROPIC_AUTO_MAX_TOKENS = 8192;
@@ -520,6 +522,7 @@ function buildOpenAICompatibleRequest(
         }),
         ...buildSamplingBody(preset),
     };
+    if (options.maxTokens && options.maxTokens > 0) body.max_tokens = Math.floor(options.maxTokens);
     if (options.stream) body.stream = true;
     if (options.tools?.length) {
         body.tools = options.tools.map((tool) => ({
@@ -563,7 +566,9 @@ function buildAnthropicRequest(
         model: config.defaultModel,
         messages: bodyMessages,
         temperature: preset?.temperature ?? 0.8,
-        max_tokens: preset?.openai_max_tokens && preset.openai_max_tokens > 0 ? preset.openai_max_tokens : ANTHROPIC_AUTO_MAX_TOKENS,
+        max_tokens: options.maxTokens && options.maxTokens > 0
+            ? Math.floor(options.maxTokens)
+            : preset?.openai_max_tokens && preset.openai_max_tokens > 0 ? preset.openai_max_tokens : ANTHROPIC_AUTO_MAX_TOKENS,
     };
     if (preset?.top_p !== undefined) body.top_p = preset.top_p;
     if (preset?.top_k && preset.top_k > 0) body.top_k = preset.top_k;
@@ -631,7 +636,9 @@ function buildGeminiRequest(
             temperature: preset?.temperature ?? 0.8,
             topP: preset?.top_p ?? 1,
             ...(preset?.top_k && preset.top_k > 0 ? { topK: preset.top_k } : {}),
-            ...(preset?.openai_max_tokens && preset.openai_max_tokens > 0 ? { maxOutputTokens: preset.openai_max_tokens } : {}),
+            ...(options.maxTokens && options.maxTokens > 0
+                ? { maxOutputTokens: Math.floor(options.maxTokens) }
+                : preset?.openai_max_tokens && preset.openai_max_tokens > 0 ? { maxOutputTokens: preset.openai_max_tokens } : {}),
         },
         safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },

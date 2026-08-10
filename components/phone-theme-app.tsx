@@ -45,6 +45,7 @@ import {
   saveThemeAssetFromBlob,
   deleteThemeAsset,
   getThemeAssetMap,
+  describeAssetSaveError,
 } from "@/lib/theme-storage";
 import { BINDING_ACCENTS } from "@/lib/ui-accent-colors";
 import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
@@ -1055,8 +1056,8 @@ function IconSkinPage({
         (Object.values(resolveActiveIconSkins(next)).filter(Boolean) as string[])
       );
       setThumbs(map);
-    } catch {
-      onNotice("上传失败，请重试");
+    } catch (error) {
+      onNotice(describeAssetSaveError(error));
     }
     setUploadTarget(null);
   }, [draft, uploadTarget, onDraftChange, onApply, onNotice]);
@@ -1092,8 +1093,8 @@ function IconSkinPage({
       await onApply(next);
       const map = await getThemeAssetMap([assetId]);
       setDockThumbUrl(map[assetId] ?? null);
-    } catch {
-      onNotice("上传失败，请重试");
+    } catch (error) {
+      onNotice(describeAssetSaveError(error));
     }
   }, [draft, onDraftChange, onApply, onNotice]);
 
@@ -1317,8 +1318,8 @@ function WallpaperPage({
       // Reload thumbnails for the new asset
       const map = await getThemeAssetMap(next.wallpaperLibrary);
       setThumbs(map);
-    } catch {
-      onNotice("\u4E0A\u4F20\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+    } catch (error) {
+      onNotice(describeAssetSaveError(error));
     }
   }, [draft, onDraftChange, onApply, onNotice]);
 

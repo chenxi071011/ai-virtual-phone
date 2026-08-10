@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Sparkles } from "lucide-react";
 import {
+  BookOpenIcon,
   PaintBrushIcon,
   PaperAirplaneIcon,
   StopIcon,
@@ -132,7 +132,7 @@ const STORY_THEMES = [
 function getStoryPreview(messages: StoryMessage[]): string {
   const last = messages[messages.length - 1];
   if (!last) return "从这里开始新的剧情。";
-  const source = last.renderedContent || last.rawContent;
+  const source = last.renderedContent || last.rawContent || "";
   // Strip HTML tags and collapse whitespace for preview text
   const text = source.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   return text.slice(0, 60) || "继续上次的场景。";
@@ -282,7 +282,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [customCssDraft, setCustomCssDraft] = useState("");
   const [foldTagsDraft, setFoldTagsDraft] = useState("");
   const [contextExcludedTagsDraft, setContextExcludedTagsDraft] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+  // 生成状态按会话记录：避免在 A 会话生成时切到 B 会话也显示"正在生成"
+  const [generatingSessionIds, setGeneratingSessionIds] = useState<ReadonlySet<string>>(() => new Set());
   // 抽屉滑动手势用 ref 而不是 state：手指按住时 touchmove 每帧都在触发，
   // 逐帧 setState 会让整个剧情页以事件频率重渲染（iOS 上拉到顶/底按住不动时
   // 表现为持续的重排/闪烁）
@@ -319,6 +320,16 @@ export function StoryApp({ onClose }: StoryAppProps) {
     [sessions, activeSessionId]
   );
   const uiPrefs = currentSession?.uiPrefs || {};
+  const isGenerating = Boolean(activeSessionId) && generatingSessionIds.has(activeSessionId);
+
+  const markGenerating = useCallback((sessionId: string, on: boolean) => {
+    setGeneratingSessionIds((prev) => {
+      if (on === prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      if (on) next.add(sessionId); else next.delete(sessionId);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -337,6 +348,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         const session = createOrGetStorySession(initialChar);
         setActiveCharacterId(initialChar);
         setActiveSessionId(session.id);
+        activeSessionIdRef.current = session.id; // 同步更新，堵住生成完成回调的守卫空窗
         setVisibleMessageCount(STORY_INITIAL_LOAD);
         setMessages(loadStoryMessages(session.id));
         setCustomCssDraft(session.customCSS || "");
@@ -352,6 +364,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (!activeCharacterId) return;
     const session = createOrGetStorySession(activeCharacterId);
     setActiveSessionId(session.id);
+    activeSessionIdRef.current = session.id; // 同步更新，堵住生成完成回调的守卫空窗
     setVisibleMessageCount(STORY_INITIAL_LOAD);
     setMessages(loadStoryMessages(session.id));
     setCustomCssDraft(session.customCSS || "");
@@ -519,7 +532,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
     const activeAssistantMessages = messages.filter((message) => message.role === "assistant");
     if (activeAssistantMessages.length === 0) return;
 
-    const { regexSignature, parserVersion } = getStoryRenderSignature(activeCharacterId);
+    // 配置解析可能抛错（如绑定的 API 配置已被删除）；这里在渲染 effect 里，
+    // 抛出去会让整个剧情页白屏，所以失败时跳过缓存刷新，错误留到发送时提示
+    let signature: { regexSignature: string; parserVersion: number };
+    try {
+      signature = getStoryRenderSignature(activeCharacterId);
+    } catch {
+      return;
+    }
+    const { regexSignature, parserVersion } = signature;
     const hasStaleMessage = activeAssistantMessages.some((message) => (
       !message.renderedContent
       || message.regexSignature !== regexSignature
@@ -537,7 +558,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
     const runRefresh = () => {
       if (cancelled) return;
-      const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
+      let rebuilt: StoryMessage[];
+      try {
+        rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
+      } catch {
+        if (cacheRefreshKeyRef.current === refreshKey) cacheRefreshKeyRef.current = null;
+        return;
+      }
       if (cancelled) return;
       if (activeSessionIdRef.current === currentSession.id) {
         setMessages(rebuilt);
@@ -595,7 +622,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
-    setIsGenerating(true);
+    markGenerating(sessionId, true);
     const generationRun = createStoryGenerationRun(sessionId);
     const generationRunId = generationRun.runId;
     const isCurrentGeneration = () => mountedRef.current && isStoryGenerationRunActive(sessionId, generationRunId);
@@ -618,7 +645,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         parserVersion: result.parserVersion,
       });
       if (activeSessionIdRef.current === sessionId) {
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages(loadStoryMessages(sessionId)); // 按会话从存储重读，杜绝跨会话串消息
       }
       setStorageVersion((value) => value + 1);
 
@@ -644,12 +671,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
         renderedContent: errText,
       });
       if (activeSessionIdRef.current === sessionId) {
-        setMessages((prev) => [...prev, systemMessage]);
+        setMessages(loadStoryMessages(sessionId));
       }
       setStorageVersion((value) => value + 1);
     } finally {
-      if (!finishStoryGenerationRun(sessionId, generationRunId)) return;
-      setIsGenerating(false);
+      if (finishStoryGenerationRun(sessionId, generationRunId)) {
+        markGenerating(sessionId, false);
+      }
     }
   }
 
@@ -657,7 +685,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (!activeSessionId) return;
     const cancelled = cancelStoryGenerationRun(activeSessionId);
     if (!cancelled && !isGenerating) return;
-    setIsGenerating(false);
+    markGenerating(activeSessionId, false);
   }
 
   function handleTouchStart(clientX: number) {
@@ -799,7 +827,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setMessages(contextMessages);
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
-    setIsGenerating(true);
+    // 重试会截掉一条长消息，内容变矮时浏览器把滚动位置钳回新底部，
+    // 看起来像"页面跳到上面"；这里主动贴底，让视线落在生成指示器上
+    autoBottomLockRef.current = true;
+    requestAnimationFrame(() => scrollStoryToBottom());
+    markGenerating(sessionId, true);
     const generationRun = createStoryGenerationRun(sessionId);
     const generationRunId = generationRun.runId;
     const isCurrentGeneration = () => mountedRef.current && isStoryGenerationRunActive(sessionId, generationRunId);
@@ -815,17 +847,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
         rawContent: result.rawText, renderedContent: result.renderedText,
         storySummary: result.storySummary, regexSignature: result.regexSignature, parserVersion: result.parserVersion,
       });
-      if (activeSessionIdRef.current === sessionId) setMessages(prev => [...prev, assistantMessage]);
+      if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
       setStorageVersion(v => v + 1);
     } catch (error) {
       if (!isCurrentGeneration() || isAbortLikeError(error)) return;
       const errText = error instanceof Error ? error.message : "重试失败，请稍后再试。";
       const systemMessage = pushStoryMessage({ sessionId, role: "system", rawContent: errText, renderedContent: errText });
-      if (activeSessionIdRef.current === sessionId) setMessages(prev => [...prev, systemMessage]);
+      if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
       setStorageVersion(v => v + 1);
     } finally {
-      if (!finishStoryGenerationRun(sessionId, generationRunId)) return;
-      setIsGenerating(false);
+      if (finishStoryGenerationRun(sessionId, generationRunId)) {
+        markGenerating(sessionId, false);
+      }
     }
   }
 
@@ -851,7 +884,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
           <div className="story-stage story-stage-empty">
             <div className="story-stage-inner">
               <div className="story-empty story-empty-panel">
-                <Sparkles size={28} opacity={0.5} />
+                <BookOpenIcon width={30} height={30} opacity={0.45} />
                 <div>
                   <div className="story-empty-title">还没有角色卡</div>
                   <div className="story-empty-desc">请先创建或导入角色卡，再进入剧情 APP 开始故事。</div>
@@ -967,10 +1000,14 @@ export function StoryApp({ onClose }: StoryAppProps) {
           <button
             className="story-tool-btn"
             onClick={() => {
-              const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
-              setMessages(rebuilt);
-              setStorageVersion((value) => value + 1);
-              alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+              try {
+                const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
+                setMessages(rebuilt);
+                setStorageVersion((value) => value + 1);
+                alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+              } catch (error) {
+                alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
+              }
             }}
           >
             重建渲染缓存
@@ -1020,7 +1057,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
                   {currentCharacter.avatar ? (
                     <img src={currentCharacter.avatar} alt="cover" />
                   ) : (
-                    <div style={{ width: "100%", height: "100%", background: "var(--c-story-accent, #94a3b8)", opacity: 0.2 }} />
+                    <div className="story-meta-cover-fallback" aria-hidden="true">
+                      <span className="story-meta-cover-char">{currentCharacter.name.trim().charAt(0) || "书"}</span>
+                      <span className="story-meta-cover-line" />
+                      <span className="story-meta-cover-sub">STORY</span>
+                    </div>
                   )}
                 </div>
                 <div className="story-meta-body">
@@ -1038,7 +1079,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
             {messages.length === 0 ? (
               <div className="story-empty">
-                <Sparkles size={26} opacity={0.5} />
+                <BookOpenIcon width={28} height={28} opacity={0.45} />
                 <div>
                   <div className="text-[calc(14px*var(--app-text-scale,1))] font-medium text-[var(--c-story-heading,#1e293b)] mb-1">故事从这里开始</div>
                   <div className="text-[calc(12px*var(--app-text-scale,1))] opacity-70">从底部输入一段引导，剧情会继续展开。</div>
@@ -1211,7 +1252,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
                         minHeight: 54,
                         borderRadius: 0,
                         border: "none",
-                        boxShadow: active ? "var(--story-paper-shadow)" : "var(--story-paper-shadow-soft)",
+                        boxShadow: "none",
                         background: active ? "var(--c-story-panel-active, rgba(148,163,184,0.12))" : "var(--c-story-panel, rgba(255,255,255,0.5))",
                         color: "var(--c-story-text, #3a3b3c)",
                         display: "flex",
@@ -1226,12 +1267,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       <span style={{
                         width: 22,
                         height: 22,
-                        borderRadius: 0,
+                        borderRadius: "50%",
                         background: t.color,
                         border: "none",
                         boxShadow: active
                           ? "inset 0 0 0 2px var(--c-story-bg-top, #fdfdfd), 0 0 0 2px var(--c-story-text, #3a3b3c)"
-                          : "var(--story-paper-shadow-soft)",
+                          : "none",
                       }} />
                       <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-sub, #94a3b8)", lineHeight: 1.1 }}>{t.name}</span>
                     </button>
@@ -1250,7 +1291,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <CSSSchemeBar target="story" currentCSS={customCssDraft} onLoad={setCustomCssDraft} btnStyle={{
                 border: "none",
                 borderRadius: 0,
-                boxShadow: "var(--story-paper-shadow-soft)",
+                boxShadow: "none",
                 background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))",
                 color: "var(--c-story-text, #3a3b3c)",
               }} modalVars={{
@@ -1266,9 +1307,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
                 onClick={() => setCustomCssDraft(CSS_EXAMPLE)}
                 style={{
                   flex: 1, padding: "12px 0", borderRadius: 0,
-                  border: "none", boxShadow: "var(--story-paper-shadow-soft)",
+                  border: "none", boxShadow: "none",
                   background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))", color: "var(--c-story-text, #3a3b3c)",
-                  fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
+                  fontSize: "calc(12px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}
               >
                 加载示例
@@ -1277,9 +1318,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
                 onClick={() => setCustomCssDraft("")}
                 style={{
                   flex: 1, padding: "12px 0", borderRadius: 0,
-                  border: "none", boxShadow: "var(--story-paper-shadow-soft)",
+                  border: "none", boxShadow: "none",
                   background: "var(--c-story-btn-bg, rgba(255,255,255,0.5))", color: "var(--c-story-text, #3a3b3c)",
-                  fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
+                  fontSize: "calc(12px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}
               >
                 清除
@@ -1287,9 +1328,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <button
                 onClick={() => { applySessionUpdates({ customCSS: customCssDraft }); setCssModalOpen(false); }}
                 style={{
-                  flex: 1, padding: "12px 0", borderRadius: 0, border: "none", boxShadow: "var(--story-paper-shadow)",
+                  flex: 1, padding: "12px 0", borderRadius: 0, border: "none", boxShadow: "none",
                   background: "var(--c-story-send-bg-active, #dbe3ea)", color: "var(--c-story-send-color-active, #475569)",
-                  fontSize: "calc(14px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
+                  fontSize: "calc(12px*var(--app-text-scale,1))", fontWeight: 500, cursor: "pointer",
                 }}
               >
                 应用

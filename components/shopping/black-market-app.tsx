@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Check,
@@ -11,6 +11,8 @@ import {
   Pencil,
   Plus,
   MoreHorizontal,
+  Download,
+  Upload,
   PenLine,
   Play,
   RefreshCw,
@@ -18,7 +20,8 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { kvGet, kvSet } from "@/lib/kv-db";
+import { downloadFile } from "@/lib/download-utils";
+import { kvGet, kvSet, registerKvMigration } from "@/lib/kv-db";
 
 import {
   BLACK_MARKET_DAILY_CHECKIN_CREDITS,
@@ -30,6 +33,7 @@ import {
   formatShadowCredits,
   getBlackMarketCatalog,
   getBlackMarketSceneSession,
+  upsertLocalTestTheater,
   appendBlackMarketSceneMessage,
   loadAllBlackMarketTheaterProjectionEntries,
   loadBlackMarketSceneSessions,
@@ -61,9 +65,12 @@ import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import type { BlackMarketOwnedTheater, BlackMarketRenderRule, BlackMarketSceneSession, BlackMarketState, BlackMarketTheaterProjectionEntry, BlackMarketTheaterTemplate } from "@/lib/black-market-types";
+import { IFRAME_ERROR_CAPTURE_SCRIPT } from "@/lib/qa-iframe-error-bridge";
 
 type BlackMarketAppProps = {
   onClose: () => void;
+  /** 工坊预览等场景：挂载后直接打开该本机剧场的试演入口 */
+  autoOpenLocalId?: string;
 };
 
 type BlackMarketTab = "market" | "vault" | "ledger" | "studio";
@@ -75,11 +82,6 @@ type BlackMarketDeleteTarget =
   | { kind: "published"; templateId: string };
 type BlackMarketExternalCanvasRequest = "start" | "resume" | null;
 type BlackMarketSceneConfirmAction = "return" | "archive" | "restart" | "summary";
-type BlackMarketPublishChoice = {
-  sourceTemplateId: string;
-  sourceTemplateTitle: string;
-};
-
 type BlackMarketNotice = {
   id: number;
   tone: "success" | "error" | "info";
@@ -98,6 +100,8 @@ const BLACK_MARKET_THEATER_FRAME_COLLAPSE_THRESHOLD = 900;
 const BLACK_MARKET_THEATER_FRAME_COLLAPSED_HEIGHT = 620;
 const BLACK_MARKET_REPLY_FRAME_MIN_HEIGHT = 90;
 const BLACK_MARKET_STUDIO_DRAFTS_KEY = "ai_phone_black_market_studio_drafts_v1";
+// 注册 localStorage → kv-db 迁移：老版本存在 localStorage 里的草稿在首次进入时收编进 kv
+registerKvMigration(BLACK_MARKET_STUDIO_DRAFTS_KEY);
 const BLACK_MARKET_STUDIO_TEST_USER_SAMPLE = "你刚才到底想隐瞒什么？";
 const BLACK_MARKET_STUDIO_TEST_ASSISTANT_SAMPLE = `*他猛地攥紧袖口，呼吸停了一拍。*
 
@@ -140,6 +144,8 @@ type BlackMarketStudioDraft = {
   draft: TheaterDraft;
   sourceTemplateId?: string;
   sourceTemplateTitle?: string;
+  /** 关联发布档案后,本机又存过草稿但还没提交更新时为 true;更新发布成功后清除 */
+  hasUnpublishedChanges?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -316,7 +322,7 @@ html,body{
 })();
 </script>`;
 
-  return /<\/body>/i.test(base) ? base.replace(/<\/body>/i, `${bridge}</body>`) : `${base}${bridge}`;
+  return /<\/body>/i.test(base) ? base.replace(/<\/body>/i, `${IFRAME_ERROR_CAPTURE_SCRIPT}${bridge}</body>`) : `${base}${IFRAME_ERROR_CAPTURE_SCRIPT}${bridge}`;
 }
 
 function createBlackMarketReplyFrameSrcDoc(html: string, frameId: string): string {
@@ -395,7 +401,92 @@ ${body}
 })();
 </script>`;
 
-  return /<\/body>/i.test(base) ? base.replace(/<\/body>/i, `${bridge}</body>`) : `${base}${bridge}`;
+  return /<\/body>/i.test(base) ? base.replace(/<\/body>/i, `${IFRAME_ERROR_CAPTURE_SCRIPT}${bridge}</body>`) : `${base}${IFRAME_ERROR_CAPTURE_SCRIPT}${bridge}`;
+}
+
+/** 找到最近的纵向滚动祖先（用于 iframe 高度变化时的手动滚动锚定） */
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/**
+ * iframe 高度异步上报（加载后 80/500/1600ms 修正）时，若 iframe 整体位于
+ * 滚动视口上方，内容会被向下顶、视口里的内容瞬间上移（iOS 无滚动锚定）。
+ * 这里手动补偿 scrollTop 保持视觉稳定；配套 CSS 已关掉原生 overflow-anchor，
+ * 避免 Chrome 双重补偿。返回 setter：记下补偿量再更新高度。
+ */
+function useAnchoredFrameHeight(
+  iframeRef: { current: HTMLIFrameElement | null },
+  minHeight: number,
+): [number, (next: number) => void] {
+  const [height, setHeight] = useState(minHeight);
+  const heightRef = useRef(minHeight);
+  const pendingAdjustRef = useRef(0);
+
+  const applyHeight = (raw: number) => {
+    const next = Math.max(minHeight, Math.round(raw));
+    const prev = heightRef.current;
+    if (next === prev) return;
+    const el = iframeRef.current;
+    const scroller = findScrollParent(el);
+    if (el && scroller) {
+      if (next < prev) {
+        // 贴底钳位保护：缩小会减短 scrollHeight，若剩余可滚距离不够，
+        // scrollTop 会被浏览器钳位、视口瞬间上跳——此时放弃本次缩小，
+        // 等桥接脚本下次上报（离开底部后）再收紧。
+        const slack = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+        if (prev - next > slack - 4) return;
+      }
+      const frameBottom = el.getBoundingClientRect().bottom;
+      const viewTop = scroller.getBoundingClientRect().top;
+      if (frameBottom <= viewTop + 1) pendingAdjustRef.current += next - prev;
+    }
+    heightRef.current = next;
+    setHeight(next);
+  };
+
+  useLayoutEffect(() => {
+    if (!pendingAdjustRef.current) return;
+    const scroller = findScrollParent(iframeRef.current);
+    if (scroller) scroller.scrollTop += pendingAdjustRef.current;
+    pendingAdjustRef.current = 0;
+  });
+
+  return [height, applyHeight];
+}
+
+/** 终端时钟（独立组件：避免每秒把整个黑市页拉着重渲染） */
+function BlackMarketTerminalClock() {
+  const [time, setTime] = useState("00:00:00");
+  useEffect(() => {
+    const tick = () => {
+      const date = new Date();
+      const pad = (value: number) => String(value).padStart(2, "0");
+      setTime(`${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <>{time}</>;
+}
+
+/** 假延迟数字（独立组件：避免每 2.6 秒整页重渲染） */
+function BlackMarketLatencyMeter() {
+  const [latency, setLatency] = useState(147);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLatency(118 + Math.floor(Math.random() * 74));
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <>{latency}ms</>;
 }
 
 function BlackMarketTheaterHtmlFrame({
@@ -411,7 +502,9 @@ function BlackMarketTheaterHtmlFrame({
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [frameId] = useState(() => `bm_theater_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-  const [height, setHeight] = useState(BLACK_MARKET_THEATER_FRAME_MIN_HEIGHT);
+  const [height, applyHeight] = useAnchoredFrameHeight(iframeRef, BLACK_MARKET_THEATER_FRAME_MIN_HEIGHT);
+  const applyHeightRef = useRef(applyHeight);
+  applyHeightRef.current = applyHeight;
   const [collapsed, setCollapsed] = useState(false);
   const srcDoc = useMemo(() => createBlackMarketTheaterFrameSrcDoc(html, frameId), [frameId, html]);
   const canCollapse = collapsible && height > BLACK_MARKET_THEATER_FRAME_COLLAPSE_THRESHOLD;
@@ -434,7 +527,7 @@ function BlackMarketTheaterHtmlFrame({
       if (!isBridgeResize && !isLegacyResize) return;
       const nextHeight = Number(record.height);
       if (!Number.isFinite(nextHeight)) return;
-      setHeight(Math.max(BLACK_MARKET_THEATER_FRAME_MIN_HEIGHT, Math.round(nextHeight)));
+      applyHeightRef.current(nextHeight);
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
@@ -501,7 +594,9 @@ function renderSceneMessageHtml(content: string, template?: BlackMarketTheaterTe
 function BlackMarketReplyHtmlFrame({ html, title, allowExternalControl = false }: { html: string; title: string; allowExternalControl?: boolean }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [frameId] = useState(() => `bm_reply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-  const [height, setHeight] = useState(BLACK_MARKET_REPLY_FRAME_MIN_HEIGHT);
+  const [height, applyHeight] = useAnchoredFrameHeight(iframeRef, BLACK_MARKET_REPLY_FRAME_MIN_HEIGHT);
+  const applyHeightRef = useRef(applyHeight);
+  applyHeightRef.current = applyHeight;
   const srcDoc = useMemo(() => createBlackMarketReplyFrameSrcDoc(html, frameId), [frameId, html]);
 
   useEffect(() => {
@@ -513,7 +608,7 @@ function BlackMarketReplyHtmlFrame({ html, title, allowExternalControl = false }
       if (record.source !== "black-market-reply-canvas" || record.type !== "resize" || record.id !== frameId) return;
       const nextHeight = Number(record.height);
       if (!Number.isFinite(nextHeight)) return;
-      setHeight(Math.max(BLACK_MARKET_REPLY_FRAME_MIN_HEIGHT, Math.round(nextHeight)));
+      applyHeightRef.current(nextHeight);
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
@@ -701,6 +796,7 @@ function normalizeStudioDraftRecord(value: unknown): BlackMarketStudioDraft | nu
     draft,
     sourceTemplateId: String(record.sourceTemplateId ?? "").trim() || undefined,
     sourceTemplateTitle: String(record.sourceTemplateTitle ?? "").trim() || undefined,
+    hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
     createdAt: String(record.createdAt ?? now),
     updatedAt: String(record.updatedAt ?? now),
   };
@@ -800,7 +896,7 @@ function createDraftPreviewTemplate(draft: TheaterDraft, renderRules: BlackMarke
   };
 }
 
-export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
+export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps) {
   const { account } = useAccount();
   const [state, setState] = useState<BlackMarketState>(() => loadBlackMarketState());
   const [theaterRecords, setTheaterRecords] = useState<BlackMarketTheaterProjectionEntry[]>(() => loadAllBlackMarketTheaterProjectionEntries());
@@ -811,21 +907,21 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
   const [communityTheaters, setCommunityTheaters] = useState<BlackMarketTheaterTemplate[]>([]);
   const [communityLoading, setCommunityLoading] = useState(false);
   const [communityError, setCommunityError] = useState<string | null>(null);
+  const [communityErrorDialog, setCommunityErrorDialog] = useState<string | null>(null);
+  const dismissedCommunityErrorRef = useRef<string | null>(null);
   const [walletBusy, setWalletBusy] = useState<"sync" | "checkin" | "purchase" | null>(null);
   const [studioMode, setStudioMode] = useState<BlackMarketStudioMode>("published");
   const defaultDraft = useMemo(() => createDefaultDraft(), []);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [studioDrafts, setStudioDrafts] = useState<BlackMarketStudioDraft[]>(() => loadBlackMarketStudioDrafts());
+  const studioDraftFileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<TheaterDraft>(() => createDefaultDraft());
   const [publishing, setPublishing] = useState(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BlackMarketDeleteTarget | null>(null);
-  const [publishChoice, setPublishChoice] = useState<BlackMarketPublishChoice | null>(null);
   const [recordMenuId, setRecordMenuId] = useState<string | null>(null);
   const [previewNonce, setPreviewNonce] = useState(0);
-  const [terminalTime, setTerminalTime] = useState("00:00:00");
-  const [latency, setLatency] = useState(147);
   const [launchOwnedId, setLaunchOwnedId] = useState<string | null>(null);
   const [launchCharacterId, setLaunchCharacterId] = useState("");
   const [activeScene, setActiveScene] = useState<BlackMarketSceneSession | null>(null);
@@ -889,10 +985,6 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
   const editingStudioDraft = useMemo(
     () => editingDraftId ? studioDrafts.find(item => item.id === editingDraftId) ?? null : null,
     [editingDraftId, studioDrafts],
-  );
-  const publishChoiceSourceTemplate = useMemo(
-    () => publishChoice ? communityTheaters.find(item => item.id === publishChoice.sourceTemplateId) ?? null : null,
-    [communityTheaters, publishChoice],
   );
   const resumableLaunchScene = useMemo(() => {
     if (!launchOwnedTheater || !launchCharacterId) return null;
@@ -969,23 +1061,13 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
     };
   }, [account.id]);
 
+  // 云端同步失败改为一次性弹窗（同一条错误只弹一次），不再常驻横幅——自部署无云端时界面保持干净
   useEffect(() => {
-    const tick = () => {
-      const date = new Date();
-      const pad = (value: number) => String(value).padStart(2, "0");
-      setTerminalTime(`${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`);
-    };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setLatency(118 + Math.floor(Math.random() * 74));
-    }, 2600);
-    return () => window.clearInterval(timer);
-  }, []);
+    if (communityError && dismissedCommunityErrorRef.current !== communityError) {
+      dismissedCommunityErrorRef.current = communityError;
+      setCommunityErrorDialog(communityError);
+    }
+  }, [communityError]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -1094,6 +1176,19 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
   function requiresExternalCanvasPermission(item?: BlackMarketOwnedTheater | null): boolean {
     return item?.templateSnapshot.allowExternalControl === true;
   }
+
+  // 工坊预览等场景：带 autoOpenLocalId 打开时，挂载后直接进入该剧场的试演入口
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoOpenLocalId || autoOpenedRef.current) return;
+    const item = loadBlackMarketState().ownedTheaters.find(owned => owned.localId === autoOpenLocalId);
+    if (!item) return;
+    autoOpenedRef.current = true;
+    setSelectedTab("studio");
+    setStudioMode("drafts");
+    openSceneLauncher(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenLocalId]);
 
   function openSceneLauncher(item: BlackMarketOwnedTheater): void {
     const existing = loadBlackMarketSceneSessions().find(session =>
@@ -1601,6 +1696,8 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
           draft,
           sourceTemplateId,
           sourceTemplateTitle,
+          // 关联草稿存了新内容但还没提交更新：卡片在「已发布」旁提示有未发布改动
+          hasUnpublishedChanges: sourceTemplateId ? true : undefined,
           createdAt: existing?.createdAt || now,
           updatedAt: now,
         },
@@ -1622,14 +1719,52 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
     showNotice("info", "草稿已删除");
   }
 
-  function getEditingDraftPublishSource(): BlackMarketPublishChoice | null {
-    const currentDraft = editingStudioDraft;
-    const sourceTemplateId = currentDraft?.sourceTemplateId?.trim();
-    if (!editingDraftId || !currentDraft || !sourceTemplateId) return null;
-    return {
-      sourceTemplateId,
-      sourceTemplateTitle: currentDraft.sourceTemplateTitle?.trim() || currentDraft.title || "原发布档案",
-    };
+  // 导出剧场草稿为 JSON 文件（blob 下载，不触发页面刷新），可发给别人「从文件导入」
+  async function exportStudioDraftFile(item: BlackMarketStudioDraft): Promise<void> {
+    try {
+      const payload = { type: "ai-phone-theater-draft", version: 1, title: item.title, draft: item.draft };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      await downloadFile(blob, `${item.title.trim() || "剧场草稿"}.json`);
+      showNotice("success", "草稿已导出为文件");
+    } catch (err) {
+      showNotice("error", err instanceof Error ? err.message : "导出失败");
+    }
+  }
+
+  // 已发布档案直接导出为草稿文件（拉全量模板转换，不经过创建表单）
+  async function exportPublishedTemplateFile(template: BlackMarketTheaterTemplate): Promise<void> {
+    try {
+      const fullTemplate = await ensureFullTheaterTemplate(template);
+      const payload = {
+        type: "ai-phone-theater-draft",
+        version: 1,
+        title: fullTemplate.title,
+        draft: createDraftFromTemplate(fullTemplate),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      await downloadFile(blob, `${fullTemplate.title.trim() || "剧场草稿"}.json`);
+      showNotice("success", "已导出为草稿文件");
+    } catch (err) {
+      showNotice("error", err instanceof Error ? err.message : "导出失败");
+    }
+  }
+
+  // 导入草稿 JSON：整张创建表单自动填好（入口在「创建发布」表单顶部）
+  async function importStudioDraftFile(file: File): Promise<void> {
+    try {
+      const payload = JSON.parse(await file.text()) as { type?: string; draft?: unknown; title?: string };
+      if (payload?.type !== "ai-phone-theater-draft" || !payload.draft || typeof payload.draft !== "object") {
+        throw new Error("不是有效的剧场草稿文件（需要从草稿箱「EXPORT」生成）");
+      }
+      const importedDraft = normalizeStudioDraftPayload(payload.draft);
+      setEditingDraftId(null);
+      setEditingTemplateId(null);
+      setDraft(importedDraft);
+      const title = (typeof payload.title === "string" && payload.title.trim()) || importedDraft.title.trim() || "导入的剧场";
+      showNotice("success", `已导入草稿「${title}」，检查后可存草稿或发布`);
+    } catch (err) {
+      showNotice("error", err instanceof Error ? err.message : "导入失败");
+    }
   }
 
   function buildDraftTemplate(existing?: BlackMarketTheaterTemplate | null): BlackMarketTheaterTemplate {
@@ -1671,16 +1806,47 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
     };
   }
 
-  async function publishCurrentDraft(mode: "auto" | "new" | "overwrite-source" = "auto"): Promise<void> {
+  function localTestDraft(): void {
+    try {
+      const template = { ...buildDraftTemplate(editingTemplate), source: "local" as const };
+      // 稳定 key：优先用草稿 id；若是未保存的新草稿，先存草稿再测，保证重复测试幂等
+      let draftId = editingDraftId;
+      if (!draftId) {
+        draftId = createStudioDraftId();
+        const now = new Date().toISOString();
+        const title = draft.title.trim() || "未命名草稿";
+        setEditingDraftId(draftId);
+        setStudioDrafts(current => saveBlackMarketStudioDrafts([
+          { id: draftId as string, title, draft, createdAt: now, updatedAt: now },
+          ...current.filter(item => item.id !== draftId),
+        ]));
+      }
+      const result = upsertLocalTestTheater(draftId, template);
+      if (!result.ok || !result.ownedTheater) {
+        showNotice("error", result.error || "当前草稿无法测试");
+        return;
+      }
+      setState(result.state);
+      openSceneLauncher(result.ownedTheater);
+    } catch (err) {
+      showNotice("error", err instanceof Error ? err.message : "当前草稿无法测试");
+    }
+  }
+
+  async function handlePublishDraft(): Promise<void> {
     setPublishing(true);
     try {
-      const sourceTemplate = mode === "overwrite-source" && publishChoice
-        ? communityTheaters.find(item => item.id === publishChoice.sourceTemplateId) ?? null
-        : null;
-      if (mode === "overwrite-source" && !sourceTemplate) {
-        throw new Error("找不到原发布档案，请先刷新共享市场，或改为发布成新档案。");
+      // 关联发布：修改已发布模式用该档案；否则草稿带关联时解析出原档案 → 同步更新同一条目
+      let existingTemplate = editingTemplate;
+      const linkedId = !existingTemplate ? editingStudioDraft?.sourceTemplateId?.trim() : undefined;
+      if (!existingTemplate && linkedId) {
+        try {
+          const known = communityTheaters.find(item => item.id === linkedId);
+          existingTemplate = known ? await ensureFullTheaterTemplate(known) : await fetchBlackMarketTheater(linkedId);
+        } catch {
+          existingTemplate = null; // 原档案已不存在：退化为发布新档案，成功后改写关联
+        }
       }
-      const existingTemplate = mode === "new" ? null : editingTemplate ?? sourceTemplate;
       const template = buildDraftTemplate(existingTemplate);
       const published = existingTemplate
         ? await updateBlackMarketTheater(template)
@@ -1691,8 +1857,22 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
       if (snapshotSync?.updatedCount) {
         setState(snapshotSync.state);
       }
+      // 发布后保留草稿并写入关联：标签变「已发布」，下次发布即同步更新，不产生新档案
       if (editingDraftId) {
-        setStudioDrafts(current => saveBlackMarketStudioDrafts(current.filter(item => item.id !== editingDraftId)));
+        const now = new Date().toISOString();
+        setStudioDrafts(current => saveBlackMarketStudioDrafts(current.map(item =>
+          item.id === editingDraftId
+            ? {
+                ...item,
+                title: draft.title.trim() || item.title,
+                draft,
+                sourceTemplateId: published.id,
+                sourceTemplateTitle: published.title,
+                hasUnpublishedChanges: undefined,
+                updatedAt: now,
+              }
+            : item,
+        )));
         setEditingDraftId(null);
       }
       setCommunityTheaters(current => [published, ...current.filter(item => item.id !== published.id)]
@@ -1701,7 +1881,6 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
       setSelectedTemplateId(published.id);
       setEditingTemplateId(null);
       setStudioMode("published");
-      setPublishChoice(null);
       showNotice(
         "success",
         existingTemplate
@@ -1717,28 +1896,18 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
     }
   }
 
-  async function handlePublishDraft(): Promise<void> {
-    if (!editingTemplate) {
-      const source = getEditingDraftPublishSource();
-      if (source) {
-        setPublishChoice(source);
-        return;
-      }
-    }
-    await publishCurrentDraft("auto");
-  }
-
-  function closePublishChoice(): void {
-    if (publishing) return;
-    setPublishChoice(null);
-  }
-
   async function handleDeletePublished(template: BlackMarketTheaterTemplate): Promise<void> {
     if (deletingTemplateId) return;
     setDeletingTemplateId(template.id);
     try {
       await deleteBlackMarketTheater({ id: template.id, authorId: template.authorId });
       setCommunityTheaters(current => current.filter(item => item.id !== template.id));
+      // 清掉指向该档案的草稿关联：标签回「未发布」，之后发布会作为新档案
+      setStudioDrafts(current => current.some(item => item.sourceTemplateId === template.id)
+        ? saveBlackMarketStudioDrafts(current.map(item => item.sourceTemplateId === template.id
+          ? { ...item, sourceTemplateId: undefined, sourceTemplateTitle: undefined, hasUnpublishedChanges: undefined }
+          : item))
+        : current);
       if (selectedTemplateId === template.id) setSelectedTemplateId(null);
       if (editingTemplateId === template.id) resetDraft();
       setDeleteTarget(null);
@@ -1880,9 +2049,9 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
           <span className="is-green">CONNECTED</span>
           <span>·</span>
           <span>TOR://night-channel.onion</span>
-          <b>{terminalTime}</b>
+          <b><BlackMarketTerminalClock /></b>
           <span>·</span>
-          <span>{latency}ms</span>
+          <span><BlackMarketLatencyMeter /></span>
         </section>
 
         <div className="cp-black-market-warning">△ THIS SESSION IS BEING MONITORED △</div>
@@ -1901,7 +2070,7 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
           <div className="cp-black-market-camera" aria-hidden="true">
             <span className="cp-black-market-camera-rec">● REC</span>
             <span className="cp-black-market-camera-sig">SIG -72dB</span>
-            <span className="cp-black-market-camera-id">OPERATOR_03 / {terminalTime}</span>
+            <span className="cp-black-market-camera-id">OPERATOR_03 / <BlackMarketTerminalClock /></span>
           </div>
           <div className="cp-black-market-operator-info">
             <div className="cp-black-market-operator-label">OPERATOR_03</div>
@@ -1920,7 +2089,6 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
               </button>
             </div>
           </div>
-          {communityError ? <div className="cp-black-market-sync-error">{communityError}</div> : null}
         </section>
 
         <section className="cp-black-market-wallet">
@@ -2068,6 +2236,10 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
                             <Pencil size={14} />
                             MODIFY
                           </button>
+                          <button type="button" onClick={() => void exportPublishedTemplateFile(template)}>
+                            <Download size={14} />
+                            EXPORT
+                          </button>
                           <button
                             type="button"
                             className="is-danger"
@@ -2096,15 +2268,20 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
                     {studioDrafts.map(item => (
                       <article key={item.id} className="cp-black-market-published-card">
                         <div>
-                          <span>{item.sourceTemplateId ? "来源草稿" : "草稿"}</span>
+                          <span data-pub={item.sourceTemplateId ? "yes" : "no"}>{item.sourceTemplateId ? "已发布" : "未发布"}</span>
+                          {item.sourceTemplateId && item.hasUnpublishedChanges ? <i className="cp-bm-dirty-hint">有未发布改动</i> : null}
                           <strong>{item.title}</strong>
-                          <p>{item.sourceTemplateId ? `来源：${item.sourceTemplateTitle || "已发布档案"}` : item.draft.subtitle || item.draft.synopsis || item.draft.storyText}</p>
+                          <p>{item.sourceTemplateId ? `关联：${item.sourceTemplateTitle || "已发布档案"}` : item.draft.subtitle || item.draft.synopsis || item.draft.storyText}</p>
                           <time>{formatBlackMarketDate(item.updatedAt)}</time>
                         </div>
                         <div className="cp-black-market-published-actions">
                           <button type="button" onClick={() => beginEditStudioDraft(item)}>
                             <Pencil size={14} />
                             EDIT
+                          </button>
+                          <button type="button" onClick={() => void exportStudioDraftFile(item)}>
+                            <Download size={14} />
+                            EXPORT
                           </button>
                           <button type="button" className="is-danger" onClick={() => handleDeleteStudioDraft(item.id)}>
                             <Trash2 size={14} />
@@ -2129,7 +2306,7 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
                 ) : null}
                 {editingDraftId && !editingTemplate ? (
                   <div className="cp-black-market-editing-banner">
-                    <span>{editingStudioDraft?.sourceTemplateId ? "来源草稿" : "草稿中"}</span>
+                    <span>{editingStudioDraft?.sourceTemplateId ? "已发布草稿" : "草稿中"}</span>
                     <strong>{editingStudioDraft?.title || "未命名草稿"}</strong>
                     <button type="button" onClick={resetDraft}>退出草稿</button>
                   </div>
@@ -2138,6 +2315,22 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
                 <div className="cp-black-market-studio-panel">
                   <h3>商品档案</h3>
                   <p className="cp-black-market-studio-hint">只需要填写用户会看到的标题和介绍；内部编号会自动处理，发布昵称可每次单独设置。</p>
+                  <div className="cp-bm-draft-import-row">
+                    <button type="button" onClick={() => studioDraftFileInputRef.current?.click()}>
+                      <Upload size={14} /> 导入草稿文件
+                    </button>
+                    <input
+                      ref={studioDraftFileInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      style={{ display: "none" }}
+                      onChange={event => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) void importStudioDraftFile(file);
+                      }}
+                    />
+                  </div>
                   <label>
                     档案名字
                     <input value={draft.title} onFocus={() => clearDraftSampleOnFocus("title")} onChange={event => updateDraft("title", event.target.value)} />
@@ -2299,9 +2492,13 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
                       <Play size={14} />
                       刷新预览
                     </button>
+                    <button type="button" onClick={localTestDraft}>
+                      <Play size={14} />
+                      本机测试
+                    </button>
                     <button type="button" className="is-primary" disabled={publishing} onClick={() => void handlePublishDraft()}>
                       <Send size={14} />
-                      {publishing ? "同步中" : editingTemplate ? "保存修改" : editingStudioDraft?.sourceTemplateId ? "选择发布方式" : "发布共享"}
+                      {publishing ? "同步中" : editingTemplate ? "保存修改" : editingStudioDraft?.sourceTemplateId ? "更新发布" : "发布共享"}
                     </button>
                   </div>
                 </div>
@@ -2317,33 +2514,23 @@ export function BlackMarketApp({ onClose }: BlackMarketAppProps) {
         </div>
       ) : null}
 
-      {publishChoice ? (
-        <div className="cp-black-market-modal cp-black-market-confirm-modal" role="presentation" onClick={closePublishChoice}>
-          <section className="cp-black-market-modal-card cp-black-market-confirm-card" role="dialog" aria-modal="true" aria-label="选择发布方式" onClick={event => event.stopPropagation()}>
+      {communityErrorDialog ? (
+        <div className="cp-black-market-modal cp-black-market-confirm-modal" role="presentation" onClick={() => setCommunityErrorDialog(null)}>
+          <section className="cp-black-market-modal-card cp-black-market-confirm-card" role="alertdialog" aria-modal="true" aria-label="云端同步失败" onClick={event => event.stopPropagation()}>
             <div className="cp-black-market-modal-head">
               <div>
-                <span>发布方式</span>
-                <strong>这个草稿来自已发布档案</strong>
+                <span>SYNC ERROR</span>
+                <strong>云端同步失败</strong>
               </div>
-              <button type="button" onClick={closePublishChoice}>关闭</button>
+              <button type="button" onClick={() => setCommunityErrorDialog(null)}>关闭</button>
             </div>
             <div className="cp-black-market-confirm-body">
-              <div className="cp-black-market-confirm-code">{publishChoice.sourceTemplateTitle}</div>
-              <p>请选择把这份草稿覆盖到原档案，还是作为一份新的夜间档案发布。</p>
-              <span>{publishChoiceSourceTemplate ? "覆盖会更新原档案；发布为新档案会保留原档案不动。" : "当前列表里找不到原档案，只能发布为新档案；刷新共享市场后可再尝试覆盖。"}</span>
+              <div className="cp-black-market-confirm-code">OFFLINE_MODE</div>
+              <p>{communityErrorDialog}</p>
+              <span>本地暗柜、内置档案与本机测试不受影响。</span>
             </div>
             <div className="cp-black-market-modal-actions cp-black-market-confirm-actions">
-              <button type="button" disabled={publishing} onClick={() => void publishCurrentDraft("new")}>
-                发布为新档案
-              </button>
-              <button
-                type="button"
-                className="is-primary"
-                disabled={publishing || !publishChoiceSourceTemplate}
-                onClick={() => void publishCurrentDraft("overwrite-source")}
-              >
-                覆盖原档案
-              </button>
+              <button type="button" className="is-primary" onClick={() => setCommunityErrorDialog(null)}>知道了</button>
             </div>
           </section>
         </div>

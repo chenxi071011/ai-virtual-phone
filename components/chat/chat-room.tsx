@@ -4166,7 +4166,8 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
         setEditingResponseRoundId(null);
         setEditingResponseContent("");
         setEditingMessageId(msg.id);
-        setEditingContent(msg.content);
+        // 语音条的文字存在 mediaData.label 里，content 是空的
+        setEditingContent(msg.mediaType === "audio" ? (msg.mediaData?.label || msg.content) : msg.content);
         setActiveMessageId(null);
     };
 
@@ -4183,8 +4184,16 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
         const nextContent = isEditingSystemInstruction
             ? editingContent.trim()
             : applyEditTextRegex(editingContent.trim(), placement, false);
-        editChatMessage(editingMessageId, nextContent);
-        setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, content: nextContent } : m));
+        if (originalMessage?.mediaType === "audio") {
+            // 语音条的显示文字和 AI 上下文都读 mediaData.label，改 content 不生效；
+            // synthesizedFromText 保留旧值，AI 语音会因文字不一致自动重新合成
+            const nextMediaData = { ...originalMessage.mediaData, label: nextContent };
+            updateMessageMediaData(editingMessageId, nextMediaData);
+            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, mediaData: nextMediaData } : m));
+        } else {
+            editChatMessage(editingMessageId, nextContent);
+            setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, content: nextContent } : m));
+        }
         setEditingMessageId(null);
         setEditingContent("");
         const ta = document.querySelector<HTMLTextAreaElement>(".chat-input-textarea");
@@ -4874,12 +4883,18 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 if (isMetaSlot && (statusPanelHere || innerMonologueHere || reasoningHere || (stateValuesHere && stateValuesHere.length > 0))) {
                     metaProjected = true;
                 }
+                // 语音条的 mediaData 里存着播放必需的状态（synthesizedFromText/voiceDuration），
+                // 直接用重解析结果整体替换会把它们丢掉，导致气泡永远判定"待重合成"而点不响。
+                // 双方都是语音条时按存储值打底、重解析字段覆盖。
+                const mediaData = part.mediaType === "audio" && base.mediaType === "audio" && base.mediaData
+                    ? { ...base.mediaData, ...part.mediaData }
+                    : part.mediaData;
                 projected.push({
                     ...base,
                     id,
                     content: part.content,
                     mediaType: part.mediaType,
-                    mediaData: part.mediaData,
+                    mediaData,
                     statusPanel: statusPanelHere,
                     innerMonologue: innerMonologueHere,
                     reasoning: reasoningHere,

@@ -12,6 +12,7 @@ import {
     addStickerToPack,
     addStickersToPack,
     addStickerByUrlToPack,
+    checkStickerBlob,
     renameStickerInPack,
     removeStickerFromPack,
     getPackAssignments,
@@ -501,14 +502,23 @@ function AddStickerDialog({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [previewSrc, setPreviewSrc] = useState<string | null>(null);
     const [adding, setAdding] = useState(false);
+    const [fileError, setFileError] = useState<string | null>(null);
     const selectedFile = useRef<File | null>(null);
 
     const hasImage = !!previewSrc;
-    const canSubmit = !!name.trim() && hasImage;
+    const canSubmit = !!name.trim() && hasImage && !fileError;
 
     const handleFileChange = () => {
         const f = fileInputRef.current?.files?.[0];
         if (!f) return;
+        const err = checkStickerBlob(f);
+        setFileError(err);
+        if (err) {
+            selectedFile.current = null;
+            setPreviewSrc(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+            return;
+        }
         selectedFile.current = f;
         setUrl("");
         const reader = new FileReader();
@@ -520,6 +530,7 @@ function AddStickerDialog({
         const trimmed = url.trim();
         if (trimmed) {
             selectedFile.current = null;
+            setFileError(null);
             if (fileInputRef.current) fileInputRef.current.value = "";
             setPreviewSrc(trimmed);
         }
@@ -529,7 +540,13 @@ function AddStickerDialog({
         if (!canSubmit || adding) return;
         setAdding(true);
         if (selectedFile.current) {
-            await addStickerToPack(packId, name.trim(), selectedFile.current);
+            try {
+                await addStickerToPack(packId, name.trim(), selectedFile.current);
+            } catch {
+                setFileError("添加失败，请换一张图片重试");
+                setAdding(false);
+                return;
+            }
         } else if (url.trim()) {
             addStickerByUrlToPack(packId, name.trim(), url.trim());
         }
@@ -592,6 +609,7 @@ function AddStickerDialog({
                                     <span className="ts-13">选择图片</span>
                                 </button>
                             )}
+                            {fileError && <span className="ts-11 ml-1" style={{ color: "var(--c-danger)" }}>{fileError}</span>}
                         </div>
                     </div>
                 </div>
@@ -750,6 +768,7 @@ function BatchAddStickerDialog({
         const k = t.toLowerCase();
         if (existingNames.current.has(k)) return "与已有表情重名";
         if ((nameCounts.get(k) ?? 0) > 1) return "本批重名";
+        if (r.file) return checkStickerBlob(r.file);
         return null;
     };
 

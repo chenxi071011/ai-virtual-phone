@@ -100,6 +100,7 @@ export type NeteasePlaylistDetail = NeteasePlaylist & {
     subscribedCount?: number;
     commentCount?: number;
     shareCount?: number;
+    subscribed?: boolean;
 };
 
 export type NeteaseHotSearch = {
@@ -116,6 +117,41 @@ export type NeteaseComment = {
     content: string;
     likedCount: number;
     time: number;
+    ipLocation?: string;
+    replyCount?: number;
+};
+
+export type NeteaseCommentPage = {
+    hotComments: NeteaseComment[];
+    comments: NeteaseComment[];
+    total: number;
+    hasMore: boolean;
+};
+
+export type NeteaseArtist = {
+    id: number;
+    name: string;
+    cover?: string;
+    briefDesc?: string;
+    musicSize: number;
+    albumSize: number;
+    fansCount?: number;
+};
+
+export type NeteaseAlbum = {
+    id: number;
+    name: string;
+    coverUrl?: string;
+    year?: string;
+};
+
+export type NeteaseUserDetail = {
+    nickname: string;
+    avatarUrl?: string;
+    signature?: string;
+    level?: number;
+    listenSongs?: number;
+    createDays?: number;
 };
 
 export type NeteaseToplist = NeteasePlaylist & {
@@ -183,33 +219,75 @@ export async function searchNetease(query: string, limit = 20): Promise<NeteaseS
     }
 }
 
-/** Get playable URL for a Netease song */
-export async function getNeteasePlayUrl(songId: number): Promise<string | null> {
+export type NeteasePlayInfo = {
+    url: string | null;
+    /** true when the returned url is only a free-trial clip (usually 30s) */
+    trial: boolean;
+    /** human-readable reason when url is null */
+    reason: string;
+};
+
+/** Get playable URL for a Netease song, with a concrete failure reason. */
+export async function getNeteasePlayInfo(songId: number): Promise<NeteasePlayInfo> {
     if (isNativeApp()) {
         try {
             await ensureNeteaseAnonymousToken();
             const data = await neteaseNative.songUrl(songId);
-            const url = data?.data?.[0]?.url;
-            return typeof url === "string" ? url.replace(/^http:\/\//, "https://") : null;
+            const d = data?.data?.[0];
+            const url = d?.url;
+            if (url && typeof url === "string") {
+                return { url: url.replace(/^http:\/\//, "https://"), trial: !!d?.freeTrialInfo, reason: "" };
+            }
+            const loggedIn = !!loadNeteaseCookie();
+            if (d?.fee === 1) {
+                return { url: null, trial: false, reason: loggedIn ? "VIP 歌曲，当前账号没有黑胶会员" : "VIP 歌曲，请先在设置中登录网易云账号" };
+            }
+            if (d?.fee === 4) {
+                return { url: null, trial: false, reason: "付费专辑歌曲，需购买后才能播放" };
+            }
+            return { url: null, trial: false, reason: "该歌曲暂时无法播放" };
         } catch (e) {
             console.warn("[MusicService] Native get play URL failed:", e);
-            return null;
+            return { url: null, trial: false, reason: "网络异常，加载失败" };
         }
     }
     const base = neteaseBase();
-    if (!base) return null;
+    if (!base) return { url: null, trial: false, reason: "音乐 API 未配置" };
     try {
         const resp = await fetch(withNeteaseParams(`${base}/song/url?id=${songId}`));
         const data = await resp.json();
-        const url = data?.data?.[0]?.url;
-        if (!url || typeof url !== "string") return null;
-        // Netease returns http:// CDN links; on an HTTPS page the browser blocks
-        // them as mixed content, so the audio never loads. The CDN serves https.
-        return url.replace(/^http:\/\//, "https://");
+        const d = data?.data?.[0];
+        const url = d?.url;
+        if (url && typeof url === "string") {
+            // Netease returns http:// CDN links; on an HTTPS page the browser blocks
+            // them as mixed content, so the audio never loads. The CDN serves https.
+            return { url: url.replace(/^http:\/\//, "https://"), trial: !!d?.freeTrialInfo, reason: "" };
+        }
+        const fee = d?.fee;
+        const loggedIn = !!loadNeteaseCookie();
+        if (fee === 1) {
+            return { url: null, trial: false, reason: loggedIn ? "VIP 歌曲，当前账号没有黑胶会员" : "VIP 歌曲，请先在设置中登录网易云账号" };
+        }
+        if (fee === 4) {
+            return { url: null, trial: false, reason: "付费专辑歌曲，需购买后才能播放" };
+        }
+        // Ask check/music for a human-readable reason (e.g. 无版权)
+        try {
+            const chk = await fetch(withNeteaseParams(`${base}/check/music?id=${songId}&timestamp=${Date.now()}`)).then(r => r.json());
+            const msg = chk?.message ? String(chk.message).replace(/^亲爱的[,，]?/, "").trim() : "";
+            if (chk?.success === false && msg) return { url: null, trial: false, reason: msg };
+        } catch { /* check endpoint unavailable — fall through */ }
+        return { url: null, trial: false, reason: "该歌曲暂时无法播放" };
     } catch (e) {
         console.warn("[MusicService] Get play URL failed:", e);
-        return null;
+        return { url: null, trial: false, reason: "网络异常，加载失败" };
     }
+}
+
+/** Get playable URL for a Netease song */
+export async function getNeteasePlayUrl(songId: number): Promise<string | null> {
+    const info = await getNeteasePlayInfo(songId);
+    return info.url;
 }
 
 /** Get lyrics for a Netease song */
@@ -234,8 +312,8 @@ export async function getNeteaseLyrics(songId: number): Promise<string> {
     }
 }
 
-/** Get song detail (cover, etc.) */
-export async function getNeteaseSongDetail(songId: number): Promise<{ coverUrl?: string; name?: string; artists?: string } | null> {
+/** Get song detail (cover, artist ids, etc.) */
+export async function getNeteaseSongDetail(songId: number): Promise<{ coverUrl?: string; name?: string; artists?: string; artistList?: { id: number; name: string }[]; album?: string } | null> {
     if (isNativeApp()) {
         try {
             await ensureNeteaseAnonymousToken();
@@ -246,6 +324,8 @@ export async function getNeteaseSongDetail(songId: number): Promise<{ coverUrl?:
                 coverUrl: secureHttpUrl(song.al?.picUrl),
                 name: song.name,
                 artists: (song.ar || []).map((a: any) => a.name).join("/"),
+                artistList: (song.ar || []).filter((a: any) => a?.id && a?.name).map((a: any) => ({ id: a.id, name: a.name })),
+                album: song.al?.name || "",
             };
         } catch {
             return null;
@@ -262,6 +342,8 @@ export async function getNeteaseSongDetail(songId: number): Promise<{ coverUrl?:
             coverUrl: secureHttpUrl(song.al?.picUrl),
             name: song.name,
             artists: (song.ar || []).map((a: any) => a.name).join("/"),
+            artistList: (song.ar || []).filter((a: any) => a?.id && a?.name).map((a: any) => ({ id: a.id, name: a.name })),
+            album: song.al?.name || "",
         };
     } catch {
         return null;
@@ -345,6 +427,7 @@ export type NeteasePlaylist = {
     coverUrl: string;
     trackCount: number;
     creator: string;
+    playCount?: number;
 };
 
 /** Get current logged-in user's uid */
@@ -474,6 +557,7 @@ export async function getPersonalizedPlaylists(limit = 12): Promise<NeteasePlayl
             coverUrl: secureHttpUrl(p.picUrl || p.coverImgUrl),
             trackCount: p.trackCount || 0,
             creator: p.creator?.nickname || "",
+            playCount: p.playCount || p.playcount || 0,
         }));
     } catch { return []; }
 }
@@ -502,6 +586,7 @@ export async function getRecommendResource(): Promise<NeteasePlaylist[]> {
             coverUrl: secureHttpUrl(p.picUrl || p.coverImgUrl),
             trackCount: p.trackCount || 0,
             creator: p.creator?.nickname || "",
+            playCount: p.playcount || p.playCount || 0,
         }));
     } catch { return []; }
 }
@@ -610,50 +695,201 @@ export async function getPlaylistDetail(playlistId: number): Promise<NeteasePlay
             subscribedCount: p.subscribedCount,
             commentCount: p.commentCount,
             shareCount: p.shareCount,
+            subscribed: !!p.subscribed,
         };
     } catch { return null; }
 }
 
+function mapComment(c: any): NeteaseComment {
+    return {
+        id: c.commentId,
+        userName: c.user?.nickname || "网易云用户",
+        avatarUrl: secureHttpUrl(c.user?.avatarUrl),
+        content: c.content || "",
+        likedCount: c.likedCount || 0,
+        time: c.time || 0,
+        ipLocation: c.ipLocation?.location || "",
+        replyCount: c.replyCount || 0,
+    };
+}
+
+/** Netease comment resource type: 0 = song, 2 = playlist */
+export type NeteaseCommentResType = 0 | 2;
+
 export async function getSongComments(songId: number, limit = 20): Promise<NeteaseComment[]> {
+    const page = await getSongCommentPage(songId, 0, limit);
+    return page.hotComments.length ? page.hotComments : page.comments;
+}
+
+/** Paged comments (song or playlist): hot comments arrive on the first page only. */
+export async function getSongCommentPage(songId: number, offset = 0, limit = 20, resType: NeteaseCommentResType = 0): Promise<NeteaseCommentPage> {
+    const empty: NeteaseCommentPage = { hotComments: [], comments: [], total: 0, hasMore: false };
+    const mapList = (list: any) => (Array.isArray(list) ? list.map(mapComment).filter((c: NeteaseComment) => c.content) : []);
     if (isNativeApp()) {
+        // 原生直连只有歌曲评论接口，歌单评论没有对应端点
+        if (resType === 2) return empty;
         try {
-            const data = await neteaseNative.commentMusic(songId, limit);
-            const comments = data?.hotComments?.length ? data.hotComments : data?.comments || [];
-            return comments.map((c: any) => ({
-                id: c.commentId,
-                userName: c.user?.nickname || "网易云用户",
-                avatarUrl: c.user?.avatarUrl,
-                content: c.content || "",
-                likedCount: c.likedCount || 0,
-                time: c.time || 0,
-            })).filter((c: NeteaseComment) => c.content);
-        } catch { return []; }
+            const data = await neteaseNative.commentMusic(songId, limit, offset);
+            return {
+                hotComments: offset === 0 ? mapList(data?.hotComments) : [],
+                comments: mapList(data?.comments),
+                total: data?.total || 0,
+                hasMore: !!data?.more,
+            };
+        } catch { return empty; }
     }
+    const base = neteaseBase();
+    if (!base) return empty;
+    try {
+        const endpoint = resType === 2 ? "comment/playlist" : "comment/music";
+        const resp = await fetch(withNeteaseParams(`${base}/${endpoint}?id=${songId}&limit=${limit}&offset=${offset}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return {
+            hotComments: offset === 0 ? mapList(data?.hotComments) : [],
+            comments: mapList(data?.comments),
+            total: data?.total || 0,
+            hasMore: !!data?.more,
+        };
+    } catch { return empty; }
+}
+
+/** Floor replies of a comment */
+export async function getFloorComments(songId: number, parentCommentId: number, limit = 20, resType: NeteaseCommentResType = 0): Promise<NeteaseComment[]> {
+    // 原生直连没有楼层评论端点
+    if (isNativeApp()) return [];
     const base = neteaseBase();
     if (!base) return [];
     try {
-        const resp = await fetch(withNeteaseParams(`${base}/comment/music?id=${songId}&limit=${limit}&timestamp=${Date.now()}`));
+        const resp = await fetch(withNeteaseParams(`${base}/comment/floor?parentCommentId=${parentCommentId}&id=${songId}&type=${resType}&limit=${limit}&timestamp=${Date.now()}`));
         const data = await resp.json();
-        const comments = data?.hotComments?.length ? data.hotComments : data?.comments || [];
-        return comments.map((c: any) => ({
-            id: c.commentId,
-            userName: c.user?.nickname || "网易云用户",
-            avatarUrl: c.user?.avatarUrl,
-            content: c.content || "",
-            likedCount: c.likedCount || 0,
-            time: c.time || 0,
-        })).filter((c: NeteaseComment) => c.content);
+        const comments = data?.data?.comments || [];
+        return Array.isArray(comments) ? comments.map(mapComment).filter((c: NeteaseComment) => c.content) : [];
     } catch { return []; }
 }
 
+/** Post a comment on a song or playlist (requires Netease login cookie) */
+export async function postSongComment(songId: number, content: string, resType: NeteaseCommentResType = 0): Promise<{ ok: boolean; message: string }> {
+    const base = neteaseBase();
+    if (!base) return { ok: false, message: "API 未配置" };
+    if (!loadNeteaseCookie()) return { ok: false, message: "发送评论需要先登录网易云账号" };
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/comment?t=1&type=${resType}&id=${songId}&content=${encodeURIComponent(content)}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        if (data?.code === 200) return { ok: true, message: "评论已发送" };
+        return { ok: false, message: data?.message || data?.msg || "发送失败" };
+    } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : "发送失败" };
+    }
+}
+
+/** Subscribe / unsubscribe a playlist (requires Netease login cookie) */
+export async function subscribePlaylist(playlistId: number, subscribe: boolean): Promise<{ ok: boolean; message: string }> {
+    const base = neteaseBase();
+    if (!base) return { ok: false, message: "API 未配置" };
+    if (!loadNeteaseCookie()) return { ok: false, message: "收藏歌单需要先登录网易云账号" };
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/playlist/subscribe?t=${subscribe ? 1 : 2}&id=${playlistId}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        if (data?.code === 200) return { ok: true, message: subscribe ? "已收藏歌单" : "已取消收藏" };
+        if (data?.code === 501) return { ok: true, message: "已收藏过这个歌单" };
+        return { ok: false, message: data?.message || data?.msg || "操作失败" };
+    } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : "操作失败" };
+    }
+}
+
+// ── Artist ──
+
+export async function getArtistDetail(artistId: number): Promise<NeteaseArtist | null> {
+    const base = neteaseBase();
+    if (!base) return null;
+    try {
+        const [detailResp, fansResp] = await Promise.all([
+            fetch(withNeteaseParams(`${base}/artist/detail?id=${artistId}&timestamp=${Date.now()}`)).then(r => r.json()),
+            fetch(withNeteaseParams(`${base}/artist/follow/count?id=${artistId}&timestamp=${Date.now()}`)).then(r => r.json()).catch(() => null),
+        ]);
+        const artist = detailResp?.data?.artist;
+        if (!artist) return null;
+        return {
+            id: artist.id,
+            name: artist.name || "",
+            cover: secureHttpUrl(artist.cover || artist.avatar),
+            briefDesc: artist.briefDesc || "",
+            musicSize: artist.musicSize || 0,
+            albumSize: artist.albumSize || 0,
+            fansCount: fansResp?.data?.fansCnt ?? fansResp?.fansCnt,
+        };
+    } catch { return null; }
+}
+
+export async function getArtistTopSongs(artistId: number): Promise<NeteaseSearchResult[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/artist/top/song?id=${artistId}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        const songs = data?.songs || [];
+        return Array.isArray(songs) ? songs.map(mapSongToSearchResult) : [];
+    } catch { return []; }
+}
+
+export async function getArtistAlbums(artistId: number, limit = 20): Promise<NeteaseAlbum[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/artist/album?id=${artistId}&limit=${limit}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.hotAlbums || []).map((a: any) => ({
+            id: a.id,
+            name: a.name || "",
+            coverUrl: secureHttpUrl(a.picUrl),
+            year: a.publishTime ? String(new Date(a.publishTime).getFullYear()) : "",
+        }));
+    } catch { return []; }
+}
+
+// ── User detail (level / listen count) ──
+
+export async function getUserDetail(): Promise<NeteaseUserDetail | null> {
+    const base = neteaseBase();
+    if (!base) return null;
+    const uid = await getLoginUid();
+    if (!uid) return null;
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/user/detail?uid=${uid}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        const profile = data?.profile;
+        if (!profile) return null;
+        return {
+            nickname: profile.nickname || "",
+            avatarUrl: secureHttpUrl(profile.avatarUrl),
+            signature: profile.signature || "",
+            level: data?.level,
+            listenSongs: data?.listenSongs,
+            createDays: data?.createDays,
+        };
+    } catch { return null; }
+}
+
 export async function getUserRecord(type: 0 | 1 = 1): Promise<NeteaseSearchResult[]> {
+    const records = await getUserRecordWithCounts(type);
+    return records.map(r => r.song);
+}
+
+export type NeteasePlayRecord = { song: NeteaseSearchResult; playCount: number };
+
+/** Listening record with per-song play counts (type 1 = this week, 0 = all time) */
+export async function getUserRecordWithCounts(type: 0 | 1 = 1): Promise<NeteasePlayRecord[]> {
     if (isNativeApp()) {
         const uid = await getLoginUid();
         if (!uid) return [];
         try {
             const data = await neteaseNative.userRecord(uid, type);
             const records = data?.weekData || data?.allData || [];
-            return Array.isArray(records) ? records.map((r: any) => mapSongToSearchResult(r.song)).filter((s: NeteaseSearchResult) => s.id) : [];
+            if (!Array.isArray(records)) return [];
+            return records
+                .map((r: any) => ({ song: mapSongToSearchResult(r.song), playCount: r.playCount || 0 }))
+                .filter((r: NeteasePlayRecord) => r.song.id);
         } catch { return []; }
     }
     const base = neteaseBase();
@@ -664,7 +900,10 @@ export async function getUserRecord(type: 0 | 1 = 1): Promise<NeteaseSearchResul
         const resp = await fetch(withNeteaseParams(`${base}/user/record?uid=${uid}&type=${type}&timestamp=${Date.now()}`));
         const data = await resp.json();
         const records = data?.weekData || data?.allData || [];
-        return Array.isArray(records) ? records.map((r: any) => mapSongToSearchResult(r.song)).filter((s: NeteaseSearchResult) => s.id) : [];
+        if (!Array.isArray(records)) return [];
+        return records
+            .map((r: any) => ({ song: mapSongToSearchResult(r.song), playCount: r.playCount || 0 }))
+            .filter((r: NeteasePlayRecord) => r.song.id);
     } catch { return []; }
 }
 

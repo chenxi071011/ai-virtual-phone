@@ -759,6 +759,52 @@ export function saveBindingConfig(config: BindingConfig, notify: boolean = true)
     if (notify) window.dispatchEvent(new CustomEvent("settings-bindings-updated"));
 }
 
+/**
+ * 删除 API 配置后清理绑定里的悬空引用。
+ * 不清理的话，指向已删除配置的绑定会让配置解析抛错（剧情模式曾因此整页白屏）。
+ */
+export function removeApiConfigReferences(apiConfigId: string): void {
+    const config = loadBindingConfig();
+    let changed = false;
+    const cleanSlot = (slot: BindingSlot): BindingSlot => {
+        if (slot.apiConfigId !== apiConfigId) return slot;
+        changed = true;
+        const { apiConfigId: _removed, ...rest } = slot;
+        return rest;
+    };
+    const cleanSlotMap = <T extends Partial<Record<string, BindingSlot>>>(slots: T): T => {
+        const next: Partial<Record<string, BindingSlot>> = {};
+        for (const [key, slot] of Object.entries(slots)) {
+            next[key] = slot ? cleanSlot(slot) : slot;
+        }
+        return next as T;
+    };
+    const next: BindingConfig = {
+        ...config,
+        globalDefaults: cleanSlot(config.globalDefaults),
+        characterBindings: config.characterBindings.map(binding => ({
+            ...binding,
+            defaults: cleanSlot(binding.defaults),
+            appOverrides: cleanSlotMap(binding.appOverrides),
+        })),
+    };
+    if (config.appDefaults) next.appDefaults = cleanSlotMap(config.appDefaults);
+    const auxFields = [
+        "memorySummaryApiConfigId",
+        "embeddingApiConfigId",
+        "mascotApiConfigId",
+        "qaApiConfigId",
+        "reasoningTranslateApiConfigId",
+    ] as const;
+    for (const field of auxFields) {
+        if (next[field] === apiConfigId) {
+            delete next[field];
+            changed = true;
+        }
+    }
+    if (changed) saveBindingConfig(next);
+}
+
 export function getCharacterBinding(config: BindingConfig, characterId: string): CharacterBinding {
     const existing = config.characterBindings.find(b => b.characterId === characterId);
     if (existing) return existing;
@@ -830,7 +876,7 @@ export function resolveBinding(
  * Falls back to global default apiConfigId if not explicitly set.
  */
 export function resolveAuxiliaryApiConfig(
-    field: "memorySummaryApiConfigId" | "embeddingApiConfigId" | "mascotApiConfigId" | "reasoningTranslateApiConfigId"
+    field: "memorySummaryApiConfigId" | "embeddingApiConfigId" | "mascotApiConfigId" | "reasoningTranslateApiConfigId" | "qaApiConfigId"
 ): ApiConfig | null {
     const config = loadBindingConfig();
     const apiConfigs = loadApiConfigs();

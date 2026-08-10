@@ -69,98 +69,99 @@
   --c-icon-lilac: #9580B066;
   --c-icon-story: #8B6F5266;
 
-  /* ── 音乐色 (Spring Light Green Aesthetics) ── */
-  --c-music-bg: #f6fcf0;
-  /* 页面底色（极淡黄绿） */
-  --c-music-bg-mint: rgba(186, 225, 220, 0.6);
-  /* 背景渐变·薄荷青 */
-  --c-music-bg-cream: rgba(255, 255, 238, 0.7);
-  /* 背景渐变·米黄 */
-  --c-music-bg-lime: rgba(200, 240, 186, 0.5);
-  /* 背景渐变·嫩绿 */
-  --c-music-bg-mint-dim: rgba(186, 230, 225, 0.4);
-  /* 背景渐变·薄荷青淡 */
-  --c-music-bg-center: rgba(240, 252, 228, 0.8);
-  /* 背景渐变·中心淡绿 */
-  --c-music-bg-glow: rgba(255, 255, 255, 0.3);
-  /* 全屏播放器·白光 */
-  --c-music-bg-mist: rgba(120, 155, 135, 0.1);
-  /* 全屏播放器·绿雾 */
-  --c-music-surface: rgba(255, 255, 255, 0.3);
+  /* ── 音乐色 (夜光 Lumen · 黑灰中性暗色) ── */
+  --c-music-bg: #0a0a0b;
+  /* 页面底色（碳黑） */
+  --c-music-bg-mint: rgba(150, 150, 158, 0.1);
+  /* 背景渐变·浅灰光 */
+  --c-music-bg-cream: rgba(120, 120, 128, 0.08);
+  /* 背景渐变·中灰光 */
+  --c-music-bg-lime: rgba(90, 90, 96, 0.08);
+  /* 背景渐变·暗灰光 */
+  --c-music-bg-mint-dim: rgba(150, 150, 158, 0.06);
+  /* 背景渐变·浅灰淡 */
+  --c-music-bg-center: rgba(16, 16, 18, 0.85);
+  /* 背景渐变·中心深灰 */
+  --c-music-bg-glow: rgba(160, 190, 255, 0.14);
+  /* 全屏播放器·月光 */
+  --c-music-bg-mist: rgba(90, 120, 200, 0.1);
+  /* 全屏播放器·蓝雾 */
+  --c-music-surface: rgba(255, 255, 255, 0.06);
   /* 玻璃面板/唱片底 */
-  --c-music-surface-solid: rgba(255, 255, 255, 0.55);
-  /* 不透明面板/边框/高光 */
-  --c-music-glass-dim: rgba(255, 255, 255, 0.08);
+  --c-music-surface-solid: rgba(255, 255, 255, 0.13);
+  /* 边框/高光 */
+  --c-music-panel: rgba(24, 24, 28, 0.96);
+  /* 不透明面板（弹窗/抽屉） */
+  --c-music-glass-dim: rgba(255, 255, 255, 0.09);
   /* 极淡装饰（沟槽/纹路） */
-  --c-music-white: rgba(255, 255, 255, 0.3);
+  --c-music-white: #ffffff;
   /* 纯白（文字/圆钮） */
-  --c-music-text: #2b3d31;
-  /* 深墨绿主文字 */
-  --c-music-accent: #5b7b64;
-  /* 龙井绿强调色/文字/按钮 */
-  --c-music-accent-dim: rgba(106, 141, 115, 0.15);
-  /* 淡绿（阴影/投影/进度条） */
-  --c-music-gold: rgba(212, 168, 83, 0.3);
-  /* 金色（唱片中心/唱臂/光晕） */
-  --c-music-overlay: rgba(0, 0, 0, 0.25);
+  --c-music-text: #eef0f7;
+  /* 月白主文字 */
+  --c-music-accent: #9aa6c0;
+  /* 月灰蓝次级文字/图标 */
+  --c-music-accent-dim: rgba(150, 170, 220, 0.14);
+  /* 淡蓝（阴影/投影/进度条） */
+  --c-music-primary: #ff5468;
+  /* 珊瑚红主强调（红心/CTA） */
+  --c-music-primary-dim: rgba(255, 84, 104, 0.14);
+  /* 珊瑚红淡底 */
+  --c-music-glowtext: #dcebff;
+  /* 发光歌词月光色 */
+  --c-music-gold: rgba(220, 235, 255, 0.4);
+  /* 月光（唱片中心/光晕） */
+  --c-music-overlay: rgba(0, 0, 0, 0.55);
   /* 遮罩/投影 */
-  --c-music-liked: #ff6b7f;
+  --c-music-liked: #ff5468;
   /* 已点赞红心 */
 
-  /* ── 日历色 (Ocean Foam Aesthetics - Default Base) ── */
-  --c-calendar-bg-top: #E8F4F8;
-  /* Seafoam White */
-  --c-calendar-bg-mid: #E8F4F8;
-  /* Flat */
-  --c-calendar-bg-bottom: #E8F4F8;
-  /* Flat */
-  --c-calendar-orb-1: #7BC6EC;
-  /* Glacier Blue */
-  --c-calendar-orb-2: #FFCDD2;
-  /* Coral Glow */
-  --c-calendar-text: #4A6B7C;
-  /* Darker blue-grey for readability */
-  --c-calendar-sub: #8AA8B8;
-  /* Lighter blue-grey */
-  --c-calendar-accent: #7BC6EC;
-  /* Deepened Glacier Blue */
-  --c-calendar-accent-dim: rgba(123, 198, 236, 0.25);
-  --c-calendar-weekend: #FFCDD2;
-  /* Coral Glow */
-  --c-calendar-action: #5B8FB9;
-  /* 弹窗按钮/图标强调色 */
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-
-  /* ── 阴影与毛玻璃辅助层 (Glass Layers - 全主题通用) ── */
-  --c-calendar-panel: rgba(255, 255, 255, 0.7);
-  --c-calendar-border: rgba(179, 229, 252, 0.4);
-  --c-calendar-glass-1: rgba(255, 255, 255, 0.3);
-  --c-calendar-glass-3: rgba(255, 255, 255, 0.3);
-  --c-calendar-glass-4: rgba(255, 255, 255, 0.3);
-  --c-calendar-glass-5: rgba(255, 255, 255, 0.5);
-  --c-calendar-glass-55: rgba(255, 255, 255, 0.55);
-  --c-calendar-glass-6: rgba(255, 255, 255, 0.6);
-  --c-calendar-glass-7: rgba(255, 255, 255, 0.7);
-  --c-calendar-glass-8: rgba(255, 255, 255, 0.8);
-  --c-calendar-glass-85: rgba(255, 255, 255, 0.85);
-  --c-calendar-glass-9: rgba(255, 255, 255, 0.9);
-  --c-calendar-glass-full: #fff;
-  --c-calendar-shadow-2: rgba(0, 0, 0, 0.02);
-  --c-calendar-shadow-3: rgba(0, 0, 0, 0.03);
-  --c-calendar-shadow-4: rgba(0, 0, 0, 0.04);
-  --c-calendar-shadow-6: rgba(0, 0, 0, 0.06);
-  --c-calendar-shadow-10: rgba(0, 0, 0, 0.1);
-  --c-calendar-shadow-15: rgba(0, 0, 0, 0.15);
-  --c-calendar-overlay: rgba(0, 0, 0, 0.18);
-  --c-calendar-event-blue: #3b82f6;
-  --c-calendar-event-green: #10b981;
-  --c-calendar-event-amber: #f59e0b;
-  --c-calendar-event-rose: #f43f5e;
-  --c-calendar-event-violet: #8b5cf6;
-  --c-calendar-event-teal: #14b8a6;
-  --c-calendar-event-slate: #64748b;
-  --c-calendar-event-purple: #a855f7;
+  /* ── 日历色（v2 · 黑白灰色块 + 糖果事件色，默认 = light 主题） ── */
+  --c-calendar-bg: #FFFFFF;
+  /* 页面底色 */
+  --c-calendar-surface: #F1F0EC;
+  /* 灰色块（按钮/胶囊/次级底） */
+  --c-calendar-surface-2: #E8E7E2;
+  /* 更深一档灰色块（hover/分层） */
+  --c-calendar-sheet: #FFFFFF;
+  /* 弹层/弹窗底色 */
+  --c-calendar-ink: #1F1E1B;
+  /* 主文字 */
+  --c-calendar-sub: #85827C;
+  /* 次级文字 */
+  --c-calendar-faint: #C0BDB6;
+  /* 弱文字（非当月/占位） */
+  --c-calendar-today: #FF3B30;
+  /* 今天强调色 */
+  --c-calendar-sel-bg: #1F1E1B;
+  /* 选中态色块 */
+  --c-calendar-sel-fg: #FFFFFF;
+  --c-calendar-scrim: rgba(0, 0, 0, 0.32);
+  /* 弹层遮罩 */
+  --c-calendar-hair: rgba(60, 60, 67, 0.10);
+  /* 发丝分隔线（课表整点线等） */
+  --c-calendar-glass: rgba(255, 255, 255, 0.68);
+  /* 液态玻璃按钮底 */
+  --c-calendar-glass-edge: rgba(255, 255, 255, 0.95);
+  /* 液态玻璃描边高光 */
+  --c-calendar-glass-hi: rgba(255, 255, 255, 1);
+  /* 液态玻璃内嵌高光 */
+  /* 事件色（糖果色三元组：浅底 bg + 同色系深字 fg） */
+  --c-calendar-ev-blue-bg: #CFE8FF;
+  --c-calendar-ev-blue-fg: #2263AE;
+  --c-calendar-ev-green-bg: #D9F2D0;
+  --c-calendar-ev-green-fg: #37702D;
+  --c-calendar-ev-amber-bg: #FFE8CC;
+  --c-calendar-ev-amber-fg: #B05E12;
+  --c-calendar-ev-rose-bg: #FFD9E8;
+  --c-calendar-ev-rose-fg: #BA3A74;
+  --c-calendar-ev-violet-bg: #E6DBFF;
+  --c-calendar-ev-violet-fg: #5F3DB4;
+  --c-calendar-ev-teal-bg: #CDEEE8;
+  --c-calendar-ev-teal-fg: #1B6E60;
+  --c-calendar-ev-slate-bg: #E7E6E3;
+  --c-calendar-ev-slate-fg: #55534E;
+  --c-calendar-ev-lilac-bg: #F0DCF5;
+  --c-calendar-ev-lilac-fg: #8A3FA8;
 
   /* ── 桌面文字 ── */
   --c-home-label: #4A4A4A;
@@ -301,162 +302,86 @@
   --c-overlay: rgba(0, 0, 0, 0.35);
 }
 
-/* ── Calendar Themes ── */
-[data-calendar-theme="ocean"] {
-  --c-calendar-bg-top: #E8F4F8;
-  --c-calendar-bg-mid: #E8F4F8;
-  --c-calendar-bg-bottom: #E8F4F8;
-  --c-calendar-orb-1: #7BC6EC;
-  --c-calendar-orb-2: #FFCDD2;
-  --c-calendar-text: #4A6B7C;
-  --c-calendar-sub: #8AA8B8;
-  --c-calendar-accent: #7BC6EC;
-  --c-calendar-accent-dim: rgba(123, 198, 236, 0.25);
-  --c-calendar-weekend: #FFCDD2;
-  --c-calendar-action: #5B8FB9;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
+/* ── Calendar Themes（v2）──
+   light 为默认值（:root），其余主题按需覆盖。 */
+[data-calendar-theme="dark"] {
+  --c-calendar-bg: #171717;
+  --c-calendar-surface: #262626;
+  --c-calendar-surface-2: #303030;
+  --c-calendar-sheet: #1F1F1F;
+  --c-calendar-ink: #E6E4E0;
+  --c-calendar-sub: #98958F;
+  --c-calendar-faint: #5C5A55;
+  --c-calendar-today: #FF5F55;
+  --c-calendar-sel-bg: #E9E7E3;
+  --c-calendar-sel-fg: #1A1A1A;
+  --c-calendar-scrim: rgba(0, 0, 0, 0.55);
+  --c-calendar-hair: rgba(255, 255, 255, 0.10);
+  --c-calendar-glass: rgba(48, 48, 48, 0.62);
+  --c-calendar-glass-edge: rgba(255, 255, 255, 0.25);
+  --c-calendar-glass-hi: rgba(255, 255, 255, 0.18);
+  /* 深色下事件色整体压暗（同色相、降饱和、提字亮度） */
+  --c-calendar-ev-blue-bg: #1E3A57;
+  --c-calendar-ev-blue-fg: #9CC9FF;
+  --c-calendar-ev-green-bg: #24401F;
+  --c-calendar-ev-green-fg: #ACE29C;
+  --c-calendar-ev-amber-bg: #48331A;
+  --c-calendar-ev-amber-fg: #FFC98A;
+  --c-calendar-ev-rose-bg: #4A2136;
+  --c-calendar-ev-rose-fg: #FFA8CF;
+  --c-calendar-ev-violet-bg: #332154;
+  --c-calendar-ev-violet-fg: #CFB6FF;
+  --c-calendar-ev-teal-bg: #173B34;
+  --c-calendar-ev-teal-fg: #95E0D2;
+  --c-calendar-ev-slate-bg: #343434;
+  --c-calendar-ev-slate-fg: #CFCFCF;
+  --c-calendar-ev-lilac-bg: #3D2547;
+  --c-calendar-ev-lilac-fg: #E3B8F5;
 }
 
-[data-calendar-theme="orange"] {
-  --c-calendar-bg-top: #FCEBE4;
-  /* Pale peach */
-  --c-calendar-bg-mid: #FCEBE4;
-  --c-calendar-bg-bottom: #E8EFF3;
-  /* Pale blue-grey */
-  --c-calendar-orb-1: #F5CDBF;
-  /* Soft muted peach */
-  --c-calendar-orb-2: #F5E0B6;
-  /* Soft muted champagne */
-  --c-calendar-text: #5C3D3D;
-  --c-calendar-sub: #8E5F5F;
-  --c-calendar-accent: #FF7E5F;
-  --c-calendar-accent-dim: rgba(255, 126, 95, 0.25);
-  --c-calendar-weekend: #F0D7A3;
-  --c-calendar-action: #E86A4D;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-  --c-calendar-event-blue: #03A9F4;
-  --c-calendar-event-green: #8BC34A;
-  --c-calendar-event-amber: #FF9800;
-  --c-calendar-event-rose: #FF5722;
-  --c-calendar-event-violet: #9C27B0;
-  --c-calendar-event-teal: #00BCD4;
-  --c-calendar-event-slate: #795548;
-  --c-calendar-event-purple: #E91E63;
-}
-
-[data-calendar-theme="honey"] {
-  --c-calendar-bg-top: #F5EADF;
-  /* Pale latte */
-  --c-calendar-bg-mid: #F5EADF;
-  --c-calendar-bg-bottom: #F2E1DD;
-  /* Pale dusty pink */
-  --c-calendar-orb-1: #ECD5BD;
-  /* Soft warm honey */
-  --c-calendar-orb-2: #EDCDCD;
-  /* Soft warm pink */
-  --c-calendar-text: #5D4642;
-  --c-calendar-sub: #8A6B66;
-  --c-calendar-accent: #D4A373;
-  --c-calendar-accent-dim: rgba(212, 163, 115, 0.25);
-  --c-calendar-weekend: #F5E6C8;
-  --c-calendar-action: #C39162;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-  --c-calendar-event-blue: #4A90E2; 
-  --c-calendar-event-green: #7CB342; 
-  --c-calendar-event-amber: #F5A623; 
-  --c-calendar-event-rose: #D0021B; 
-  --c-calendar-event-violet: #A569BD; 
-  --c-calendar-event-teal: #17A589; 
-  --c-calendar-event-slate: #839192; 
-  --c-calendar-event-purple: #C0392B; 
+[data-calendar-theme="cream"] {
+  --c-calendar-bg: #FAF6ED;
+  --c-calendar-surface: #F1EBDD;
+  --c-calendar-surface-2: #E9E1CE;
+  --c-calendar-sheet: #FFFDF7;
+  --c-calendar-ink: #3A3326;
+  --c-calendar-sub: #8F8672;
+  --c-calendar-faint: #C7BEA9;
+  --c-calendar-sel-bg: #3A3326;
 }
 
 [data-calendar-theme="mint"] {
-  --c-calendar-bg-top: #EBF4EF;
-  /* Pale sage */
-  --c-calendar-bg-mid: #EBF4EF;
-  --c-calendar-bg-bottom: #F6F6DE;
-  /* Pale lemon */
-  --c-calendar-orb-1: #CAEAE5;
-  /* Muted glass green */
-  --c-calendar-orb-2: #F3EDB4;
-  /* Muted yellow */
-  --c-calendar-text: #3A4D45;
-  --c-calendar-sub: #5C7A6D;
-  --c-calendar-accent: #80CBC4;
-  --c-calendar-accent-dim: rgba(128, 203, 196, 0.25);
-  --c-calendar-weekend: #C8E6C9;
-  --c-calendar-action: #6DB8B1;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-  --c-calendar-event-blue: #29B6F6; 
-  --c-calendar-event-green: #26A69A; 
-  --c-calendar-event-amber: #FFEE58; 
-  --c-calendar-event-rose: #EC407A; 
-  --c-calendar-event-violet: #AB47BC; 
-  --c-calendar-event-teal: #26C6DA; 
-  --c-calendar-event-slate: #78909C; 
-  --c-calendar-event-purple: #7E57C2; 
+  --c-calendar-bg: #F3F8F3;
+  --c-calendar-surface: #E7F0E7;
+  --c-calendar-surface-2: #DCE8DC;
+  --c-calendar-sheet: #FCFFFC;
+  --c-calendar-ink: #24312A;
+  --c-calendar-sub: #7C8F82;
+  --c-calendar-faint: #B3C4B8;
+  --c-calendar-sel-bg: #24312A;
 }
 
 [data-calendar-theme="mist"] {
-  --c-calendar-bg-top: #ECE8F2;
-  /* Pale misty lavender */
-  --c-calendar-bg-mid: #ECE8F2;
-  --c-calendar-bg-bottom: #F4F0DD;
-  /* Pale warm moon yellow */
-  --c-calendar-orb-1: #D8CFEB;
-  /* Soft muted lavender */
-  --c-calendar-orb-2: #EDD5E5;
-  /* Soft muted pink */
-  --c-calendar-text: #4B405A;
-  --c-calendar-sub: #6B5C7E;
-  --c-calendar-accent: #B399D4;
-  --c-calendar-accent-dim: rgba(179, 153, 212, 0.25);
-  --c-calendar-weekend: #C4C4C4;
-  --c-calendar-action: #9D83BE;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-  --c-calendar-event-blue: #5C6BC0; 
-  --c-calendar-event-green: #66BB6A; 
-  --c-calendar-event-amber: #FFA726; 
-  --c-calendar-event-rose: #EF5350; 
-  --c-calendar-event-violet: #7E57C2; 
-  --c-calendar-event-teal: #26A69A; 
-  --c-calendar-event-slate: #546E7A; 
-  --c-calendar-event-purple: #8E24AA; 
+  --c-calendar-bg: #F5F3F9;
+  --c-calendar-surface: #EAE7F2;
+  --c-calendar-surface-2: #DFDBEA;
+  --c-calendar-sheet: #FDFCFF;
+  --c-calendar-ink: #322E3E;
+  --c-calendar-sub: #857F96;
+  --c-calendar-faint: #BEB8CE;
+  --c-calendar-sel-bg: #322E3E;
 }
 
-[data-calendar-theme="melon"] {
-  --c-calendar-bg-top: #ECF3E8;
-  /* Pale celery */
-  --c-calendar-bg-mid: #ECF3E8;
-  --c-calendar-bg-bottom: #F4E4E4;
-  /* Pale muted coral */
-  --c-calendar-orb-1: #D7EAD5;
-  /* Muted dew green */
-  --c-calendar-orb-2: #E4EECA;
-  /* Muted yellow-green */
-  --c-calendar-text: #5C3D3D;
-  --c-calendar-sub: #8E5F5F;
-  --c-calendar-accent: #87A885;
-  /* Deeper Dew Green for legibility */
-  --c-calendar-accent-dim: rgba(135, 168, 133, 0.35);
-  --c-calendar-weekend: #E0F0B0;
-  --c-calendar-action: #BBD2BB;
-  --c-calendar-modal-pink: rgba(255, 255, 255, 0.3);
-  --c-calendar-modal-blue: rgba(255, 255, 255, 0.3);
-  --c-calendar-event-blue: #42A5F5; 
-  --c-calendar-event-green: #4CAF50; 
-  --c-calendar-event-amber: #FFCA28; 
-  --c-calendar-event-rose: #F06292; 
-  --c-calendar-event-violet: #5C6BC0; 
-  --c-calendar-event-teal: #4DB6AC;
-  --c-calendar-event-slate: #607D8B;
-  --c-calendar-event-purple: #BA68C8;
+[data-calendar-theme="sakura"] {
+  --c-calendar-bg: #FBF3F5;
+  --c-calendar-surface: #F4E5EA;
+  --c-calendar-surface-2: #ECD8DF;
+  --c-calendar-sheet: #FFFBFC;
+  --c-calendar-ink: #3B2A31;
+  --c-calendar-sub: #97808A;
+  --c-calendar-faint: #CFB6BF;
+  --c-calendar-today: #E8497E;
+  --c-calendar-sel-bg: #3B2A31;
 }
 
 /* ── Adventure Mode ── */

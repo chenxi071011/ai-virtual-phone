@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import type { MomentPost, MomentComment } from "@/lib/moments-types";
 import { BilingualTextBlock, MediaImageWithPreview } from "@/components/chat/message-bubble";
+import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import {
     loadMomentComments,
     toggleMomentLike,
@@ -18,7 +19,7 @@ import { buildTwoLevelMomentThreads } from "@/lib/moments-comment-threading";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import { retryMomentGeneratedPhoto } from "@/lib/generated-image-retry";
-import { RefreshCw, Trash2, MoreHorizontal, MapPin, Heart, MessageCircle, Pencil } from "lucide-react";
+import { Trash2, MoreHorizontal, MapPin, Heart, MessageCircle, Pencil } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui";
 
 type Props = {
@@ -40,6 +41,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
     const [showPhotoPromptEditor, setShowPhotoPromptEditor] = useState(false);
     const [photoPromptDraft, setPhotoPromptDraft] = useState("");
     const [photoRegenerating, setPhotoRegenerating] = useState(false);
+    const [showFallbackPreview, setShowFallbackPreview] = useState(false);
     const [photoRetryError, setPhotoRetryError] = useState("");
     const [showPostActions, setShowPostActions] = useState(false);
     const [editingPostOpen, setEditingPostOpen] = useState(false);
@@ -327,20 +329,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                         onError={() => {
                             setResolvedPhotoUrl(null);
                         }}
-                        sideAction={canRegeneratePhoto ? (
-                            <button
-                                type="button"
-                                className="feed-post-photo-retry-btn"
-                                disabled={photoRegenerating}
-                                aria-label="重新生成朋友圈图片"
-                                onClick={e => {
-                                    e.stopPropagation();
-                                    openPhotoPromptEditor();
-                                }}
-                            >
-                                <RefreshCw size={14} className={photoRegenerating ? "is-spinning" : undefined} />
-                            </button>
-                        ) : undefined}
+                        onRegenerate={canRegeneratePhoto ? openPhotoPromptEditor : undefined}
+                        regenerating={photoRegenerating}
                     />
                 )}
                 {fallbackPhotoDescription && (
@@ -348,23 +338,10 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                         <div className="feed-post-photo-retry-row">
                             <div
                                 className="feed-post-photo-description ts-13 italic leading-[1.8] opacity-80 text-[var(--c-text)] px-4 py-3 inline-block max-w-full"
-                                style={{ background: "color-mix(in srgb, var(--c-text) 10%, transparent)", borderRadius: 0 }}
+                                style={{ background: "color-mix(in srgb, var(--c-text) 10%, transparent)", borderRadius: 0, cursor: canRetryPhoto ? "pointer" : undefined }}
+                                onClick={canRetryPhoto ? (e => { e.stopPropagation(); setShowFallbackPreview(true); }) : undefined}
                             >
                                 <MomentInlineBilingualText text={fallbackPhotoDescription} defaultExpanded={defaultTranslationExpanded} />
-                                {canRetryPhoto && (
-                                    <button
-                                        type="button"
-                                        className="feed-post-photo-retry-btn feed-post-photo-inline-retry-btn"
-                                        disabled={photoRegenerating}
-                                        aria-label="重新生成朋友圈图片"
-                                        onClick={e => {
-                                            e.stopPropagation();
-                                            openPhotoPromptEditor();
-                                        }}
-                                    >
-                                        <RefreshCw size={14} className={photoRegenerating ? "is-spinning" : undefined} />
-                                    </button>
-                                )}
                             </div>
                         </div>
                         {post.photoGenerationStatus === "pending" && (
@@ -377,6 +354,14 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                 )}
                 {photoRetryError && <div className="feed-post-photo-retry-error">生成失败：{photoRetryError}</div>}
             </div>
+            {showFallbackPreview && fallbackPhotoDescription && (
+                <MediaPreviewOverlay
+                    description={fallbackPhotoDescription}
+                    onRegenerate={canRetryPhoto ? () => { setShowFallbackPreview(false); openPhotoPromptEditor(); } : undefined}
+                    regenerating={photoRegenerating}
+                    onClose={() => setShowFallbackPreview(false)}
+                />
+            )}
             {showPhotoPromptEditor && typeof document !== "undefined" && createPortal(
                 <div className="modal-overlay" data-ui="modal" onClick={() => setShowPhotoPromptEditor(false)}>
                     <div className="modal-dialog feed-post-photo-prompt-dialog" data-ui="modal-dialog" onClick={e => e.stopPropagation()}>

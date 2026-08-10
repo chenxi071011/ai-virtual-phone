@@ -15,6 +15,7 @@ import {
 import { getMascotContext, subscribeMascotContext } from "@/lib/mascot-context";
 import { mascotNavigate, DIY_WIDGET_PREVIEW_EVENT, type DiyWidgetPreviewEventDetail, type DiyWidgetPreviewRequest } from "@/lib/mascot-events";
 import { DIY_WIDGET_GUARD_STYLE } from "@/components/widgets/diy-widget-renderer";
+import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import {
   clearMascotToolHistoryMessages,
   deleteMascotMessageWithLinkedTools,
@@ -613,6 +614,7 @@ export function MascotFloat() {
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   // ref → blob object URL 缓存，渲染预览用
   const [imagePreviewCache, setImagePreviewCache] = useState<Record<string, string>>({});
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [nineSliceCalibration, setNineSliceCalibration] = useState<NineSliceCalibrationEventDetail | null>(null);
   const [diyWidgetPreview, setDiyWidgetPreview] = useState<DiyWidgetPreviewRequest | null>(null);
   const [activeMascotMessageIndex, setActiveMascotMessageIndex] = useState<number | null>(null);
@@ -1018,7 +1020,16 @@ export function MascotFloat() {
                 const url = imagePreviewCache[ref];
                 if (!url) return <div key={idx} className="mascot-msg-image mascot-msg-image-loading" />;
                 /* eslint-disable-next-line @next/next/no-img-element */
-                return <img key={idx} src={url} alt="" className="mascot-msg-image" />;
+                return (
+                  <img
+                    key={idx}
+                    src={url}
+                    alt=""
+                    className="mascot-msg-image"
+                    style={{ cursor: "pointer" }}
+                    onClick={e => { e.stopPropagation(); setPreviewImageUrl(url); }}
+                  />
+                );
               })}
             </div>
           )}
@@ -1056,7 +1067,16 @@ export function MascotFloat() {
                 const url = imagePreviewCache[ref];
                 if (!url) return <div key={idx} className="mascot-msg-image mascot-msg-image-loading" />;
                 /* eslint-disable-next-line @next/next/no-img-element */
-                return <img key={idx} src={url} alt="" className="mascot-msg-image" />;
+                return (
+                  <img
+                    key={idx}
+                    src={url}
+                    alt=""
+                    className="mascot-msg-image"
+                    style={{ cursor: "pointer" }}
+                    onClick={e => { e.stopPropagation(); setPreviewImageUrl(url); }}
+                  />
+                );
               })}
             </div>
           )}
@@ -2098,6 +2118,14 @@ export function MascotFloat() {
         <NineSliceCalibrationDialog
           detail={nineSliceCalibration}
           onClose={() => setNineSliceCalibration(null)}
+        />
+      )}
+
+      {previewImageUrl && (
+        <MediaPreviewOverlay
+          imageUrl={previewImageUrl}
+          saveFilename="小卷图片.png"
+          onClose={() => setPreviewImageUrl(null)}
         />
       )}
 

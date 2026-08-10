@@ -238,6 +238,10 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 滚到底继续拉时不把滚动链传给外层（iOS 上会被外层回弹带跳） */
+  overscroll-behavior: contain;
+  /* 画布 iframe 高度异步修正由 JS 手动锚定补偿，关掉原生锚定防止双重补偿 */
+  overflow-anchor: none;
   padding: 0 18px 28px;
 }
 
@@ -666,10 +670,20 @@
   margin-top: 10px;
 }
 
+/* 五个操作按钮固定两排：前三个一整排，后两个一整排 */
 .cp-black-market-studio-actions {
   display: grid;
-  grid-template-columns: 0.72fr 0.9fr 1.16fr 1.18fr;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
+}
+
+.cp-black-market-studio-actions button {
+  grid-column: span 2;
+}
+
+.cp-black-market-studio-actions button:nth-child(4),
+.cp-black-market-studio-actions button:nth-child(5) {
+  grid-column: span 3;
 }
 
 .cp-black-market-studio-actions button {
@@ -740,6 +754,8 @@
   max-width: 390px;
   max-height: min(82vh, 680px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   background: #070908;
   border: 1px solid rgba(215, 228, 223, 0.16);
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
@@ -2084,6 +2100,21 @@
   gap: 8px;
 }
 
+/* 草稿卡片发布状态标签：关联共享档案后亮绿 */
+.cp-black-market-published-card span[data-pub="yes"] {
+  color: #79d99a;
+}
+
+/* 关联草稿在上次发布后又存过草稿：提示有未提交的本机改动（与「已发布」标签同款同色） */
+.cp-bm-dirty-hint {
+  margin-left: 8px;
+  color: #79d99a;
+  font: 800 calc(9px*var(--app-text-scale,1)) "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-style: normal;
+}
+
 .cp-black-market-studio-tabs button {
   min-height: 36px;
   border: 1px solid var(--bm-line-soft);
@@ -2195,6 +2226,18 @@
 
 .cp-black-market-published-actions:has(button:nth-child(2):last-child) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* 四个按钮保持一行不换行，收紧间距与字距 */
+.cp-black-market-published-actions:has(button:nth-child(4)) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.cp-black-market-published-actions:has(button:nth-child(4)) button {
+  gap: 3px;
+  letter-spacing: 0.04em;
+  padding: 0 2px;
 }
 
 .cp-black-market-published-actions button {
@@ -2469,6 +2512,8 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding-right: 2px;
   margin-top: 12px;
 }
@@ -2862,4 +2907,28 @@
   border-top: 1px solid rgba(234, 255, 241, 0.14);
   padding-top: 10px;
   flex-wrap: wrap;
+}
+
+/* 创建发布「导入草稿文件」：整行宽，跟随终端绿风格（与昵称快捷按钮同构） */
+.cp-bm-draft-import-row {
+  margin-bottom: 10px;
+}
+.cp-bm-draft-import-row button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(82, 255, 158, 0.24);
+  background: rgba(82, 255, 158, 0.06);
+  color: #8dffbd;
+  padding: 0 10px;
+  font: 800 calc(11px*var(--app-text-scale,1)) "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.cp-bm-draft-import-row button:active {
+  transform: translateY(1px);
+  background: rgba(82, 255, 158, 0.12);
 }

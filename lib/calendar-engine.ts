@@ -22,14 +22,12 @@ import { getCustomStickerExample, getCustomStickerNames } from "./custom-sticker
 import { previewMessagesForApi, sendLLMRequest, type ChatEngineError } from "./chat-engine";
 import { buildCalendarScheduleMarker, clearGeneratedWeekItems, cloneWeekPlanWithManualEdits, normalizeGeneratedScheduleItems, restoreCalendarWeekItems } from "./calendar-storage";
 import {
-  CALENDAR_HOUR_END,
-  CALENDAR_HOUR_START,
-  formatIsoDate,
   getWeekDates,
   getWeekStartIso,
   getWeekdayLabel,
   isCalendarTimeRangeAllowed,
   normalizeTime,
+  sanitizeScheduleEmoji,
 } from "./calendar-utils";
 
 type CalendarAssemblerResolved = {
@@ -61,6 +59,15 @@ function buildSyntheticUserCharacter(identity: UserIdentity | null): Character {
   };
 }
 
+function buildCalendarTriggerInstruction(ownerName: string, weekDates: string[]): string {
+  return [
+    `请为${ownerName}生成 ${weekDates[0]} 到 ${weekDates[6]} 这一周的日程安排。`,
+    "请参考已有日程，生成这一周的完整日程安排。",
+    "每行一条，格式：YYYY-MM-DD|周几|开始时间|结束时间|地点|emoji|事项。emoji 段填一个最贴合该事项的表情符号。",
+    "作息时间不受限制（早起、夜跑、通宵都可以安排），但每一天最多 5 条日程，宁缺毋滥。",
+  ].join("\n");
+}
+
 function stripCodeFences(text: string): string {
   return text
     .replace(/^```[a-zA-Z]*\s*/g, "")
@@ -81,6 +88,7 @@ function parseScheduleLines(rawText: string, weekStart: string): CalendarSchedul
     endTime: string;
     location: string;
     title: string;
+    emoji?: string;
   }> = [];
 
   for (const rawLine of lines) {
@@ -99,7 +107,21 @@ function parseScheduleLines(rawText: string, weekStart: string): CalendarSchedul
     if (!startTime || !endTime || !isCalendarTimeRangeAllowed(startTime, endTime)) continue;
 
     const location = parts[4] === "无" ? "" : parts[4];
-    const title = parts.slice(5).join("|");
+    // 新格式第 6 段为 emoji（YYYY-MM-DD|周几|开始|结束|地点|emoji|事项）；
+    // 兼容旧格式（第 6 段直接是事项）：仅当该段确实是 emoji 时才按新格式取。
+    let emoji = "";
+    let title: string;
+    if (parts.length >= 7) {
+      const candidate = sanitizeScheduleEmoji(parts[5]);
+      if (candidate && Array.from(parts[5]).length <= 3) {
+        emoji = candidate;
+        title = parts.slice(6).join("|");
+      } else {
+        title = parts.slice(5).join("|");
+      }
+    } else {
+      title = parts[5];
+    }
     if (!title.trim()) continue;
 
     parsed.push({
@@ -108,6 +130,7 @@ function parseScheduleLines(rawText: string, weekStart: string): CalendarSchedul
       endTime,
       location,
       title,
+      emoji,
     });
   }
 
@@ -219,11 +242,7 @@ export async function generateWeeklyCalendarSchedule(
   try {
     const resolved = await resolveCalendarAssemblerInput(ownerType, ownerId, weekStart);
     const weekDates = getWeekDates(weekStart);
-    const triggerInstruction = [
-      `请为${resolved.ownerName}生成 ${weekDates[0]} 到 ${weekDates[6]} 这一周的日程安排。`,
-      "请参考已有日程，生成这一周的完整日程安排。",
-      `仅安排 ${String(CALENDAR_HOUR_START).padStart(2, "0")}:00 到 ${String(CALENDAR_HOUR_END).padStart(2, "0")}:00 之间的事项。`,
-    ].join("\n");
+    const triggerInstruction = buildCalendarTriggerInstruction(resolved.ownerName, weekDates);
 
     const messages: LLMMessage[] = [
       ...resolved.llmMessages,
@@ -268,11 +287,7 @@ export async function previewCalendarPromptPayload(
   }
   const resolved = await resolveCalendarAssemblerInput(ownerType, ownerId, weekStart);
   const weekDates = getWeekDates(weekStart);
-  const triggerInstruction = [
-    `请为${resolved.ownerName}生成 ${weekDates[0]} 到 ${weekDates[6]} 这一周的日程安排。`,
-    "请参考已有日程，生成这一周的完整日程安排。",
-    `仅安排 ${String(CALENDAR_HOUR_START).padStart(2, "0")}:00 到 ${String(CALENDAR_HOUR_END).padStart(2, "0")}:00 之间的事项。`,
-  ].join("\n");
+  const triggerInstruction = buildCalendarTriggerInstruction(resolved.ownerName, weekDates);
 
   const messages: LLMMessage[] = [
     ...resolved.llmMessages,
@@ -300,6 +315,7 @@ export function createDefaultScheduleDraft(date: string) {
     endTime: "10:00",
     location: "",
     title: "",
+    emoji: "",
     source: "manual" as const,
   };
 }

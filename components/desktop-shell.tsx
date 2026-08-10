@@ -20,6 +20,9 @@ import MusicPlayer from "@/components/music/music-player";
 import MusicFloat from "@/components/music/music-float";
 import MiniAppWindow from "@/components/music/mini-app-window";
 import { PhoneCalendarApp } from "@/components/calendar-app";
+import { PhoneQaApp } from "@/components/phone-qa-app";
+import { ResourceHubApp } from "@/components/resource-hub/resource-hub-app";
+import "@/lib/qa-error-log";
 import { DiaryApp } from "@/components/diary/diary-app";
 import { XiaohongshuApp } from "@/components/xiaohongshu/xiaohongshu-app";
 import { StoryApp } from "@/components/story/story-app";
@@ -64,7 +67,10 @@ import {
 } from "@/lib/custom-app-tool-runtime";
 import {
   CUSTOM_APPS_UPDATED_EVENT,
+  CUSTOM_APP_PLACE_DESKTOP_EVENT,
+  loadCustomAppIconStyles,
   loadInstalledCustomApps,
+  type CustomAppIconStyle,
 } from "@/lib/custom-app-storage";
 import {
   isCustomAppMarketItemNewerThanInstalled,
@@ -956,6 +962,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [notice, setNotice] = useState<string | null>(null);
   const [activeApp, setActiveApp] = useState<DesktopIconId | null>(null);
   const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
+  // 自定义 APP 桌面图标样式偏好（global = 忽略上传图标走全局效果）
+  const [customAppIconStyles, setCustomAppIconStyles] = useState<Record<string, CustomAppIconStyle>>({});
+  useEffect(() => {
+    const syncIconStyles = () => setCustomAppIconStyles(loadCustomAppIconStyles());
+    syncIconStyles();
+    window.addEventListener(CUSTOM_APPS_UPDATED_EVENT, syncIconStyles);
+    return () => window.removeEventListener(CUSTOM_APPS_UPDATED_EVENT, syncIconStyles);
+  }, []);
   const [customAppUpdatePrompt, setCustomAppUpdatePrompt] = useState<PendingCustomAppUpdatePrompt | null>(null);
   const [customAppUpdateBusy, setCustomAppUpdateBusy] = useState(false);
   const customAppUpdateCheckingRef = useRef<Set<string>>(new Set());
@@ -1393,6 +1407,19 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     };
     window.addEventListener(CUSTOM_APPS_UPDATED_EVENT, refreshCustomApps);
     return () => window.removeEventListener(CUSTOM_APPS_UPDATED_EVENT, refreshCustomApps);
+  }, []);
+
+  // 其他模块（如工坊 agent 装应用）请求把已安装应用的图标摆上桌面
+  const handleInstallCustomAppToDesktopRef = useRef<((app: InstalledCustomApp) => void) | null>(null);
+  useEffect(() => {
+    const placeHandler = (e: Event) => {
+      const appId = (e as CustomEvent).detail?.appId;
+      if (typeof appId !== "string" || !appId) return;
+      const app = loadInstalledCustomApps().find(item => item.id === appId);
+      if (app) handleInstallCustomAppToDesktopRef.current?.(app);
+    };
+    window.addEventListener(CUSTOM_APP_PLACE_DESKTOP_EVENT, placeHandler);
+    return () => window.removeEventListener(CUSTOM_APP_PLACE_DESKTOP_EVENT, placeHandler);
   }, []);
 
   useEffect(() => {
@@ -1994,6 +2021,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       window.setTimeout(() => setCurrentPageIndex(Math.max(0, (placedPageNumber ?? 1) - 1)), 0);
     }
   }, []);
+  handleInstallCustomAppToDesktopRef.current = handleInstallCustomAppToDesktop;
 
   // Allow other components to switch apps via custom event
   const [chatInitSessionId, setChatInitSessionId] = useState<string | null>(null);
@@ -3333,6 +3361,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     if (activeApp === "calendar") {
       return <PhoneCalendarApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
     }
+    if (activeApp === "qa") {
+      return <PhoneQaApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+    if (activeApp === "resource_hub") {
+      return <ResourceHubApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
 
     if (activeApp === "diary") {
       return <DiaryApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
@@ -3865,7 +3899,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                               const builtinIconId = customApp ? null : icon.id as IconId;
                               const iconSkinId = activeIconSkins[iconId];
                               const iconSkinUrl = iconSkinId ? themeAssets[iconSkinId] ?? null : null;
-                              const customIconUrl = customApp?.iconDataUrl ?? null;
+                              const customIconUrl = customApp && customAppIconStyles[customApp.id] !== "global"
+                                ? customApp.iconDataUrl ?? null
+                                : null;
                               const iconImageUrl = iconSkinUrl || customIconUrl;
                               const hasImageIcon = Boolean(iconImageUrl);
                               const isDragging = dragItem?.type === "icon" && dragItem.id === iconId;
@@ -4003,7 +4039,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                     const builtinIconId = customApp ? null : (icon.id as IconId);
                     const iconSkinId = activeIconSkins[iconId];
                     const iconSkinUrl = iconSkinId ? themeAssets[iconSkinId] ?? null : null;
-                    const customIconUrl = customApp?.iconDataUrl ?? null;
+                    const customIconUrl = customApp && customAppIconStyles[customApp.id] !== "global"
+                      ? customApp.iconDataUrl ?? null
+                      : null;
                     const iconImageUrl = iconSkinUrl || customIconUrl;
                     const hasImageIcon = Boolean(iconImageUrl);
                     const isDragging = dragItem?.type === "icon" && dragItem.id === iconId;

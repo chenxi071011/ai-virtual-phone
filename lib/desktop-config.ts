@@ -24,9 +24,11 @@ export type IconId =
   | "settings"
   | "theme"
   | "resources"
+  | "resource_hub"
   | "characters"
   | "worldbuilder"
-  | "toydevice";
+  | "toydevice"
+  | "qa";
 
 export type DesktopIconId = IconId | CustomAppIconId;
 
@@ -55,7 +57,7 @@ export const PAGE_2_DEFAULT: IconId[] = [
 ];
 
 // 第三页默认图标（居中放置，位置见 createDefaultDesktopIconLayout）
-export const PAGE_3_DEFAULT: IconId[] = ["worldbuilder"];
+export const PAGE_3_DEFAULT: IconId[] = ["worldbuilder", "qa", "resource_hub"];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];
 
@@ -93,6 +95,7 @@ export const ICONS: Record<IconId, IconMeta> = {
   settings: { id: "settings", label: "设置", tone: "var(--c-icon-slate)", placeholder: false },
   theme: { id: "theme", label: "\u4E3B\u9898", tone: "var(--c-icon-violet)", placeholder: true },
   resources: { id: "resources", label: "\u8D44\u6E90\u5E93", tone: "var(--c-icon-teal)", placeholder: false },
+  resource_hub: { id: "resource_hub", label: "资源集市", tone: "var(--c-icon-amber)", placeholder: false },
   characters: {
     id: "characters",
     label: "\u89D2\u8272",
@@ -113,4 +116,5 @@ export const ICONS: Record<IconId, IconMeta> = {
     tone: "var(--c-icon-rose)",
     placeholder: false,
   },
+  qa: { id: "qa", label: "工坊", tone: "var(--c-icon-qa, #4a505c99)", placeholder: false },
 };

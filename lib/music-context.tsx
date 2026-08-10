@@ -5,7 +5,7 @@ import { createContext, useContext, useState, useRef, useCallback, useEffect, us
 import type { MusicTrack } from "./music-storage";
 import { getAudioBlob, markTrackPlayed } from "./music-storage";
 import { recordPlayHistory } from "./music-history";
-import { findPlayableMatch, getNeteaseLyrics, getNeteasePlayUrl, getNeteaseSongDetail } from "./music-service";
+import { findPlayableMatch, getNeteaseLyrics, getNeteasePlayUrl, getNeteasePlayInfo, getNeteaseSongDetail } from "./music-service";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { registerMusicControlBridge } from "./music-control-bridge";
 
@@ -361,8 +361,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
         if (track.id.startsWith("netease_")) {
             const nid = parseInt(track.id.replace("netease_", ""), 10);
-            const url = await getNeteasePlayUrl(nid);
-            if (!url) return { ok: false, message: "没有找到可播放的音乐" };
+            const info = await getNeteasePlayInfo(nid);
+            const url = info.url;
+            if (!url) return { ok: false, message: info.reason || "没有找到可播放的音乐" };
             const [detail, lyrics] = await Promise.all([
                 getNeteaseSongDetail(nid).catch(() => null),
                 getNeteaseLyrics(nid).catch(() => ""),

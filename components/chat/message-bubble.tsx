@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -9,14 +9,16 @@ import { resolveContactCard } from "@/lib/contact-card";
 import { loadCharacters } from "@/lib/character-storage";
 import { CHAT_OPEN_SESSION_EVENT, dispatchOpenAddContact } from "@/lib/chat-notification-events";
 import { ContactCardGenerateFlow } from "@/components/chat/contact-card-generate-flow";
+import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import { findStickerByName } from "@/lib/sticker-data";
 import { splitBilingualText } from "@/lib/bilingual-text";
+import { isInvisibleOrWhitespaceOnly } from "@/lib/rich-message-parser";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
-import { Blocks, Maximize2, ReceiptText, RefreshCw } from "lucide-react";
+import { Blocks, Maximize2, ReceiptText } from "lucide-react";
 import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
 import { payWithWalletBalance } from "@/lib/wallet-storage";
@@ -192,7 +194,7 @@ function splitChatContent(text: string): { type: "md" | "html"; content: string 
 }
 
 export function normalizeTextBubbleContent(content: string): string {
-    return content
+    const cleaned = content
         .replace(/\[音乐(?:分享)?(?:[：:][^\]]*)?\]/g, "")
         .replace(/\[情趣互动(?:[：:][^\]]*)?\]/g, "")
         .replace(/\[[^\]]+拍了拍[^\]]+\]/g, "")
@@ -200,6 +202,9 @@ export function normalizeTextBubbleContent(content: string): string {
         .replace(/\[[^\]]*?(?:执行动作|工具调用)[:：][^\]]*?[（(][\s\S]*?[)）]\]/g, "")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
+    // 只剩零宽字符/BOM 等不可见内容时按空处理，否则会渲染出一个空气泡
+    //（也让历史脏数据在显示层直接被隐藏）
+    return isInvisibleOrWhitespaceOnly(cleaned) ? "" : cleaned;
 }
 
 export function isStandaloneHtmlPreviewContent(content: string): boolean {
@@ -1243,9 +1248,8 @@ function ImageBubble({
     const [regenerating, setRegenerating] = useState(false);
     const [retryError, setRetryError] = useState("");
     const isPending = d?.imageGenerationStatus === "pending";
-    const canRetry = (!msg.mediaUrl || refExpired)
-        && !isPending
-        && Boolean(d?.label?.trim());
+    const canRegenerate = !isPending && Boolean(d?.label?.trim());
+    const [showPreview, setShowPreview] = useState(false);
 
     useEffect(() => {
         if (!isMediaStoreRef(rawUrl)) {
@@ -1288,15 +1292,49 @@ function ImageBubble({
             });
     }, [characterId, msg, onUpdate, promptDraft]);
 
+    // 预览层与提示词对话框：图片正常/失败占位两种形态共用（操作按钮统一收在点开后的预览层里）
+    const previewAndDialog = (
+        <>
+            {showPreview && (
+                <MediaPreviewOverlay
+                    imageUrl={resolvedUrl || undefined}
+                    description={!resolvedUrl ? label : undefined}
+                    saveFilename={resolvedUrl ? ensureExtension(label, "image") : undefined}
+                    onRegenerate={canRegenerate ? () => { setShowPreview(false); openPromptEditor(); } : undefined}
+                    regenerating={regenerating}
+                    onClose={() => setShowPreview(false)}
+                />
+            )}
+            {showPromptEditor && typeof document !== "undefined" && createPortal(
+                <GeneratedImagePromptDialog
+                    value={promptDraft}
+                    onChange={setPromptDraft}
+                    onConfirm={handleRetry}
+                    onCancel={() => setShowPromptEditor(false)}
+                    busy={regenerating}
+                    error={retryError}
+                />,
+                document.body,
+            )}
+        </>
+    );
+
     if (resolvedUrl) {
         return (
-            <div className="chat-photo-card chat-photo-card--image rounded-none">
-                <img
-                    src={resolvedUrl}
-                    alt={label}
-                    className="chat-photo-card-image block max-w-[240px] max-h-[320px] w-auto h-auto"
-                />
-            </div>
+            <>
+                <div
+                    className="chat-photo-card chat-photo-card--image rounded-none"
+                    style={{ cursor: "pointer" }}
+                    onClick={e => { e.stopPropagation(); setShowPreview(true); }}
+                >
+                    <img
+                        src={resolvedUrl}
+                        alt={label}
+                        className="chat-photo-card-image block max-w-[240px] max-h-[320px] w-auto h-auto"
+                    />
+                </div>
+                {previewAndDialog}
+            </>
         );
     }
     // media-store 引用解析中：占个位，避免闪一下重试卡
@@ -1318,40 +1356,17 @@ function ImageBubble({
     }
     return (
         <div className="chat-generated-image-retry-stack">
-            <div className="chat-generated-image-retry-wrap" data-action-placement={msg.role === "user" ? "left" : "right"}>
-                <div className="chat-photo-card w-[180px] aspect-square rounded-none">
-                    <div className="chat-photo-card-placeholder w-full h-full flex items-center justify-center px-5">
-                        <div className="chat-photo-card-text">{label}</div>
-                    </div>
+            <div
+                className="chat-photo-card w-[180px] aspect-square rounded-none"
+                style={{ cursor: "pointer" }}
+                onClick={e => { e.stopPropagation(); setShowPreview(true); }}
+            >
+                <div className="chat-photo-card-placeholder w-full h-full flex items-center justify-center px-5">
+                    <div className="chat-photo-card-text">{label}</div>
                 </div>
-                {canRetry && (
-                    <button
-                        type="button"
-                        className="chat-generated-image-retry-btn"
-                        disabled={regenerating}
-                        aria-label="重新生成图片"
-                        onPointerDown={e => e.stopPropagation()}
-                        onClick={e => {
-                            e.stopPropagation();
-                            openPromptEditor();
-                        }}
-                    >
-                        <RefreshCw size={14} className={regenerating ? "is-spinning" : undefined} />
-                    </button>
-                )}
             </div>
             {retryError && <div className="chat-generated-image-retry-error">生成失败：{retryError}</div>}
-            {showPromptEditor && typeof document !== "undefined" && createPortal(
-                <GeneratedImagePromptDialog
-                    value={promptDraft}
-                    onChange={setPromptDraft}
-                    onConfirm={handleRetry}
-                    onCancel={() => setShowPromptEditor(false)}
-                    busy={regenerating}
-                    error={retryError}
-                />,
-                document.body,
-            )}
+            {previewAndDialog}
         </div>
     );
 }
@@ -1832,54 +1847,34 @@ export function MediaImageWithPreview({
     title,
     filename,
     onError,
-    sideAction,
-    sideActionPlacement = "right",
+    onRegenerate,
+    regenerating,
 }: {
     url: string;
     title: string;
     filename?: string;
     onError?: () => void;
-    sideAction?: ReactNode;
-    sideActionPlacement?: "left" | "right";
+    onRegenerate?: () => void;
+    regenerating?: boolean;
 }) {
     const [preview, setPreview] = useState(false);
     const saveName = filename || title;
     return (
         <>
-            <div className="chat-media-file-wrap" data-action-placement={sideActionPlacement}>
+            <div className="chat-media-file-wrap">
                 <div className="chat-media-file-card chat-media-file-image" onClick={(e) => { e.stopPropagation(); setPreview(true); }}>
                     {title && <div className="chat-media-file-title">{title}</div>}
                     <img src={url} alt={title} style={{ cursor: "pointer" }} onError={onError} />
                 </div>
-                {sideAction ? (
-                    <div className="chat-media-file-actions">
-                        {sideAction}
-                        <MediaSaveButton url={url} filename={ensureExtension(saveName, "image")} />
-                    </div>
-                ) : (
-                    <MediaSaveButton url={url} filename={ensureExtension(saveName, "image")} />
-                )}
             </div>
-            {preview && createPortal(
-                <div
-                    style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.85)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}
-                    onClick={() => setPreview(false)}
-                >
-                    <img src={url} alt={title} style={{ maxWidth: "90vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 8 }} />
-                    <button
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={async (e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            const { downloadUrl } = await import("@/lib/download-utils");
-                            await downloadUrl(url, ensureExtension(saveName, "image"));
-                        }}
-                        style={{ color: "#fff", fontSize: "calc(14px*var(--app-text-scale,1))", opacity: 0.8, border: "none", cursor: "pointer", padding: "8px 20px", borderRadius: 20, background: "rgba(255,255,255,0.15)", backdropFilter: "blur(8px)" }}
-                    >
-                        保存图片
-                    </button>
-                </div>,
-                document.body,
+            {preview && (
+                <MediaPreviewOverlay
+                    imageUrl={url}
+                    saveFilename={ensureExtension(saveName, "image")}
+                    onRegenerate={onRegenerate ? () => { setPreview(false); onRegenerate(); } : undefined}
+                    regenerating={regenerating}
+                    onClose={() => setPreview(false)}
+                />
             )}
         </>
     );
@@ -2082,22 +2077,8 @@ function MediaFileBubble({
                     url={url}
                     title={displayTitle}
                     filename={title}
-                    sideActionPlacement={msg.role === "user" ? "left" : "right"}
-                    sideAction={canRegenerateImage ? (
-                        <button
-                            type="button"
-                            className="chat-generated-image-retry-btn"
-                            disabled={imageRegenerating}
-                            aria-label="重新生成图片"
-                            onPointerDown={e => e.stopPropagation()}
-                            onClick={e => {
-                                e.stopPropagation();
-                                openImagePromptEditor();
-                            }}
-                        >
-                            <RefreshCw size={14} className={imageRegenerating ? "is-spinning" : undefined} />
-                        </button>
-                    ) : undefined}
+                    onRegenerate={canRegenerateImage ? openImagePromptEditor : undefined}
+                    regenerating={imageRegenerating}
                 />
                 {imageRetryError && <div className="chat-generated-image-retry-error">生成失败：{imageRetryError}</div>}
                 {showImagePromptEditor && typeof document !== "undefined" && createPortal(

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, ChevronLeft, Code, Image as ImageIcon, MessageSquare, MoreHorizontal, RotateCcw, Trash2, UserRound } from "lucide-react";
 import { PageShell } from "@/components/ui/page-shell";
 import { ConfirmDialog } from "@/components/ui/modal";
+import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import { Input } from "@/components/ui/form";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
@@ -432,6 +433,7 @@ export function MascotChatRoom({ onBack, onDeleted }: MascotChatRoomProps) {
     const [visibleMascotMessageCount, setVisibleMascotMessageCount] = useState(MASCOT_INITIAL_VISIBLE_MESSAGE_COUNT);
     const [activeMascotMessageIndex, setActiveMascotMessageIndex] = useState<number | null>(null);
     const [contextMenuAnchor, setContextMenuAnchor] = useState<ContextMenuAnchor | null>(null);
+    const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
     const [enterToSendEnabled, setEnterToSendEnabled] = useState(() => loadChatAppSettings().enterToSendEnabled === true);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -823,7 +825,16 @@ export function MascotChatRoom({ onBack, onDeleted }: MascotChatRoomProps) {
                 {msg.images.map((ref, idx) => {
                     const url = imagePreviewCache[ref] || (ref.startsWith("data:") ? ref : "");
                     if (!url) return <span key={idx} className="mascot-inline-image-loading" />;
-                    return <img key={idx} src={url} alt="" onLoad={handleMascotImageLoad} />;
+                    return (
+                        <img
+                            key={idx}
+                            src={url}
+                            alt=""
+                            style={{ cursor: "pointer" }}
+                            onLoad={handleMascotImageLoad}
+                            onClick={e => { e.stopPropagation(); setPreviewImageUrl(url); }}
+                        />
+                    );
                 })}
             </div>
         );
@@ -1155,6 +1166,14 @@ export function MascotChatRoom({ onBack, onDeleted }: MascotChatRoomProps) {
                     />
                 </div>,
                 wrapperRef.current.parentElement
+            )}
+
+            {previewImageUrl && (
+                <MediaPreviewOverlay
+                    imageUrl={previewImageUrl}
+                    saveFilename="小卷图片.png"
+                    onClose={() => setPreviewImageUrl(null)}
+                />
             )}
         </div>
     );

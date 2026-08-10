@@ -2,10 +2,35 @@ import type { CalendarColorKey, CalendarScheduleItem } from "./calendar-types";
 
 const WEEKDAY_LABELS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"] as const;
 
-export const CALENDAR_HOUR_START = 8;
-export const CALENDAR_HOUR_END = 23;
-const CALENDAR_MINUTE_START = CALENDAR_HOUR_START * 60;
-const CALENDAR_MINUTE_END = CALENDAR_HOUR_END * 60;
+/** 时间轴视图默认展示范围（仅影响显示，不再限制数据） */
+export const CALENDAR_HOUR_START = 0;
+export const CALENDAR_HOUR_END = 24;
+
+export const CALENDAR_COLOR_KEYS: CalendarColorKey[] = [
+  "blue",
+  "green",
+  "amber",
+  "rose",
+  "violet",
+  "teal",
+  "slate",
+  "lilac",
+];
+
+export function isCalendarColorKey(value: unknown): value is CalendarColorKey {
+  return typeof value === "string" && (CALENDAR_COLOR_KEYS as string[]).includes(value);
+}
+
+const EMOJI_SEQUENCE_RE = /\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*/u;
+
+/** 事项 emoji：从输入中提取第一个 emoji 序列；没有 emoji 时返回空串。 */
+export function sanitizeScheduleEmoji(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "无") return "";
+  const match = trimmed.match(EMOJI_SEQUENCE_RE);
+  return match ? match[0] : "";
+}
 
 export function formatIsoDate(date: Date): string {
   const year = date.getFullYear();
@@ -89,11 +114,14 @@ export function normalizeTime(value: string): string | null {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+/**
+ * 时间段是否有效。历史版本曾把日程限制在 08:00-23:00 并在读取时静默丢弃越界数据；
+ * 现已放开为全天可安排，只校验格式合法且开始早于结束。
+ */
 export function isCalendarTimeRangeAllowed(startTime: string, endTime: string): boolean {
   const start = timeToMinutes(startTime);
   const end = timeToMinutes(endTime);
-  if (Number.isNaN(start) || Number.isNaN(end) || start >= end) return false;
-  return start >= CALENDAR_MINUTE_START && end <= CALENDAR_MINUTE_END;
+  return !Number.isNaN(start) && !Number.isNaN(end) && start < end;
 }
 
 export function pickScheduleColorKey(startTime: string): CalendarColorKey {

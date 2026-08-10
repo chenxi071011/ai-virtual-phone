@@ -748,6 +748,14 @@
   justify-content: center;
   text-align: center;
   color: rgba(45, 43, 39, 0.58);
+  /* 空状态与「定时写日记」弹窗同款手写体 */
+  font-family: "NoteWall Xiaozhitiao", var(--app-font-family);
+}
+
+.diary-entry-empty h2,
+.diary-entry-empty p,
+.diary-entry-empty button {
+  font-family: "NoteWall Xiaozhitiao", var(--app-font-family);
 }
 
 .diary-entry-empty h2 {

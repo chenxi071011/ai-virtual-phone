@@ -48,6 +48,10 @@ async function main() {
     }
     try {
         await run("npx", ["next", "build"], { BUILD_STATIC_EXPORT: "1" });
+        // 普通 build 跑完 next build 会补一遍 restore-backdrop-filter（CSS 压缩器看到
+        // -webkit-backdrop-filter 就把标准的 backdrop-filter 当冗余删掉）。静态导出的
+        // 产物在 out/ 而不是 .next/，得单独再跑一次，否则 APK 里的毛玻璃全是平的。
+        await run("node", ["scripts/restore-backdrop-filter.mjs", "--dir", "out/_next/static/css"]);
         console.log("[static-export] 完成，静态文件在 ./out");
     } finally {
         for (const { dir, parkedPath } of parked) {

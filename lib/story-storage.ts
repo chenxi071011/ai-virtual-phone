@@ -142,13 +142,14 @@ export async function hydrateStoryStorage(): Promise<void> {
 export function loadStorySessions(): StorySession[] {
   const normalized = normalizeStorySessions(_sessionsCache);
   if (normalized.changed) _sessionsCache = normalized.items;
-  return [..._sessionsCache].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  // 空值安全：旧版本/异常导入的数据可能缺 updatedAt，排序不能让页面崩溃
+  return [..._sessionsCache].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
 export function loadStoryMessages(sessionId: string): StoryMessage[] {
   return _messagesCache
     .filter((message) => message.sessionId === sessionId)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
 }
 
 export function createOrGetStorySession(characterId: string): StorySession {

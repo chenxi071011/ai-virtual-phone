@@ -958,6 +958,25 @@
   background: rgba(196, 92, 110, 0.12);
 }
 
+/* 本地测试：未上架（没有关联的市场版） */
+.am-list-status[data-status="offline"] {
+  color: #7a8494;
+  background: rgba(120, 132, 150, 0.12);
+}
+
+/* 本地测试：关联市场版后本机改过还没提交更新（与「已上架」徽标同款同色） */
+.am-dirty-hint {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: #3f8d63;
+  background: rgba(70, 170, 110, 0.12);
+  font-style: normal;
+  font-size: calc(11px * var(--app-text-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .am-list-status-corner {
   position: absolute;
   top: -2px;
@@ -1014,6 +1033,69 @@
   max-height: min(82%, 420px);
 }
 
+/* ── 已安装详情：桌面图标样式编辑 ── */
+.am-installed-icon-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.am-icon-style-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: var(--am-chip-bg, rgba(37, 99, 235, 0.08));
+  color: var(--am-accent-deep, #2563eb);
+  font-size: calc(10.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.am-icon-style-sheet {
+  max-height: min(82%, 480px);
+}
+
+.am-icon-style-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.am-icon-style-options button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 8px 12px;
+  border: 1.5px solid rgba(120, 130, 150, 0.2);
+  border-radius: 16px;
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+}
+
+.am-icon-style-options button[data-active="true"] {
+  border-color: var(--am-accent-deep, #2563eb);
+  background: var(--am-chip-bg, rgba(37, 99, 235, 0.06));
+}
+
+.am-icon-style-options button strong {
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  color: var(--am-ink, #1f2430);
+}
+
+.am-icon-style-options button span {
+  font-size: calc(10.5px * var(--app-text-scale, 1));
+  color: var(--am-ink-dim, #7a8394);
+  line-height: 1.5;
+}
+
 .app-market-error-dialog .app-market-sheet-actions {
   grid-template-columns: 1fr;
 }
@@ -1039,6 +1121,8 @@
 }
 
 .app-market-sheet-head strong {
+  /* 标题吃掉剩余宽度：右侧多个按钮（导出/关闭）才会贴在一起，而不是被 space-between 摊开 */
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--am-text);
   font-size: calc(17px * var(--app-text-scale, 1));

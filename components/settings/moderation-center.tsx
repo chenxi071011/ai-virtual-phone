@@ -10,6 +10,14 @@ import { ConfirmDialog } from "../ui/modal";
 import { fetchReports, moderationApi, type ContentReport } from "@/lib/moderation-client";
 import { fetchCustomAppMarketAdminItems, reviewCustomAppMarketItem } from "@/lib/custom-app-market-client";
 import type { CustomAppMarketItem } from "@/lib/custom-app-market-types";
+import {
+  approveShareSubmission,
+  fetchShareSubmissionFiles,
+  listShareSubmissions,
+  rejectShareSubmission,
+  type ShareSubmission,
+  type ShareSubmissionFile,
+} from "@/lib/resource-hub-review";
 
 const TYPE_LABELS: Record<string, string> = {
   market_app: "市场APP",
@@ -19,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
   online_room: "联机房间",
 };
 
-type Tab = "reports" | "review" | "users";
+type Tab = "reports" | "review" | "share" | "users";
 
 type FoundUser = { id: string; username: string; displayName: string; status: string };
 
@@ -104,6 +112,68 @@ export function ModerationCenter({ onNotice }: { onNotice?: (msg: string) => voi
     }
   };
 
+  // ── 集市审核（share 仓库待审投稿；权限由 GitHub 服务端裁决）──
+  const [shareItems, setShareItems] = useState<ShareSubmission[]>([]);
+  const [shareLoading, setShareLoading] = useState(false);
+  // 记录正在进行的动作，按钮上好显示「上架中…/拒绝中…」
+  const [shareBusy, setShareBusy] = useState<Record<number, "approve" | "reject">>({});
+  const [shareExpanded, setShareExpanded] = useState<number | null>(null);
+  const [shareFiles, setShareFiles] = useState<Record<number, ShareSubmissionFile[] | "loading">>({});
+  const [shareRejectFor, setShareRejectFor] = useState<number | null>(null);
+  const [shareRejectReason, setShareRejectReason] = useState("");
+
+  const loadShareItems = useCallback(async () => {
+    setShareLoading(true);
+    try {
+      setShareItems(await listShareSubmissions());
+    } catch (err) {
+      notice(err instanceof Error ? err.message : "投稿列表加载失败");
+      setShareItems([]);
+    } finally {
+      setShareLoading(false);
+    }
+  }, [notice]);
+
+  useEffect(() => {
+    if (tab === "share") void loadShareItems();
+  }, [tab, loadShareItems]);
+
+  const toggleShareDetail = async (item: ShareSubmission) => {
+    if (shareExpanded === item.number) { setShareExpanded(null); return; }
+    setShareExpanded(item.number);
+    if (!shareFiles[item.number]) {
+      setShareFiles(current => ({ ...current, [item.number]: "loading" }));
+      try {
+        const files = await fetchShareSubmissionFiles(item.number);
+        setShareFiles(current => ({ ...current, [item.number]: files }));
+      } catch (err) {
+        notice(err instanceof Error ? err.message : "内容加载失败");
+        setShareFiles(current => { const next = { ...current }; delete next[item.number]; return next; });
+      }
+    }
+  };
+
+  const runShareAction = async (item: ShareSubmission, action: "approve" | "reject", reason?: string) => {
+    setShareBusy(current => ({ ...current, [item.number]: action }));
+    try {
+      if (action === "approve") {
+        await approveShareSubmission(item.number);
+        notice(`已上架「${item.title}」（CDN 缓存刷新后集市可见）`);
+      } else {
+        await rejectShareSubmission(item.number, reason);
+        notice(`已拒绝「${item.title}」`);
+      }
+      setShareExpanded(null);
+      setShareRejectFor(null);
+      setShareRejectReason("");
+      await loadShareItems();
+    } catch (err) {
+      notice(err instanceof Error ? err.message : "操作失败");
+    } finally {
+      setShareBusy(current => { const next = { ...current }; delete next[item.number]; return next; });
+    }
+  };
+
   // ── 用户管理 ──
   const [userQuery, setUserQuery] = useState("");
   const [foundUser, setFoundUser] = useState<FoundUser | null>(null);
@@ -172,6 +242,7 @@ export function ModerationCenter({ onNotice }: { onNotice?: (msg: string) => voi
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         <button type="button" style={segStyle(tab === "reports")} onClick={() => setTab("reports")}>举报队列</button>
         <button type="button" style={segStyle(tab === "review")} onClick={() => setTab("review")}>应用审核</button>
+        <button type="button" style={segStyle(tab === "share")} onClick={() => setTab("share")}>集市审核</button>
         <button type="button" style={segStyle(tab === "users")} onClick={() => setTab("users")}>用户管理</button>
       </div>
 
@@ -242,6 +313,80 @@ export function ModerationCenter({ onNotice }: { onNotice?: (msg: string) => voi
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {tab === "share" ? (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={subStyle}>资源集市的待审投稿（通过 = 上架；拒绝可留言）</span>
+            <button type="button" style={{ ...btnStyle, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => void loadShareItems()}><RefreshCw size={12} />刷新</button>
+          </div>
+          {shareLoading ? <p style={subStyle}><Loader2 size={13} className="animate-spin" style={{ verticalAlign: -2 }} /> 加载中…</p> : null}
+          {!shareLoading && shareItems.length === 0 ? <p style={subStyle}>没有待审核的投稿。</p> : null}
+          {shareItems.map(item => {
+            const files = shareFiles[item.number];
+            const expanded = shareExpanded === item.number;
+            return (
+              <div key={item.number} style={cardStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong style={{ fontSize: 12.5 }}>{item.title}</strong>
+                  <span style={subStyle}>{new Date(item.createdAt).toLocaleString()}</span>
+                </div>
+                <div style={subStyle}>提交账号：{item.author}</div>
+                {item.body ? <div style={{ margin: "4px 0", whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 12 }}>{item.body}</div> : null}
+
+                {expanded && files === "loading" ? <p style={subStyle}><Loader2 size={13} className="animate-spin" style={{ verticalAlign: -2 }} /> 内容加载中…</p> : null}
+                {expanded && Array.isArray(files) ? (
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {files.map(file => (
+                      <div key={file.path} style={{ border: "1px solid var(--border-soft, rgba(0,0,0,.08))", borderRadius: 10, padding: "6px 8px" }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, wordBreak: "break-all" }}>{file.path}</div>
+                        {file.imageDataUrl ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={file.imageDataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 220, borderRadius: 6, marginTop: 4 }} />
+                        ) : null}
+                        {file.textPreview ? (
+                          <pre style={{ margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11, maxHeight: 180, overflowY: "auto", fontFamily: "inherit" }}>{file.textPreview}</pre>
+                        ) : null}
+                        {file.note ? <div style={subStyle}>{file.note}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {shareRejectFor === item.number ? (
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <input
+                      value={shareRejectReason}
+                      onChange={event => setShareRejectReason(event.target.value)}
+                      placeholder="拒绝理由（可选，投稿人可见）"
+                      style={{ flex: 1, minWidth: 0, border: "1px solid var(--border-soft, rgba(0,0,0,.1))", borderRadius: 10, padding: "6px 10px", fontSize: 12, background: "var(--surface-inset, rgba(0,0,0,.03))", color: "inherit", outline: "none" }}
+                    />
+                    <button type="button" style={dangerBtn} disabled={!!shareBusy[item.number]} onClick={() => void runShareAction(item, "reject", shareRejectReason)}>
+                      {shareBusy[item.number] === "reject"
+                        ? <><Loader2 size={12} className="animate-spin" style={{ verticalAlign: -2 }} /> 拒绝中…</>
+                        : "确认拒绝"}
+                    </button>
+                    <button type="button" style={btnStyle} onClick={() => { setShareRejectFor(null); setShareRejectReason(""); }}>取消</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button type="button" style={btnStyle} disabled={!!shareBusy[item.number]} onClick={() => void toggleShareDetail(item)}>
+                      {expanded ? "收起内容" : "查看内容"}
+                    </button>
+                    <button type="button" style={btnStyle} disabled={!!shareBusy[item.number]} onClick={() => void runShareAction(item, "approve")}>
+                      {shareBusy[item.number] === "approve"
+                        ? <><Loader2 size={12} className="animate-spin" style={{ verticalAlign: -2 }} /> 上架中…</>
+                        : "通过并上架"}
+                    </button>
+                    <button type="button" style={dangerBtn} disabled={!!shareBusy[item.number]} onClick={() => setShareRejectFor(item.number)}>拒绝</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <p style={{ ...subStyle, marginTop: 8 }}>需在资源集市设置（标题栏 ⚙）配置有仓库写权限的 GitHub Token；权限由 GitHub 服务端校验。</p>
         </div>
       ) : null}
 

@@ -10,6 +10,41 @@ const THEME_DB_VERSION = 2;
 const THEME_ASSET_STORE = "assets";
 const IMAGE_MAX_DIMENSION = 2200;
 const IMAGE_TARGET_SIZE_BYTES = 2 * 1024 * 1024;
+/**
+ * 动图（GIF）不经 canvas 重编码，会原样落库，因此单独限制体积。
+ * dataUrl 存储比原文件再大约 1/3，超过这个阈值应让用户换图而不是静默拍平成静帧。
+ */
+export const ANIMATED_ASSET_MAX_BYTES = 3 * 1024 * 1024;
+
+/** 动图体积超限：调用方应提示用户换一张更小的图。 */
+export class AnimatedAssetTooLargeError extends Error {
+  constructor() {
+    super("动图体积超出限制");
+    this.name = "AnimatedAssetTooLargeError";
+  }
+}
+
+/** 该 blob 是否是必须保留原始编码的动图格式。 */
+export function isAnimatedImageBlob(blob: Blob): boolean {
+  return (blob.type || "").toLowerCase() === "image/gif";
+}
+
+/** 上传前预检：返回给用户看的错误文案，通过则返回 null。 */
+export function checkAnimatedAssetSize(blob: Blob): string | null {
+  if (!isAnimatedImageBlob(blob)) return null;
+  if (blob.size <= ANIMATED_ASSET_MAX_BYTES) return null;
+  const limitMb = Math.round(ANIMATED_ASSET_MAX_BYTES / (1024 * 1024));
+  return `GIF 需小于 ${limitMb}MB（当前 ${(blob.size / (1024 * 1024)).toFixed(1)}MB），请换一张`;
+}
+
+/** 把上传异常翻译成给用户看的文案。 */
+export function describeAssetSaveError(error: unknown, fallback = "上传失败，请重试"): string {
+  if (error instanceof AnimatedAssetTooLargeError) {
+    const limitMb = Math.round(ANIMATED_ASSET_MAX_BYTES / (1024 * 1024));
+    return `GIF 需小于 ${limitMb}MB，请换一张`;
+  }
+  return fallback;
+}
 
 export type ThemeAssetRecord = {
   id: string;
@@ -150,6 +185,14 @@ async function normalizeRasterBlob(blob: Blob): Promise<Blob> {
 async function normalizeIncomingBlob(blob: Blob): Promise<Blob> {
   const mime = blob.type.toLowerCase();
   if (mime === "image/svg+xml") {
+    return blob;
+  }
+  if (mime === "image/gif") {
+    // GIF 必须原样保留：canvas 只能取到第一帧，重编码等于把动图拍平成静态图。
+    // 代价是无法压缩，所以改为体积超限时报错，交给调用方提示用户。
+    if (blob.size > ANIMATED_ASSET_MAX_BYTES) {
+      throw new AnimatedAssetTooLargeError();
+    }
     return blob;
   }
   if (!mime.startsWith("image/")) {

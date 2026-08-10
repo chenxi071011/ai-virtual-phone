@@ -18,6 +18,8 @@ export type CalendarScheduleItem = {
   endTime: string;    // HH:MM
   location: string;
   title: string;
+  /** 事项 emoji 图标（可选，一个 emoji） */
+  emoji?: string;
   colorKey: CalendarColorKey;
   source: "manual" | "generated";
   createdAt: string;

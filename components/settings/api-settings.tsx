@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useContext } from "react";
 import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check } from "lucide-react";
 import { SettingsContext } from "../phone-settings-app";
 import type { ApiConfig } from "@/lib/settings-types";
-import { loadApiConfigs, saveApiConfigs } from "@/lib/settings-storage";
+import { loadApiConfigs, removeApiConfigReferences, saveApiConfigs } from "@/lib/settings-storage";
 import { generateEmbedding, isEmbeddingModelName } from "@/lib/memory-embedding";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
@@ -98,6 +98,7 @@ export function ApiSettings() {
 
     const removeConfig = (id: string) => {
         persist(configs.filter(c => c.id !== id));
+        removeApiConfigReferences(id);
         const newFetchedModels = { ...fetchedModels };
         delete newFetchedModels[id];
         setFetchedModels(newFetchedModels);

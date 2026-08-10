@@ -3,7 +3,14 @@
 // Data model: StickerPack[] + assignments (packId → characterId[]).
 // Metadata in localStorage, images in IndexedDB (ThemeAssetType "sticker").
 
-import { saveThemeAssetFromBlob, deleteThemeAsset, getThemeAssetDataUrl, getThemeAssetMap } from "./theme-storage";
+import {
+    saveThemeAssetFromBlob,
+    deleteThemeAsset,
+    getThemeAssetDataUrl,
+    getThemeAssetMap,
+    isAnimatedImageBlob,
+    checkAnimatedAssetSize,
+} from "./theme-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
 const PACKS_KEY = "ai_phone_sticker_packs_v1";
@@ -104,12 +111,13 @@ export function renameStickerPack(packId: string, newName: string): void {
 
 // ── Sticker items within a pack ──
 
+/** GIF 原样保留(不经 canvas 重编码,避免动图变静帧);其余图片走压缩。 */
 export async function addStickerToPack(packId: string, name: string, imageBlob: Blob): Promise<StickerItem | null> {
     const packs = readPacks();
     const pack = packs.find(p => p.id === packId);
     if (!pack) return null;
-    const compressed = await compressStickerImage(imageBlob);
-    const assetId = await saveThemeAssetFromBlob(compressed, "sticker");
+    const prepared = isAnimatedImageBlob(imageBlob) ? imageBlob : await compressStickerImage(imageBlob);
+    const assetId = await saveThemeAssetFromBlob(prepared, "sticker");
     const item: StickerItem = {
         id: `stk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name,
@@ -138,7 +146,7 @@ export async function addStickersToPack(
     for (let i = 0; i < items.length; i++) {
         try {
             const src = items[i].blob;
-            const prepared = src.type === "image/gif" ? src : await compressStickerImage(src);
+            const prepared = isAnimatedImageBlob(src) ? src : await compressStickerImage(src);
             const assetId = await saveThemeAssetFromBlob(prepared, "sticker");
             pack.stickers.push({
                 id: `stk_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
@@ -153,6 +161,11 @@ export async function addStickersToPack(
     }
     writePacks(packs);
     return { added, failed };
+}
+
+/** 上传前预检：通过返回 null，否则返回给用户看的错误文案（目前只有动图体积限制）。 */
+export function checkStickerBlob(blob: Blob): string | null {
+    return checkAnimatedAssetSize(blob);
 }
 
 export function addStickerByUrlToPack(packId: string, name: string, url: string): StickerItem | null {

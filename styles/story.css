@@ -309,6 +309,35 @@
           width: 100%; height: 100%; object-fit: cover;
           filter: contrast(0.95) brightness(1.05); /* 日系褪色滤镜 */
         }
+        /* 无头像时的灰色系兜底封面：灰阶渐变 + 宋体首字，素面书封 */
+        .story-meta-cover-fallback {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          background: #f6f6f6;
+        }
+        .story-meta-cover-char {
+          font-family: var(--story-font, serif);
+          font-size: 30px;
+          font-weight: 600;
+          color: #b6b6b6;
+          line-height: 1;
+        }
+        .story-meta-cover-line {
+          width: 18px;
+          height: 1px;
+          background: #d5d5d5;
+        }
+        .story-meta-cover-sub {
+          font-size: 8px;
+          letter-spacing: 3px;
+          color: #c9c9c9;
+          text-transform: uppercase;
+        }
         .story-meta-body {
           flex: 1;
           display: flex;
@@ -476,7 +505,7 @@
         .story-bubble {
           border-radius: 0;
           padding: 0;
-          line-height: 1.68;
+          line-height: 1.78;
           font-size: calc(14px*var(--app-text-scale,1));
           white-space: pre-wrap;
           word-break: break-word;
@@ -498,10 +527,21 @@
           border: none;
           box-shadow: none;
           padding: 8px;
-          font-size: calc(12px*var(--app-text-scale,1));
+          font-size: calc(11.5px*var(--app-text-scale,1));
           color: var(--c-story-sub, #94a3b8);
-          text-align: center;
-          font-style: italic;
+          text-align: left;
+          font-style: normal;
+        }
+        /* 系统消息（报错等）内的富文本跟随小字样式：
+           不让 .story-richtext 的 14px/两端对齐/首行缩进盖回来 */
+        .story-row[data-role="system"] .story-richtext {
+          font-size: calc(11.5px*var(--app-text-scale,1));
+          text-align: left;
+          line-height: 1.7;
+        }
+        .story-row[data-role="system"] .story-richtext p {
+          text-indent: 0;
+          margin: 0.4em 0;
         }
         /* === 底部输入栏（固定在底部，无圆角） === */
         .story-composer {
@@ -655,6 +695,23 @@
         .story-richtext blockquote p,
         .story-richtext li p {
           text-indent: 0;
+        }
+        /* 折叠块（思维链等）内一律不做首行缩进：
+           AI 思考文本的空行习惯不统一，段落缩进忽有忽无反而杂乱 */
+        .story-fold-block__content p,
+        .story-summary-fold__content p {
+          text-indent: 0;
+        }
+        /* 单换行(<br>)后一行的缩进占位符（渲染器注入） */
+        .story-richtext .story-br-indent {
+          display: inline-block;
+          width: 2em;
+        }
+        /* 折叠块与系统消息内保持齐头，占位符归零 */
+        .story-fold-block__content .story-br-indent,
+        .story-summary-fold__content .story-br-indent,
+        .story-row[data-role="system"] .story-br-indent {
+          width: 0;
         }
         .story-richtext p:first-child {
           margin-top: 0;
@@ -856,7 +913,7 @@
           margin-left: 0;
         }
         .story-fold-translate-btn[data-active] {
-          color: var(--c-story-accent, #e5484d);
+          color: var(--c-story-heading, #1e293b);
           font-weight: 600;
         }
         .story-fold-translation {

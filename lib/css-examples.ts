@@ -1802,198 +1802,117 @@ export const VN_CSS_EXAMPLE = `/* ═══ 漫卷模式(VN)样式示例 ══�
 `;
 
 export const CALENDAR_CSS_EXAMPLE = `/* ══════════════════════════════════════════
-   日历页面自定义样式 — 暗夜星空主题
-   修改后点击「保存」即刻生效
-   清空全部内容保存即恢复默认
+   日历页面自定义样式 — 焦糖奶茶主题
+   修改后点击「应用」即刻生效
+   清空全部内容应用即恢复默认
    ══════════════════════════════════════════ */
 
 /* ━━ 全部色彩变量 ━━ */
 .calendar-app-shell {
-  /* 背景渐变三段 */
-  --c-calendar-bg-top: #0f0e1a;
-  --c-calendar-bg-mid: #151228;
-  --c-calendar-bg-bottom: #1a1530;
-  /* 装饰光球 */
-  --c-calendar-orb-1: rgba(100, 60, 220, 0.5);
-  --c-calendar-orb-2: rgba(220, 80, 160, 0.4);
-  /* 文字 */
-  --c-calendar-text: #f0ecfa;
-  --c-calendar-sub: #bdb2da;
-  /* 强调色 */
-  --c-calendar-accent: #a78bfa;
-  --c-calendar-accent-dim: rgba(167, 139, 250, 0.2);
-  /* 周末色 */
-  --c-calendar-weekend: #f472b6;
-  /* 按钮 / 操作色 */
-  --c-calendar-action: #818cf8;
-  /* 弹窗背景渐变 */
-  --c-calendar-modal-pink: rgba(80, 50, 140, 0.4);
-  --c-calendar-modal-blue: rgba(40, 30, 100, 0.4);
-  /* 面板底色 / 边框 */
-  /* 玻璃层 (透明度梯度) */
-  --c-calendar-glass-1: rgba(255, 255, 255, 0.04);
-  --c-calendar-glass-3: rgba(255, 255, 255, 0.06);
-  --c-calendar-glass-4: rgba(255, 255, 255, 0.08);
-  --c-calendar-glass-5: rgba(255, 255, 255, 0.1);
-  --c-calendar-glass-55: rgba(255, 255, 255, 0.12);
-  --c-calendar-glass-6: rgba(255, 255, 255, 0.14);
-  --c-calendar-glass-7: rgba(255, 255, 255, 0.18);
-  --c-calendar-glass-8: rgba(255, 255, 255, 0.22);
-  --c-calendar-glass-85: rgba(255, 255, 255, 0.85);
-  --c-calendar-glass-9: rgba(255, 255, 255, 0.9);
-  --c-calendar-glass-full: #fff;
-  /* 阴影 */
-  --c-calendar-shadow-2: rgba(0, 0, 0, 0.08);
-  --c-calendar-shadow-3: rgba(0, 0, 0, 0.12);
-  --c-calendar-shadow-4: rgba(0, 0, 0, 0.15);
-  --c-calendar-shadow-6: rgba(0, 0, 0, 0.2);
-  --c-calendar-shadow-10: rgba(0, 0, 0, 0.3);
-  --c-calendar-shadow-15: rgba(0, 0, 0, 0.4);
-  /* 遮罩 */
-  /* 日程事件色板 */
-  --c-calendar-event-blue: #818cf8;
-  --c-calendar-event-green: #34d399;
-  --c-calendar-event-amber: #fbbf24;
-  --c-calendar-event-rose: #fb7185;
-  --c-calendar-event-violet: #a78bfa;
-  --c-calendar-event-teal: #2dd4bf;
-  --c-calendar-event-slate: #94a3b8;
-  --c-calendar-event-purple: #c084fc;
+  /* 页面底色 / 灰色块 / 弹层底色 */
+  --c-calendar-bg: #F7F0E6;
+  --c-calendar-surface: #EDE2D2;
+  --c-calendar-surface-2: #E2D4BF;
+  --c-calendar-sheet: #FFFBF4;
+  /* 文字三级 */
+  --c-calendar-ink: #453425;
+  --c-calendar-sub: #94816C;
+  --c-calendar-faint: #C8B8A2;
+  /* 今天强调色 */
+  --c-calendar-today: #C96F2E;
+  /* 选中态色块 */
+  --c-calendar-sel-bg: #453425;
+  --c-calendar-sel-fg: #FFF9F0;
+  /* 弹层遮罩 */
+  --c-calendar-scrim: rgba(69, 52, 37, 0.35);
+
+  /* 事件色板（每色一对：浅底 bg + 深字 fg） */
+  --c-calendar-ev-blue-bg: #D8E6EE;   --c-calendar-ev-blue-fg: #35617C;
+  --c-calendar-ev-green-bg: #DEEBD2;  --c-calendar-ev-green-fg: #4C6B35;
+  --c-calendar-ev-amber-bg: #F6E3C5;  --c-calendar-ev-amber-fg: #96601C;
+  --c-calendar-ev-rose-bg: #F4DCDC;   --c-calendar-ev-rose-fg: #A04A4E;
+  --c-calendar-ev-violet-bg: #E5DEEC; --c-calendar-ev-violet-fg: #6A5390;
+  --c-calendar-ev-teal-bg: #D6EAE4;   --c-calendar-ev-teal-fg: #2F6E5F;
+  --c-calendar-ev-slate-bg: #E5E1DA;  --c-calendar-ev-slate-fg: #5C574E;
+  --c-calendar-ev-lilac-bg: #EEDFEC;  --c-calendar-ev-lilac-fg: #8A4E80;
 }
 
-/* ━━ 页面整体 ━━ */
-.calendar-app {
-  /* 可替换整体背景 */
-  /* background: linear-gradient(180deg, #0f0e1a, #1a1530); */
-}
-
-/* ━━ 顶部导航栏 ━━ */
-.calendar-header {
-  /* backdrop-filter: blur(20px); */
-}
-.calendar-header-eyebrow {
-  /* letter-spacing: 2px; */
-}
-.calendar-header-action {
-  /* opacity: 0.8; */
-}
-
-/* ━━ 角色/用户切换条 ━━ */
-.calendar-owner-strip {
-  /* gap: 8px; */
-}
-.calendar-owner-chip {
-  border-radius: 20px;
-  /* box-shadow: 0 2px 12px rgba(167, 139, 250, 0.2); */
-}
-
-/* ━━ 周标题区 ━━ */
-.calendar-week-header {
-  /* padding: 12px 16px; */
-}
-.calendar-week-title {
-  /* font-size: calc(15px*var(--app-text-scale,1)); */
-}
-
-/* ━━ 月历网格 ━━ */
-.calendar-grid-shell {
-  border-radius: 18px;
-  /* box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); */
-}
-.calendar-grid-card {
-  border-radius: 10px;
-}
-.calendar-grid-counter {
-  /* font-size: calc(10px*var(--app-text-scale,1)); */
-}
-
-/* ━━ 日程时间轴 ━━ */
-.calendar-day-columns {
-  /* gap: 2px; */
-}
-.calendar-day-column {
-  /* min-width: 0; */
-}
-.calendar-event-block {
-  border-radius: 8px;
-  /* box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); */
-}
-
-/* ━━ 统一视图 ━━ */
-.calendar-unified-grid {
-  /* border-radius: 16px; */
-}
-.calendar-unified-row {
-  /* padding: 8px 12px; */
-}
-.calendar-unified-cell {
-  border-radius: 8px;
-}
-
-/* ━━ Hero 卡片 ━━ */
-.calendar-hero {
-  border-radius: 20px;
-  /* box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); */
-}
-.calendar-hero-kicker {
-  /* font-size: calc(11px*var(--app-text-scale,1)); */
-}
-.calendar-hero-stat {
-  color: #fff;
-}
-.calendar-hero-stat strong {
-  background: linear-gradient(135deg, #c4b5fd, #f9a8d4);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-/* ━━ 设置卡片 ━━ */
-.calendar-setting-card {
-  border-radius: 16px;
-}
-.calendar-setting-row {
-  /* padding: 12px 16px; */
-}
-
-/* ━━ 浮动按钮 ━━ */
-.calendar-fab {
-  /* box-shadow: 0 4px 16px rgba(167, 139, 250, 0.3); */
+/* ━━ 顶栏 / 悬浮按钮 ━━ */
+.calendar-pill-btn,
+.calendar-icon-btn {
+  /* border-radius: 12px; */
 }
 .calendar-fab-primary {
-  /* background: var(--c-calendar-action); */
-}
-.calendar-fab-secondary {
-  /* opacity: 0.9; */
+  /* background: var(--c-calendar-today); */
 }
 
-/* ━━ 编辑弹窗 ━━ */
+/* ━━ 主人切换条 ━━ */
+.calendar-owner-chip {
+  /* border-radius: 12px; */
+}
+
+/* ━━ 整页月历 ━━ */
+.calendar-month-title strong {
+  /* font-family: Georgia, "Songti SC", serif; */
+}
+.calendar-month-num {
+  /* font-weight: 700; */
+}
+.calendar-month-lunar {
+  /* display: none; */  /* 隐藏农历小字 */
+}
+.calendar-month-week {
+  /* border-top: none; */  /* 去掉周分隔线 */
+}
+
+/* ━━ 详情页周条 ━━ */
+.calendar-strip-bubble {
+  /* border-radius: 14px; */  /* 方圆选中块 */
+}
+.calendar-strip-range {
+  /* background: var(--c-calendar-ev-blue-bg); */
+}
+
+/* ━━ 双日时间轴 ━━ */
+.calendar-tl-event {
+  /* border-radius: 10px; */
+  /* border-left-width: 5px; */
+}
+.calendar-tl-event span {
+  /* display: none; */  /* 只显示标题行 */
+}
+.calendar-tl-headrow {
+  /* background: var(--c-calendar-surface); */  /* 列头版头行底色 */
+}
+.calendar-tl-day-head b {
+  /* color: var(--c-calendar-sub); */  /* 列头日期文字 */
+}
+
+/* ━━ 经期打卡行 ━━ */
+.calendar-cycle-line {
+  /* border-bottom: none; */
+}
+.calendar-mini-btn[data-variant="primary"] {
+  /* background: var(--c-calendar-ev-violet-bg); color: var(--c-calendar-ev-violet-fg); */
+}
+
+/* ━━ 弹窗 ━━ */
 .calendar-edit-modal {
-  border-radius: 24px;
-  /* backdrop-filter: blur(5px) saturate(140%); */
-}
-
-/* ━━ 确认弹窗 ━━ */
-.calendar-confirm-dialog {
-  /* max-width: 280px; */
-}
-.calendar-confirm-icon {
-  /* opacity: 0.9; */
-}
-.calendar-confirm-title {
-  /* font-size: calc(15px*var(--app-text-scale,1)); */
+  /* border-radius: 24px; */
 }`;
 
 export const MUSIC_CSS_EXAMPLE = `/* ══════════════════════════════════════════
    音乐页面自定义样式 — 极光紫夜主题
+   （适配「夜光 Lumen」新版界面）
    修改后点击「保存」即刻生效
    清空全部内容保存即恢复默认
    ══════════════════════════════════════════ */
 
-/* ━━ 全部 18 个色彩变量 ━━ */
+/* ━━ 全部色彩变量 ━━
+   注：桌面悬浮球(.music-float)与聊天小窗(.mini-app-window)
+   已独立为浅色配色，不受这里的变量影响 */
 .music-app,
-.music-player,
-.music-float {
+.music-player {
   /* 页面底色 */
   --c-music-bg: #0c0a1a;
   /* 背景渐变 · 5 层 */
@@ -2005,116 +1924,48 @@ export const MUSIC_CSS_EXAMPLE = `/* ══════════════�
   /* 全屏播放器背景光 */
   --c-music-bg-glow: rgba(140, 80, 255, 0.15);
   --c-music-bg-mist: rgba(80, 40, 160, 0.15);
-  /* 玻璃面板 / 边框 / 极淡装饰 */
+  /* 玻璃面板 / 边框 / 不透明弹窗 / 极淡装饰 */
   --c-music-surface: rgba(255, 255, 255, 0.06);
   --c-music-surface-solid: rgba(255, 255, 255, 0.12);
-  --c-music-glass-dim: rgba(255, 255, 255, 0.03);
-  /* 文字 / 强调 / 纯白 */
-  --c-music-white: #e0d8f0;
+  --c-music-panel: rgba(26, 20, 46, 0.96);
+  --c-music-glass-dim: rgba(255, 255, 255, 0.06);
+  /* 文字 / 次级文字 / 纯白 */
+  --c-music-white: #ffffff;
   --c-music-text: #e0d8f0;
   --c-music-accent: #b49de8;
   --c-music-accent-dim: rgba(180, 157, 232, 0.12);
-  /* 金色 / 遮罩 / 红心 */
-  --c-music-gold: rgba(232, 180, 100, 0.35);
-  --c-music-overlay: rgba(0, 0, 0, 0.4);
+  /* 主强调色（红心/播放全部/榜单序号） */
+  --c-music-primary: #c86bff;
+  --c-music-primary-dim: rgba(200, 107, 255, 0.14);
+  /* 发光歌词月光色 / 光晕 / 遮罩 / 红心 */
+  --c-music-glowtext: #ead8ff;
+  --c-music-gold: rgba(210, 170, 255, 0.4);
+  --c-music-overlay: rgba(0, 0, 0, 0.5);
   --c-music-liked: #ff5c8a;
 }
 
 /* ━━ 页面整体 ━━ */
 .music-app {
-  /* 可替换背景渐变方式 */
-  /* background-image: linear-gradient(135deg, #0c0a1a, #1a1030); */
+  /* 提示：想换背景图请优先用「设置→App页面背景」，
+     也可在这里强行覆盖： */
+  /* background-image: linear-gradient(135deg, #0c0a1a, #1a1030) !important; */
 }
 
-/* ━━ 顶部标签栏 ━━ */
-.music-tabs {
-  border-radius: 24px;
-  box-shadow: 0 2px 16px rgba(140, 80, 255, 0.25);
-  backdrop-filter: blur(16px);
+/* ━━ 底部区域（Tab栏+播放条 同一块玻璃） ━━ */
+.music-bottom-dock {
+  background: rgba(16, 10, 30, 0.45);
+  backdrop-filter: blur(28px) saturate(160%);
 }
-.music-tab {
-  font-size: calc(13px*var(--app-text-scale,1));
-  letter-spacing: 1.5px;
-  border-radius: 20px;
+.music-tabbar-item {
+  font-size: calc(9.9px*var(--app-text-scale,1));
 }
-.music-tab[data-active] {
-  box-shadow: 0 2px 12px rgba(180, 157, 232, 0.3);
-}
-/* 顶部左右图标按钮 */
-.music-header-action {
-  /* opacity: 0.8; */
-}
-
-/* ━━ 推荐 / 我的页 ━━ */
-.music-discovery {
-  gap: 18px;
-  padding: 12px 16px 120px;
-}
-.music-section-head h3 {
-  font-size: calc(15px*var(--app-text-scale,1));
-  font-weight: 600;
-}
-.music-section-head span {
-  color: var(--c-music-accent);
-}
-.music-hot-item,
-.music-chart-card {
-  border-radius: 16px;
-  background: var(--c-music-surface);
-  border: 1px solid var(--c-music-surface-solid);
-}
-.music-hot-rank {
-  color: var(--c-music-accent);
-}
-.music-chart-cover {
-  border-radius: 14px;
-}
-
-/* ━━ 歌曲列表 ━━ */
-.music-list {
-  gap: 10px;
-  padding: 12px 16px 120px;
-}
-.music-song {
-  border-radius: 18px;
-  padding: 12px 14px;
-  gap: 12px;
-  border: 1px solid rgba(180, 157, 232, 0.15);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(20px);
-}
-.music-song-cover {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-}
-.music-song-title {
-  font-size: calc(14px*var(--app-text-scale,1));
-  letter-spacing: 0.3px;
-}
-.music-song-artist {
-  font-size: calc(11px*var(--app-text-scale,1));
-}
-.music-song-duration {
-  font-size: calc(11px*var(--app-text-scale,1));
-}
-/* 播放中高亮 */
-.music-song[data-playing] .music-song-title {
-  /* color: #c8b4ff; */
-}
-
-/* ━━ 底部正在播放条 ━━ */
-.music-now-bar {
-  border-radius: 28px;
-  backdrop-filter: blur(32px) saturate(160%);
-  box-shadow: 0 8px 32px rgba(140, 80, 255, 0.25);
-}
-.music-now-bar-cover {
-  border-radius: 50%;
-  border-width: 2px;
+.music-tabbar-item[data-active] svg {
+  /* 选中Tab图标发光色 */
+  color: var(--c-music-primary);
+  filter: drop-shadow(0 0 6px rgba(200, 107, 255, 0.5));
 }
 .music-now-bar-title {
-  font-size: calc(13px*var(--app-text-scale,1));
+  font-size: calc(11.7px*var(--app-text-scale,1));
 }
 /* 小鸟装饰 */
 .music-bird {
@@ -2122,534 +1973,215 @@ export const MUSIC_CSS_EXAMPLE = `/* ══════════════�
   /* filter: hue-rotate(180deg); */ /* 变色 */
 }
 
-/* ━━ 全屏播放器 ━━ */
-/* 背景光晕 */
-.music-player-bg {
-  filter: blur(80px);
-  /* opacity: 0.8; */
+/* ━━ 首页 ━━ */
+.music-greet-hello {
+  font-size: calc(19.8px*var(--app-text-scale,1));
+  letter-spacing: 0.02em;
 }
-/* 唱片 */
+.music-search-pill {
+  border-radius: 12px;
+}
+.music-daily-card {
+  border-radius: 18px;
+  /* height: 128px; */
+}
+.music-daily-title {
+  font-size: calc(16.2px*var(--app-text-scale,1));
+}
+.music-rail-cover {
+  border-radius: 14px;
+}
+.music-rail-count {
+  /* 播放量角标 */
+  background: rgba(20, 8, 40, 0.5);
+}
+.music-chart-card {
+  border-radius: 16px;
+  background: var(--c-music-surface);
+  border: 1px solid var(--c-music-surface-solid);
+}
+.music-chart-track em {
+  /* 榜单前三序号颜色 */
+  color: var(--c-music-primary);
+}
+.music-hot-rank[data-top] {
+  color: var(--c-music-primary);
+}
+
+/* ━━ 歌曲列表（扁平行） ━━ */
+.music-song {
+  border-radius: 14px;
+  padding: 10px 10px;
+}
+.music-song-title {
+  font-size: calc(13.5px*var(--app-text-scale,1));
+  letter-spacing: 0.3px;
+}
+.music-song-artist {
+  font-size: calc(11px*var(--app-text-scale,1));
+}
+/* 正在播放行 */
+.music-song[data-playing] {
+  background: var(--c-music-primary-dim);
+}
+.music-song[data-playing] .music-song-title {
+  color: var(--c-music-primary);
+}
+
+/* ━━ 歌单详情 ━━ */
+.music-pl-hero-cover {
+  border-radius: 16px;
+}
+.music-pl-hero-name {
+  font-size: calc(14.4px*var(--app-text-scale,1));
+}
+.music-pl-hero-tags span {
+  /* 标签胶囊 */
+}
+.music-playlist-play-all {
+  /* 播放全部按钮渐变 */
+  background: linear-gradient(120deg, #a44bff, #ff5cd0);
+  box-shadow: 0 8px 20px rgba(180, 80, 255, 0.3);
+}
+.music-pl-chip {
+  /* 收藏/评论胶囊 */
+  border-radius: 999px;
+}
+
+/* ━━ 全屏播放页（现代封面态） ━━ */
+/* 封面取色光斑：想固定颜色可强制覆盖 */
+.mp-blob-1 { /* background: rgba(140, 80, 255, 0.5) !important; */ }
+.mp-blob-2 { /* background: rgba(255, 92, 208, 0.35) !important; */ }
+.mp-blob-3 { /* background: rgba(60, 120, 255, 0.3) !important; */ }
+.mp-cover {
+  border-radius: 24px;
+  /* max-width: 276px; */
+}
+.mp-song {
+  font-size: calc(17px*var(--app-text-scale,1));
+}
+.mp-lyric-peek {
+  /* 封面态底部歌词预览行 */
+}
+
+/* ━━ 发光歌词 ━━ */
+.mp-lyric-line {
+  font-size: calc(15.3px*var(--app-text-scale,1));
+  letter-spacing: 0.08em;
+}
+.mp-lyric-line[data-active] {
+  font-size: calc(18.9px*var(--app-text-scale,1));
+  /* 发光颜色（三层光晕） */
+  text-shadow:
+    0 0 10px rgba(240, 220, 255, 0.9),
+    0 0 30px rgba(200, 140, 255, 0.6),
+    0 0 66px rgba(160, 80, 255, 0.35);
+}
+
+/* ━━ 波形进度条 ━━ */
+.mp-wave i {
+  /* 未播放波形 */
+  background: rgba(200, 170, 255, 0.18);
+}
+.mp-wave i[data-lit] {
+  /* 已播放波形 */
+  background: rgba(240, 220, 255, 0.85);
+  box-shadow: 0 0 6px rgba(220, 180, 255, 0.7);
+}
+.mp-wave i[data-head] {
+  /* 播放头 */
+  box-shadow: 0 0 10px rgba(240, 220, 255, 0.95), 0 0 20px rgba(200, 120, 255, 0.7);
+}
+
+/* ━━ 播放控制 ━━ */
+.mp-ctrl-play {
+  width: 64px;
+  height: 64px;
+  /* background: #fff; color: #1a1030; */
+  box-shadow: 0 10px 30px rgba(200, 140, 255, 0.2);
+}
+.mp-social-btn {
+  /* 喜欢/评论/分享胶囊 */
+  border-radius: 999px;
+}
+.mp-social-btn[data-liked] {
+  color: var(--c-music-liked);
+}
+
+/* ━━ 黑胶模式（右上角圆盘按钮切换） ━━ */
 .music-player-vinyl {
-  width: 240px;
-  height: 240px;
-  box-shadow:
-    0 0 0 1px rgba(180, 157, 232, 0.2),
-    0 0 80px rgba(140, 80, 255, 0.15),
-    inset 0 0 30px rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(12px);
+  /* width: 240px; height: 240px; */
 }
 .music-player-vinyl-glow {
-  width: 320px;
-  height: 320px;
+  /* 唱片背后的光晕 */
   background: radial-gradient(circle,
-    rgba(140, 80, 255, 0.25) 0%, transparent 60%);
+    rgba(180, 120, 255, 0.35) 0%, transparent 60%);
 }
-/* 唱片中心 */
-.music-player-vinyl-center {
-  width: 90px;
-  height: 90px;
-}
-.music-player-vinyl-dot {
-  width: 8px;
-  height: 8px;
-}
-/* 唱片沟槽 */
-.music-player-vinyl-groove {
-  /* border-color: rgba(180, 157, 232, 0.1); */
-}
-/* 唱臂 */
 .music-player-tonearm {
   /* transform: rotate(-25deg); */ /* 休息角度 */
 }
-.music-player-tonearm-pivot {
-  /* background: radial-gradient(circle, #fff, #b49de8); */
+
+/* ━━ 评论区 ━━ */
+.mcmt-song {
+  border-radius: 14px;
+}
+.mcmt-sort[data-on] {
+  background: var(--c-music-primary-dim);
+  color: var(--c-music-primary);
+}
+.mcmt-likes[data-hot] {
+  color: var(--c-music-primary);
+}
+.mcmt-send {
+  background: var(--c-music-primary);
 }
 
-/* ━━ 歌词视图 ━━ */
-.music-player-lyrics {
-  padding: 40px 28px;
-  gap: 16px;
+/* ━━ 歌手主页 ━━ */
+.mart-name {
+  font-size: calc(21.6px*var(--app-text-scale,1));
 }
-.music-player-lyric-line {
-  font-size: calc(16px*var(--app-text-scale,1));
-  line-height: 1.8;
-  /* text-shadow: 0 0 8px rgba(180, 157, 232, 0.3); */
-}
-.music-player-lyric-line[data-active] {
-  font-size: calc(18px*var(--app-text-scale,1));
-  font-weight: 500;
-  /* text-shadow: 0 0 12px rgba(180, 157, 232, 0.5); */
+.mart-song-idx[data-top] {
+  color: var(--c-music-primary);
 }
 
-/* ━━ 进度条 ━━ */
-.music-player-progress::before {
-  height: 3px;
-  border-radius: 2px;
+/* ━━ 我的页 · 听歌周报卡 ━━ */
+.music-week-card {
+  border-radius: 18px;
+  /* background: linear-gradient(140deg, #241a3d, #16102a 70%); */
 }
-.music-player-progress-fill {
-  height: 3px;
-}
-.music-player-progress-thumb {
-  width: 14px;
-  height: 14px;
-  box-shadow: 0 0 8px rgba(180, 157, 232, 0.6);
-}
-
-/* ━━ 播放控制按钮 ━━ */
-.music-player-ctrl-play {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  box-shadow: 0 4px 24px rgba(180, 157, 232, 0.35);
-}
-.music-player-ctrl-btn {
-  /* 前进/后退按钮 */
-}
-.music-player-ctrl-side {
-  /* 模式/红心按钮 */
-}
-
-/* ━━ 悬浮窗 ━━ */
-.music-float {
-  border-radius: 36px;
-  backdrop-filter: blur(28px);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.1),
-    0 8px 32px rgba(140, 80, 255, 0.3);
-}
-.music-float[data-expanded] {
-  border-radius: 24px;
-}
-.music-float-cover-wrap {
-  /* 悬浮窗封面唱片 */
-}
-.music-float-title {
-  font-size: calc(13px*var(--app-text-scale,1));
-  font-weight: 600;
+.music-week-bar i {
+  /* 柱状图颜色 */
+  background: linear-gradient(180deg, rgba(230, 210, 255, 0.9), rgba(180, 130, 255, 0.45));
 }
 
 /* ━━ 搜索页 ━━ */
 .music-search-bar {
   border-radius: 20px;
-  height: 40px;
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .music-search-input {
   font-size: calc(14px*var(--app-text-scale,1));
 }
-.music-search-input::placeholder {
-  /* color: rgba(180, 157, 232, 0.4); */
-}
 
-/* ━━ 歌单页 ━━ */
-.music-playlist-grid {
-  gap: 12px;
-  /* grid-template-columns: repeat(3, 1fr); */
-}
-.music-playlist-cover {
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.music-playlist-count {
-  border-radius: 6px;
-  font-size: calc(10px*var(--app-text-scale,1));
-  background: rgba(140, 80, 255, 0.6);
-}
-.music-playlist-name {
-  font-size: calc(12px*var(--app-text-scale,1));
-}
-.music-playlist-detail-name {
-  font-size: calc(16px*var(--app-text-scale,1));
-  font-weight: 600;
-}
-
-/* ━━ 空状态 ━━ */
+/* ━━ 空状态 / 浮动按钮 ━━ */
 .music-empty {
   opacity: 0.4;
 }
-.music-empty-icon {
-  font-size: calc(48px*var(--app-text-scale,1));
-}
-.music-empty-text {
-  font-size: calc(14px*var(--app-text-scale,1));
-  letter-spacing: 1px;
-}
-
-/* ━━ 浮动按钮 ━━ */
 .music-fab-add {
-  width: 44px;
-  height: 44px;
   border-radius: 50%;
   box-shadow: 0 4px 20px rgba(140, 80, 255, 0.3);
 }
 
-/* ━━ 设置弹窗 ━━ */
+/* ━━ 弹窗 / 抽屉（底色由 --c-music-panel 控制） ━━ */
 .music-settings-modal-dialog {
   border-radius: 24px;
-  backdrop-filter: blur(28px);
 }
-.music-settings-header h2 {
-  font-size: calc(15px*var(--app-text-scale,1));
-}
-.music-settings-input {
-  border-radius: 10px;
-}
-.music-settings-btn {
-  border-radius: 10px;
-  height: 36px;
-}
-.music-settings-toggle {
-  /* 开关轨道 */
-}
-.music-settings-toggle[data-checked] {
-  /* 开关开启态 */
-}
-
-/* ━━ 收藏歌单弹窗 / 分享弹窗 (底部上滑) ━━ */
 .music-playlist-picker {
-  /* background: var(--c-music-surface-solid); */
   /* border-radius: 20px 20px 0 0; */
 }
-.music-playlist-picker-header {
-  /* font-size: calc(14px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
-  /* border-bottom: 1px solid var(--c-music-surface); */
-}
-.music-playlist-picker-item:active {
-  /* background: var(--c-music-accent-dim); */
-}
-.music-playlist-picker-name {
-  /* font-size: calc(13px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
-}
-.music-playlist-picker-count {
-  /* font-size: calc(11px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-accent); */
-}
-
-/* ━━ 播放队列抽屉 (右侧滑入) ━━ */
 .music-queue-drawer {
   /* width: 75%; */
-  /* background: var(--c-music-surface-solid); */
-}
-.music-queue-header {
-  /* font-size: calc(14px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
 }
 .music-queue-item[data-current] {
   /* background: var(--c-music-accent-dim); */
-}
-.music-queue-item-title {
-  /* font-size: calc(13px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
-}
-.music-queue-item-artist {
-  /* font-size: calc(11px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-accent); */
-}
-
-/* ━━ 确认弹窗 ━━ */
-.music-confirm-dialog {
-  /* max-width: 280px; */
-}
-.music-confirm-text {
-  /* font-size: calc(13px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
-}
-.music-settings-btn-danger {
-  /* background: var(--c-music-liked); */
-  /* color: var(--c-music-white); */
-}
-
-/* ━━ Toast 通知 ━━ */
-.music-toast {
-  /* border-radius: 20px; */
-  /* font-size: calc(13px*var(--app-text-scale,1)); */
-}
-.music-toast-ok {
-  /* background: var(--c-music-accent-dim); */
-  /* color: var(--c-music-text); */
-}
-.music-toast-err {
-  /* color: var(--c-music-liked); */
-}
-
-/* ━━ 聊天音乐分享卡片 ━━ */
-.chat-music-share-card {
-  /* width: 220px; */
-  /* border-radius: 16px; */
-  /* background: var(--c-music-surface); */
-  /* border: 1px solid var(--c-music-surface-solid); */
-  /* box-shadow: 0 4px 12px var(--c-music-accent-dim); */
-}
-.chat-music-share-cover {
-  /* width: 44px; height: 44px; */
-  /* border-radius: 10px; */
-  /* background: var(--c-music-surface-solid); */
-}
-.chat-music-share-title {
-  /* font-size: calc(13px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-text); */
-}
-.chat-music-share-artist {
-  /* font-size: calc(11px*var(--app-text-scale,1)); */
-  /* color: var(--c-music-accent); */
-}
-.chat-music-share-footer {
-  /* border-top: 1px solid var(--c-music-surface); */
-  /* color: var(--c-music-accent); */
-}
-
-/* ━━ 动画速度 ━━ */
-/* .music-player-vinyl[data-spinning] {
-  animation-duration: 8s;
-} */
-/* .music-now-bar-cover[data-playing] {
-  animation-duration: 6s;
-} */`;
-
-export const GLOBAL_CSS_EXAMPLE = `/* === 全局 CSS 选择器示例 === */
-/* 本示例只列全局相对稳定的选择器，不包含具体 APP 的业务类名，也不依赖全局变量。 */
-/* 取消注释需要的属性后点击「应用」。全局 CSS 会影响所有页面，请尽量用选择器限定范围。 */
-
-/* === 页面基础结构 === */
-[data-ui="phone-screen"] {
-  /* background: #f7f7f8; */
-  /* color: #222222; */
-}
-
-[data-ui="header"] {
-  /* background: rgba(255, 255, 255, 0.86); */
-  /* backdrop-filter: blur(18px); */
-  /* -webkit-backdrop-filter: blur(18px); */
-  /* border-bottom: 1px solid rgba(0, 0, 0, 0.08); */
-}
-
-[data-ui="body"] {
-  /* background: #f5f5f6; */
-  /* padding-left: 14px; */
-  /* padding-right: 14px; */
-}
-
-[data-ui="nav"] {
-  /* background: rgba(255, 255, 255, 0.82); */
-  /* backdrop-filter: blur(18px); */
-  /* -webkit-backdrop-filter: blur(18px); */
-}
-
-[data-ui="input"] {
-  /* background: rgba(255, 255, 255, 0.9); */
-  /* border-top: 1px solid rgba(0, 0, 0, 0.08); */
-}
-
-/* === 通用页面壳 === */
-.page-shell {
-  /* background: #f5f5f6; */
-}
-
-.page-header {
-  /* background: rgba(255, 255, 255, 0.88); */
-  /* border-bottom: 1px solid rgba(0, 0, 0, 0.08); */
-}
-
-.page-header-content {
-  /* padding-left: 14px; */
-  /* padding-right: 14px; */
-}
-
-.page-title {
-  /* color: #222222; */
-  /* font-weight: 600; */
-}
-
-.page-body {
-  /* background: transparent; */
-}
-
-/* === 通用卡片 / 列表 === */
-[data-ui="card"],
-.app-card,
-.ui-entry-card,
-.ui-list-card,
-.ui-config-card,
-.ui-collapsible {
-  /* background: rgba(255, 255, 255, 0.78); */
-  /* border: 1px solid rgba(0, 0, 0, 0.08); */
-  /* border-radius: 14px; */
-  /* box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06); */
-}
-
-/* === 通用按钮 === */
-.ui-btn {
-  /* border-radius: 10px; */
-  /* min-height: 38px; */
-  /* font-weight: 500; */
-}
-
-.ui-btn-primary {
-  /* background: #2f7cf6; */
-  /* color: #ffffff; */
-}
-
-.ui-btn-outline {
-  /* background: rgba(255, 255, 255, 0.64); */
-  /* border-color: rgba(0, 0, 0, 0.12); */
-  /* color: #222222; */
-}
-
-.ui-btn-soft-action,
-.ui-btn-ghost {
-  /* color: #2f7cf6; */
-}
-
-.ui-btn-danger {
-  /* background: #ff3b30; */
-  /* color: #ffffff; */
-}
-
-/* === 通用输入控件 === */
-.ui-input,
-.ui-textarea,
-.ui-select {
-  /* background: rgba(255, 255, 255, 0.86); */
-  /* border: 1px solid rgba(0, 0, 0, 0.12); */
-  /* border-radius: 10px; */
-  /* color: #222222; */
-}
-
-.ui-input:focus,
-.ui-textarea:focus,
-.ui-select:focus {
-  /* border-color: #2f7cf6; */
-  /* box-shadow: 0 0 0 3px rgba(47, 124, 246, 0.14); */
-}
-
-[data-ui="slider"],
-.ui-slider {
-  /* accent-color: #2f7cf6; */
-}
-
-[data-ui="toggle"],
-.ui-toggle {
-  /* background: rgba(0, 0, 0, 0.18); */
-}
-
-.ui-toggle[data-checked] {
-  /* background: #2f7cf6; */
-}
-
-.ui-toggle-knob {
-  /* background: #ffffff; */
-}
-
-/* === 标签 / 徽章 / 头像 === */
-.ui-badge,
-.ui-status-tag,
-.ui-tag,
-.ui-chip {
-  /* border-radius: 999px; */
-  /* background: rgba(0, 0, 0, 0.06); */
-  /* color: #333333; */
-}
-
-.ui-chip[data-selected] {
-  /* background: #2f7cf6; */
-  /* color: #ffffff; */
-}
-
-.ui-avatar {
-  /* border-radius: 12px; */
-  /* border: 1px solid rgba(255, 255, 255, 0.8); */
-}
-
-.ui-alert {
-  /* background: rgba(255, 149, 0, 0.12); */
-  /* border: 1px solid rgba(255, 149, 0, 0.22); */
-  /* border-radius: 12px; */
-}
-
-/* === 菜单 === */
-[data-ui="menu"],
-.menu-group {
-  /* background: rgba(255, 255, 255, 0.82); */
-  /* border: 1px solid rgba(0, 0, 0, 0.08); */
-  /* border-radius: 14px; */
-}
-
-.menu-item {
-  /* min-height: 46px; */
-  /* padding: 12px 14px; */
-}
-
-.menu-label {
-  /* color: #222222; */
-}
-
-.menu-desc {
-  /* color: #777777; */
-}
-
-/* === 弹窗 === */
-[data-ui="modal"] {
-  /* background: rgba(0, 0, 0, 0.42); */
-}
-
-[data-ui="modal-dialog"],
-[data-ui="modal-sheet"],
-[data-ui="modal-expand"] {
-  /* background: #ffffff; */
-  /* border: 1px solid rgba(0, 0, 0, 0.08); */
-  /* border-radius: 18px; */
-  /* box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22); */
-}
-
-[data-ui="modal-header"] {
-  /* border-bottom: 1px solid rgba(0, 0, 0, 0.08); */
-}
-
-[data-ui="modal-body"] {
-  /* padding: 16px; */
-}
-
-[data-ui="modal-footer"] {
-  /* gap: 10px; */
-}
-
-/* === 进度条 === */
-[data-ui="progress"],
-.ui-progress-track {
-  /* height: 4px; */
-  /* background: rgba(0, 0, 0, 0.1); */
-  /* border-radius: 999px; */
-}
-
-.ui-progress-fill {
-  /* background: #2f7cf6; */
-}
-
-/* === 消息气泡：只在存在这些语义节点的页面生效 === */
-[data-ui="bubble-user"],
-[data-ui="bubble-bot"] {
-  /* border-radius: 18px; */
-  /* box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08); */
-}
-
-[data-ui="bubble-user"] {
-  /* background: #2f7cf6; */
-  /* color: #ffffff; */
-}
-
-[data-ui="bubble-bot"] {
-  /* background: #ffffff; */
-  /* color: #222222; */
-}
-
-/* === 组合限定示例 === */
-[data-ui="modal"] .ui-btn {
-  /* border-radius: 12px; */
-}
-
-[data-ui="body"] [data-ui="card"] {
-  /* margin-bottom: 10px; */
 }
 `;
