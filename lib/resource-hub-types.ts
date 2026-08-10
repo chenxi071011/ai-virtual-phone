@@ -25,6 +25,8 @@ export type ShareIndexEntry = {
     description: string;
     /** 投稿人（来自 .author 文件，可为空） */
     author?: string;
+    /** 投稿人头像的仓库路径（.avatar.png，可为空） */
+    avatar?: string;
     /** 最近更新时间（ISO），索引生成时来自 git log */
     updatedAt: string | null;
 };

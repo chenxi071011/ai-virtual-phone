@@ -53,6 +53,21 @@ export type UploadPayload = {
     description: string;
     /** 资源本体 + 图片，函数侧不区分（图片靠扩展名被索引识别） */
     files: UploadPayloadFile[];
+    /** 作者头像（64×64 PNG 的纯 base64），可选 */
+    avatarBase64?: string;
+};
+
+/** 作者编辑已上架资源的载荷（路径不变，只改内容） */
+export type EditPayload = {
+    /** 标题（可带贴纸/排版标记） */
+    title: string;
+    author: string;
+    description: string;
+    avatarBase64?: string;
+    /** 新增或覆盖的文件（同名即覆盖） */
+    addFiles: UploadPayloadFile[];
+    /** 要删掉的文件（传仓库路径或文件名都行） */
+    removeFiles: string[];
 };
 
 export type UploadResult = {
@@ -124,17 +139,34 @@ export async function uploadViaService(endpoint: string, payload: UploadPayload)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, ownerKeyHash }),
     });
-    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; prUrl?: string };
+    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; prUrl?: string; path?: string };
     if (!res.ok || data.ok === false) {
         throw new Error(data.error || `上传服务返回 HTTP ${res.status}`);
     }
     recordMyUpload({
-        path: `${RESOURCE_ROOT}/${payload.folder}/${payload.name}`,
+        // 服务端会把标题安全化成文件夹名，以它返回的真实路径为准，
+        // 否则本机凭证记录会对不上，日后删不掉也改不了
+        path: data.path || `${RESOURCE_ROOT}/${payload.folder}/${payload.name}`,
         name: payload.name,
         ownerKey,
         uploadedAt: new Date().toISOString(),
     });
     return { merged: false, prUrl: data.prUrl };
+}
+
+/** 作者自助编辑（免账号路径）：凭本机凭证请求上传服务改内容。 */
+export async function editViaService(endpoint: string, record: MyUploadRecord, payload: EditPayload): Promise<void> {
+    const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "edit", path: record.path, ownerKey: record.ownerKey, ...payload }),
+    });
+    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (!res.ok || data.ok === false) {
+        throw new Error(data.error || `编辑服务返回 HTTP ${res.status}`);
+    }
+    // 标题可能改了，本机记录跟着更新
+    saveMyUploads(loadMyUploads().map(r => (r.path === record.path ? { ...r, name: payload.title || r.name } : r)));
 }
 
 /** 投稿者自助下架：把本机保存的删除凭证发给上传服务比对后删除。 */
@@ -177,9 +209,18 @@ function encodeContentPath(dir: string, file: string): string {
     return `${dir.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(file)}`;
 }
 
+/** 标题 → 安全的文件夹名（与上传服务的规则保持一致） */
+export function safeSegment(value: string): string {
+    return value.trim()
+        .replace(/[\\/:*?"<>|#%\x00-\x1f]/g, "")
+        .replace(/^\.+|\.+$/g, "")
+        .slice(0, 60);
+}
+
 export async function uploadViaToken(token: string, source: ResourceHubSource, payload: UploadPayload): Promise<UploadResult> {
     const { owner, repo, branch } = source;
-    const dir = `${RESOURCE_ROOT}/${payload.folder}/${payload.name}`;
+    const dirName = safeSegment(payload.name);
+    const dir = `${RESOURCE_ROOT}/${payload.folder}/${dirName}`;
     const ownerKey = generateOwnerKey();
     const toWrite: UploadPayloadFile[] = [...payload.files];
     if (payload.description.trim()) {
@@ -193,6 +234,13 @@ export async function uploadViaToken(token: string, source: ResourceHubSource, p
     // 投稿人写进 .author，索引带上后详情页展示
     if (payload.author.trim()) {
         toWrite.push({ name: ".author", contentBase64: btoa(unescape(encodeURIComponent(payload.author.trim()))) });
+    }
+    // 原始标题（可能带贴纸标记，与安全化后的文件夹名不同）
+    if (payload.name.trim() && payload.name.trim() !== dirName) {
+        toWrite.push({ name: ".title", contentBase64: btoa(unescape(encodeURIComponent(payload.name.trim()))) });
+    }
+    if (payload.avatarBase64) {
+        toWrite.push({ name: ".avatar.png", contentBase64: payload.avatarBase64 });
     }
 
     // 有写权限（仓库主/协作者）→ 直接提交默认分支，立即上架
@@ -250,6 +298,54 @@ export async function uploadViaToken(token: string, source: ResourceHubSource, p
     return { merged: false, prUrl: pr.html_url };
 }
 
+/** 作者编辑（Token 直传路径）：直接改仓库里的文件。 */
+export async function editViaToken(token: string, source: ResourceHubSource, record: MyUploadRecord, payload: EditPayload): Promise<void> {
+    const { owner, repo, branch } = source;
+    const dirName = record.path.split("/")[2] || "";
+
+    const shaOf = async (path: string): Promise<string> => {
+        try {
+            const info = await gh<{ sha?: string }>(token, "GET", `/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`);
+            return info.sha || "";
+        } catch { return ""; }
+    };
+    const put = async (name: string, contentBase64: string) => {
+        const target = `${record.path}/${name}`;
+        const sha = await shaOf(target);
+        await gh(token, "PUT", `/repos/${owner}/${repo}/contents/${encodeContentPath(record.path, name)}`, {
+            message: `编辑：${target}`, content: contentBase64, branch, ...(sha ? { sha } : {}),
+        });
+    };
+    const remove = async (name: string) => {
+        const target = `${record.path}/${name}`;
+        const sha = await shaOf(target);
+        if (!sha) return;
+        await gh(token, "DELETE", `/repos/${owner}/${repo}/contents/${encodeContentPath(record.path, name)}`, {
+            message: `编辑：删除 ${target}`, sha, branch,
+        });
+    };
+
+    for (const raw of payload.removeFiles) {
+        const name = raw.split("/").pop() || "";
+        if (name && !name.startsWith(".")) await remove(name);
+    }
+    for (const file of payload.addFiles) await put(file.name, file.contentBase64);
+
+    const title = payload.title.trim();
+    const fields: Array<{ name: string; value: string }> = [
+        { name: ".title", value: title && title !== dirName ? title : "" },
+        { name: "说明.txt", value: payload.description.trim() },
+        { name: ".author", value: payload.author.trim() },
+    ];
+    for (const field of fields) {
+        if (field.value) await put(field.name, btoa(unescape(encodeURIComponent(field.value))));
+        else await remove(field.name);
+    }
+    if (payload.avatarBase64) await put(".avatar.png", payload.avatarBase64);
+
+    saveMyUploads(loadMyUploads().map(r => (r.path === record.path ? { ...r, name: title || r.name } : r)));
+}
+
 /** 统一入口：配了 token 走直传，否则走上传服务。 */
 export async function uploadResource(source: ResourceHubSource, payload: UploadPayload): Promise<UploadResult> {
     const config = loadUploadConfig();
@@ -257,4 +353,13 @@ export async function uploadResource(source: ResourceHubSource, payload: UploadP
         return uploadViaToken(config.githubToken.trim(), source, payload);
     }
     return uploadViaService(config.endpoint, payload);
+}
+
+/** 统一编辑入口：同上，token 优先。 */
+export async function editResource(source: ResourceHubSource, record: MyUploadRecord, payload: EditPayload): Promise<void> {
+    const config = loadUploadConfig();
+    if (config.githubToken.trim()) {
+        return editViaToken(config.githubToken.trim(), source, record, payload);
+    }
+    return editViaService(config.endpoint, record, payload);
 }

@@ -25,14 +25,18 @@ import {
     type ShareIndexEntry,
 } from "@/lib/resource-hub-types";
 import {
+    editResource,
     fileToUploadEntry,
     loadMyUploads,
     loadUploadConfig,
     ownerDeleteViaService,
     saveUploadConfig,
     uploadResource,
+    type MyUploadRecord,
     type ResourceHubUploadConfig,
 } from "@/lib/resource-hub-upload";
+import { avatarBase64, fileToAvatarDataUrl, loadHubProfile, saveHubProfile, type HubProfile } from "@/lib/resource-hub-profile";
+import { DefaultPixelAvatar } from "@/components/resource-hub/pixel-avatar";
 import { DestPixelIcon, FileTypePixelIcon, fileExtension } from "@/components/resource-hub/pixel-icons";
 import { deleteShareEntry } from "@/lib/resource-hub-review";
 import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
@@ -70,6 +74,20 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     // 送花：各资源花数（我的货摊展示用）+ 非阻塞小提示
     const [flowerCounts, setFlowerCounts] = useState<FlowerCounts | null>(null);
     const [toast, setToast] = useState<string | null>(null);
+    // 摊主资料（昵称 + 头像，本机存；上传/编辑时头像一并发布）
+    const [profile, setProfile] = useState<HubProfile>(() => loadHubProfile());
+    const [editingNickname, setEditingNickname] = useState(false);
+    // 作者编辑已发布资源
+    const [editEntry, setEditEntry] = useState<ShareIndexEntry | null>(null);
+    const [editRecord, setEditRecord] = useState<MyUploadRecord | null>(null);
+    const [editAuthor, setEditAuthor] = useState("");
+    const [editTitle, setEditTitle] = useState("");
+    const [editDesc, setEditDesc] = useState("");
+    const [editAddFiles, setEditAddFiles] = useState<File[]>([]);
+    const [editRemoved, setEditRemoved] = useState<string[]>([]);
+    const [savingEdit, setSavingEdit] = useState(false);
+    const editTitleRef = useRef<RichEditorHandle | null>(null);
+    const editDescRef = useRef<RichEditorHandle | null>(null);
     // 联网中的按钮（各自显示像素沙漏）
     const [sendingFlower, setSendingFlower] = useState(false);
     const [importingTo, setImportingTo] = useState<string | null>(null);
@@ -98,6 +116,10 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     const uploadNameRef = useRef<RichEditorHandle | null>(null);
     const uploadDescRef = useRef<RichEditorHandle | null>(null);
 
+    /** 这条资源是不是本机发布的（有删除/编辑凭证） */
+    const myRecordFor = useCallback((path: string): MyUploadRecord | null =>
+        loadMyUploads().find(r => r.path === path) ?? null, []);
+
     const showToast = useCallback((msg: string) => {
         setToast(msg);
         window.setTimeout(() => setToast(current => (current === msg ? null : current)), 2600);
@@ -110,6 +132,13 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
 
     // 工具栏按钮按下时不抢走编辑器焦点，选区才能保住（iOS 上尤其关键）
     const keepSelection = useCallback((e: React.PointerEvent) => e.preventDefault(), []);
+
+    // 编辑弹窗打开时把现有标题/正文灌进所见即所得编辑器（编辑器是非受控的）
+    useEffect(() => {
+        if (!editEntry) return;
+        editTitleRef.current?.setMarkup(editEntry.name);
+        editDescRef.current?.setMarkup(editEntry.description);
+    }, [editEntry]);
 
     const reload = useCallback((activeSource: ResourceHubSource, options?: { purge?: boolean }) => {
         setLoadState("loading");
@@ -237,6 +266,69 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         void runImport(importFile, destination);
     }, [importFile, onNotice, runImport]);
 
+    const openEdit = useCallback((entry: ShareIndexEntry) => {
+        const record = myRecordFor(entry.path);
+        if (!record) { showToast("只有发布者本人可以编辑"); return; }
+        setEditRecord(record);
+        setEditEntry(entry);
+        setEditTitle(entry.name);
+        setEditDesc(entry.description);
+        setEditAuthor(entry.author?.trim() || profile.nickname);
+        setEditAddFiles([]);
+        setEditRemoved([]);
+    }, [myRecordFor, profile.nickname, showToast]);
+
+    const handleSaveEdit = useCallback(async () => {
+        if (!editEntry || !editRecord) return;
+        const title = editTitle.trim();
+        if (!title) { showToast("标题不能为空"); return; }
+        setSavingEdit(true);
+        try {
+            const addFiles = await Promise.all(editAddFiles.map(fileToUploadEntry));
+            await editResource(source, editRecord, {
+                title,
+                author: editAuthor.trim(),
+                description: editDesc.trim(),
+                avatarBase64: avatarBase64(profile.avatarDataUrl) || undefined,
+                addFiles,
+                removeFiles: editRemoved,
+            });
+            // 乐观更新：CDN 索引重建要一会儿，先让界面显示新内容
+            const keep = (list: string[]) => list.filter(f => !editRemoved.includes(f));
+            const updated: ShareIndexEntry = {
+                ...editEntry,
+                name: title,
+                description: editDesc.trim(),
+                author: editAuthor.trim(),
+                files: keep(editEntry.files),
+                images: keep(editEntry.images),
+            };
+            setIndex(current => current
+                ? { ...current, entries: current.entries.map(e => (e.path === updated.path ? updated : e)) }
+                : current);
+            setActiveEntry(current => (current?.path === updated.path ? updated : current));
+            setEditEntry(null);
+            setEditRecord(null);
+            onNotice?.("已保存，索引刷新后所有人都能看到新内容");
+        } catch (err) {
+            onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            setSavingEdit(false);
+        }
+    }, [editAddFiles, editAuthor, editDesc, editEntry, editRecord, editRemoved, editTitle, onNotice, profile.avatarDataUrl, showToast, source]);
+
+    const handlePickAvatar = useCallback(async (file: File) => {
+        try {
+            const dataUrl = await fileToAvatarDataUrl(file);
+            const next = { ...profile, avatarDataUrl: dataUrl };
+            setProfile(next);
+            saveHubProfile(next);
+            showToast("头像已更新（发布新资源时同步）");
+        } catch {
+            showToast("这张图片处理失败，换一张试试");
+        }
+    }, [profile, showToast]);
+
     const handleDeleteEntry = useCallback(async (entry: ShareIndexEntry) => {
         setDeleting(true);
         try {
@@ -273,9 +365,11 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
             const files = await Promise.all([...uploadFiles, ...uploadImages].map(fileToUploadEntry));
             const result = await uploadResource(source, {
                 folder, name,
-                author: uploadAuthor.trim(),
+                author: uploadAuthor.trim() || profile.nickname,
                 description: uploadDesc.trim(),
                 files,
+                // 头像随资源发布，别人在详情页也能看到作者头像
+                avatarBase64: avatarBase64(profile.avatarDataUrl) || undefined,
             });
             setShowUpload(false);
             uploadNameRef.current?.setMarkup(""); uploadDescRef.current?.setMarkup("");
@@ -288,7 +382,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         } finally {
             setUploading(false);
         }
-    }, [onNotice, source, uploadAuthor, uploadDesc, uploadFiles, uploadFolder, uploadFolderCustom, uploadImages, uploadName]);
+    }, [onNotice, profile, source, uploadAuthor, uploadDesc, uploadFiles, uploadFolder, uploadFolderCustom, uploadImages, uploadName]);
 
     // 贴纸/颜色选择面板（上传弹窗的排版工具栏用）
     const stickerPanel = (
@@ -312,18 +406,27 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         </div>
     );
 
-    // 详情页署名行：投稿人（填了才有）+ 更新日期
-    const detailByline = activeEntry
-        ? [activeEntry.author?.trim() ? `投稿人：${activeEntry.author.trim()}` : "", formatEntryDate(activeEntry.updatedAt)]
-            .filter(Boolean).join("　·　")
-        : "";
-
     const title = activeEntry ? activeEntry.name : activeFolder ? activeFolder : "资源集市";
     const handleBack = activeEntry
         ? () => setActiveEntry(null)
         : activeFolder
             ? () => setActiveFolder(null)
             : onClose;
+
+    /** 作者头像：优先用随资源发布的 .avatar.png；自己的帖子退回本机头像；都没有就用默认像素头像 */
+    const renderAuthorAvatar = (entry: ShareIndexEntry | null, size: number) => {
+        const published = entry?.avatar ? resolveResourceHubAssetUrl(source, entry.avatar) : "";
+        const local = !entry || myRecordFor(entry.path) ? profile.avatarDataUrl : "";
+        const url = published || local;
+        return (
+            <span className="rh-avatar" style={{ width: size, height: size }}>
+                {url
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={url} alt="" width={size} height={size} />
+                    : <DefaultPixelAvatar size={size} />}
+            </span>
+        );
+    };
 
     const renderEntryRow = (entry: ShareIndexEntry, showFolder = false, flowers?: number | "loading") => (
         <button key={entry.path} className="rh-entry" onClick={() => { setActiveEntry(entry); setSelectedFile(entry.files[0] ?? null); }}>
@@ -366,7 +469,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                     <span className="rh-address">
                         地址：C:\资源集市{viewMode === "mine" ? "\\我的货摊" : ""}{activeFolder ? `\\${activeFolder}` : ""}{activeEntry ? `\\${activeEntry.name}` : ""}
                     </span>
-                    <button className="rh-btn" onClick={() => { setUploadFolder(activeFolder || ""); setShowUpload(true); }}>上传</button>
+                    <button className="rh-btn" onClick={() => { setUploadFolder(activeFolder || ""); setUploadAuthor(profile.nickname); setShowUpload(true); }}>上传</button>
                 </div>
 
                 {/* 浏览集市 / 我的货摊 切换 */}
@@ -395,6 +498,40 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                     {loadState === "ready" && viewMode === "mine" && !activeEntry && (
                         (myStall.published.length > 0 || myStall.pending.length > 0) ? (
                             <div className="rh-entry-list">
+                                {/* 摊主资料卡：头像 + 昵称 + 统计 */}
+                                <div className="rh-profile-card">
+                                    <label className="rh-profile-avatar" title="点击更换头像">
+                                        {renderAuthorAvatar(null, 54)}
+                                        <input type="file" accept="image/*" hidden
+                                            onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void handlePickAvatar(f); }} />
+                                        <span className="rh-profile-avatar-hint">换头像</span>
+                                    </label>
+                                    <div className="rh-profile-main">
+                                        {editingNickname ? (
+                                            <input
+                                                className="rh-input rh-profile-nickname-input"
+                                                autoFocus
+                                                value={profile.nickname}
+                                                placeholder="给自己起个昵称"
+                                                maxLength={24}
+                                                onChange={e => setProfile(current => ({ ...current, nickname: e.target.value }))}
+                                                onBlur={() => { saveHubProfile(profile); setEditingNickname(false); }}
+                                                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                            />
+                                        ) : (
+                                            <button className="rh-profile-nickname" onClick={() => setEditingNickname(true)}>
+                                                {profile.nickname || "点这里起个昵称"} <span className="rh-profile-edit-hint">✎</span>
+                                            </button>
+                                        )}
+                                        <div className="rh-profile-stats">
+                                            <span>已发布 <b>{myStall.published.length}</b></span>
+                                            <span>待审核 <b>{myStall.pending.length}</b></span>
+                                            <span>收到 <b>{flowerCounts
+                                                ? myStall.published.reduce((sum, e) => sum + (flowerCounts[e.path] ?? 0), 0)
+                                                : "…"}</b> 🌸</span>
+                                        </div>
+                                    </div>
+                                </div>
                                 {myStall.published.length > 0 && (
                                     <div className="rh-stall-flowers">
                                         {flowerCounts
@@ -414,7 +551,40 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                 ))}
                             </div>
                         ) : (
-                            <div className="rh-center-hint">你还没有上传过资源，点右上角「上传」摆个摊吧</div>
+                            <>
+                                <div className="rh-profile-card">
+                                    <label className="rh-profile-avatar" title="点击更换头像">
+                                        {renderAuthorAvatar(null, 54)}
+                                        <input type="file" accept="image/*" hidden
+                                            onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void handlePickAvatar(f); }} />
+                                        <span className="rh-profile-avatar-hint">换头像</span>
+                                    </label>
+                                    <div className="rh-profile-main">
+                                        {editingNickname ? (
+                                            <input
+                                                className="rh-input rh-profile-nickname-input"
+                                                autoFocus
+                                                value={profile.nickname}
+                                                placeholder="给自己起个昵称"
+                                                maxLength={24}
+                                                onChange={e => setProfile(current => ({ ...current, nickname: e.target.value }))}
+                                                onBlur={() => { saveHubProfile(profile); setEditingNickname(false); }}
+                                                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                            />
+                                        ) : (
+                                            <button className="rh-profile-nickname" onClick={() => setEditingNickname(true)}>
+                                                {profile.nickname || "点这里起个昵称"} <span className="rh-profile-edit-hint">✎</span>
+                                            </button>
+                                        )}
+                                        <div className="rh-profile-stats">
+                                            <span>已发布 <b>0</b></span>
+                                            <span>待审核 <b>0</b></span>
+                                            <span>收到 <b>0</b> 🌸</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="rh-center-hint">你还没有上传过资源，点右上角「上传」摆个摊吧</div>
+                            </>
                         )
                     )}
 
@@ -477,11 +647,29 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                         <div className="rh-detail2">
                             <div className="rh-detail2-main">
                                 {/* 发帖式排版：标题 → 正文 → 图片（标记语法经 RichText 安全渲染） */}
-                                <div className="rh-detail2-title" data-solo={detailByline ? undefined : "1"}>
+                                {/* 第一行：头像 + 昵称/时间 +（作者才有的）编辑、删除 */}
+                                <div className="rh-detail2-head">
+                                    {renderAuthorAvatar(activeEntry, 40)}
+                                    <div className="rh-detail2-head-main">
+                                        <div className="rh-detail2-author">
+                                            {activeEntry.author?.trim()
+                                                || (myRecordFor(activeEntry.path) ? profile.nickname : "")
+                                                || "匿名投稿人"}
+                                        </div>
+                                        <div className="rh-detail2-time">{formatEntryDate(activeEntry.updatedAt)}</div>
+                                    </div>
+                                    {myRecordFor(activeEntry.path) && (
+                                        <div className="rh-detail2-head-actions">
+                                            <button className="rh-icon-btn" aria-label="编辑" title="编辑"
+                                                onClick={() => openEdit(activeEntry)}>✎</button>
+                                            <button className="rh-icon-btn rh-icon-btn-danger" aria-label="删除" title="删除"
+                                                onClick={() => setConfirmDeleteEntry(activeEntry)}>🗑</button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="rh-detail2-title">
                                     <RichText text={activeEntry.name} mode="sticker" />
                                 </div>
-                                {/* 投稿人（上传时填了才显示）+ 更新日期 */}
-                                {detailByline && <div className="rh-detail2-byline">{detailByline}</div>}
                                 {activeEntry.description
                                     ? <div className="rh-detail2-desc"><RichText text={activeEntry.description} mode="full" /></div>
                                     : <div className="rh-detail2-desc rh-detail2-desc-empty">（该资源没有说明文字）</div>}
@@ -545,8 +733,9 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                                 ? <><PixelHourglass size={13} /> 导入中</>
                                                 : "导入"}
                                         </button>
-                                        {(uploadCfg.githubToken.trim() || loadMyUploads().some(r => r.path === activeEntry.path)) && (
-                                            <button className="rh-btn rh-action-del" onClick={() => setConfirmDeleteEntry(activeEntry)}>删除</button>
+                                        {/* 作者的编辑/删除已移到顶部作者行；这里只留管理员下架入口 */}
+                                        {uploadCfg.githubToken.trim() && !myRecordFor(activeEntry.path) && (
+                                            <button className="rh-btn rh-action-del" onClick={() => setConfirmDeleteEntry(activeEntry)}>下架</button>
                                         )}
                                     </div>
                                 </>
@@ -653,6 +842,67 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                             <button className="rh-btn" disabled={deleting} onClick={() => setConfirmDeleteEntry(null)}>取消</button>
                             <button className="rh-btn rh-action-del" disabled={deleting} onClick={() => void handleDeleteEntry(confirmDeleteEntry)}>
                                 {deleting ? <><PixelHourglass size={13} /> 删除中…</> : "确认删除"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 编辑已发布的资源（仅作者，凭本机凭证） */}
+            {editEntry && (
+                <div className="rh-dialog-overlay" onClick={savingEdit ? undefined : () => setEditEntry(null)}>
+                    <div className="rh-dialog" onClick={e => e.stopPropagation()}>
+                        <div className="rh-titlebar">
+                            <span className="rh-titlebar-text">编辑资源</span>
+                            <span className="rh-titlebar-controls">
+                                <button className="rh-tb-btn" disabled={savingEdit} onClick={() => setEditEntry(null)}>✕</button>
+                            </span>
+                        </div>
+                        <div className="rh-dialog-body rh-form">
+                            <div className="rh-form-field">
+                                <span>标题</span>
+                                <RichEditor ref={editTitleRef} className="rh-input rh-editor rh-editor-line"
+                                    placeholder="标题" ariaLabel="编辑标题" singleLine onChange={setEditTitle} />
+                            </div>
+                            <label>投稿人
+                                <input className="rh-input" value={editAuthor} maxLength={24}
+                                    onChange={e => setEditAuthor(e.target.value)} />
+                            </label>
+                            <div className="rh-form-field">
+                                <span>说明文字（选中文字可改颜色、字号、加粗）</span>
+                                <RichEditor ref={editDescRef} className="rh-input rh-editor rh-editor-area"
+                                    placeholder="写点介绍吧～" ariaLabel="编辑说明" onChange={setEditDesc} />
+                            </div>
+                            <div className="rh-form-field">
+                                <span>现有文件（打叉即移除）</span>
+                                <div className="rh-edit-files">
+                                    {[...editEntry.files, ...editEntry.images].map(file => {
+                                        const base = file.split("/").pop() || file;
+                                        const removed = editRemoved.includes(file);
+                                        return (
+                                            <button key={file} className="rh-edit-file" data-removed={removed ? "1" : undefined}
+                                                onClick={() => setEditRemoved(current =>
+                                                    removed ? current.filter(f => f !== file) : [...current, file])}>
+                                                <span className="rh-edit-file-name">{base}</span>
+                                                <span className="rh-edit-file-x">{removed ? "撤销" : "✕"}</span>
+                                            </button>
+                                        );
+                                    })}
+                                    {editEntry.files.length + editEntry.images.length === 0 && (
+                                        <span className="rh-form-hint">（这个资源还没有文件）</span>
+                                    )}
+                                </div>
+                            </div>
+                            <label className="rh-file-picker">
+                                <span className="rh-btn">添加/替换文件{editAddFiles.length > 0 ? `（已选 ${editAddFiles.length} 个）` : ""}</span>
+                                <input type="file" multiple hidden onChange={e => { setEditAddFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+                            </label>
+                            <div className="rh-form-hint">同名文件会被覆盖；保存后立即生效，索引刷新后所有人可见。</div>
+                        </div>
+                        <div className="rh-dialog-footer">
+                            <button className="rh-btn" disabled={savingEdit} onClick={() => setEditEntry(null)}>取消</button>
+                            <button className="rh-btn rh-btn-primary" disabled={savingEdit} onClick={() => void handleSaveEdit()}>
+                                {savingEdit ? <><PixelHourglass size={13} /> 保存中…</> : "保存"}
                             </button>
                         </div>
                     </div>
@@ -1036,8 +1286,8 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                     -webkit-tap-highlight-color: rgba(0, 0, 128, 0.15);
                 }
                 .rh-detail2-main img {
-                    max-width: min(220px, 62%);
-                    max-height: 240px;
+                    max-width: min(300px, 88%);
+                    max-height: 360px;
                     width: auto;
                     height: auto;
                     align-self: center;
@@ -1051,20 +1301,121 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                     color: #000;
                     line-height: 1.4;
                     word-break: break-all;
-                }
-                /* 标题下的署名行（投稿人 · 日期），兼当标题与正文的分隔 */
-                .rh-detail2-byline {
-                    margin-top: -6px;
                     padding-bottom: 8px;
                     border-bottom: 1px solid #d4d0c8;
+                }
+                /* 详情页第一行：头像 + 昵称/时间 + 作者操作 */
+                .rh-detail2-head {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .rh-detail2-head-main { flex: 1; min-width: 0; }
+                .rh-detail2-author {
+                    font-size: calc(12px * var(--app-text-scale, 1));
+                    font-weight: 700;
+                    color: #000080;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .rh-detail2-time { font-size: calc(10px * var(--app-text-scale, 1)); color: #808080; }
+                .rh-detail2-head-actions { display: flex; gap: 4px; flex-shrink: 0; }
+                .rh-icon-btn {
+                    width: 26px;
+                    height: 24px;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 13px;
+                    background: #c0c0c0;
+                    color: #000;
+                    border: 2px solid;
+                    border-color: #ffffff #404040 #404040 #ffffff;
+                    cursor: pointer;
+                    padding: 0;
+                }
+                .rh-icon-btn:active { border-color: #404040 #ffffff #ffffff #404040; }
+                .rh-icon-btn-danger { color: #a01818; }
+                /* 头像：矩形，带凹边框 */
+                .rh-avatar {
+                    display: inline-block;
+                    flex-shrink: 0;
+                    overflow: hidden;
+                    background: #dcd8d0;
+                    border: 2px solid;
+                    border-color: #404040 #ffffff #ffffff #404040;
+                }
+                .rh-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+                /* 我的货摊资料卡 */
+                .rh-profile-card {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 10px;
+                    background: #ececec;
+                    border-bottom: 1px solid #808080;
+                }
+                .rh-profile-avatar { position: relative; cursor: pointer; display: inline-block; }
+                .rh-profile-avatar-hint {
+                    position: absolute;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    text-align: center;
+                    font-size: calc(9px * var(--app-text-scale, 1));
+                    color: #fff;
+                    background: rgba(0, 0, 0, 0.55);
+                    padding: 1px 0;
+                }
+                .rh-profile-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+                .rh-profile-nickname {
+                    align-self: flex-start;
+                    max-width: 100%;
+                    background: none;
+                    border: none;
+                    padding: 0;
+                    font-size: calc(14px * var(--app-text-scale, 1));
+                    font-weight: 700;
+                    color: #000080;
+                    cursor: pointer;
+                    text-align: left;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .rh-profile-edit-hint { font-size: calc(11px * var(--app-text-scale, 1)); color: #808080; }
+                .rh-profile-nickname-input { font-size: calc(13px * var(--app-text-scale, 1)); }
+                .rh-profile-stats {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
                     font-size: calc(11px * var(--app-text-scale, 1));
-                    color: #606060;
+                    color: #404040;
                 }
-                /* 没有署名行时，分隔线回到标题下面 */
-                .rh-detail2-title[data-solo] {
-                    padding-bottom: 8px;
-                    border-bottom: 1px solid #d4d0c8;
+                .rh-profile-stats b { color: #000; font-size: calc(13px * var(--app-text-scale, 1)); }
+                /* 编辑弹窗的文件清单 */
+                .rh-edit-files { display: flex; flex-direction: column; gap: 3px; }
+                .rh-edit-file {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 4px 6px;
+                    background: #fff;
+                    border: 1px solid #808080;
+                    cursor: pointer;
+                    text-align: left;
                 }
+                .rh-edit-file[data-removed] { background: #f0d0d0; text-decoration: line-through; color: #a01818; }
+                .rh-edit-file-name {
+                    flex: 1;
+                    min-width: 0;
+                    font-size: calc(11px * var(--app-text-scale, 1));
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .rh-edit-file-x { font-size: calc(11px * var(--app-text-scale, 1)); color: #a01818; flex-shrink: 0; }
                 .rh-detail2-desc {
                     font-size: calc(12px * var(--app-text-scale, 1));
                     line-height: 1.8;
