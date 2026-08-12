@@ -660,12 +660,55 @@ function normalizeChatSessions(sessions: ChatSession[]): NormalizedSessionList {
     return { items: normalized, changed, redirects };
 }
 
+// ── 用户主动删除的好友（墓碑）────────────────────────
+// 删好友是「删联系人、留会话」——会话留着，重新加回来才能接上历史记录。
+// 但下面的 restoreContactsForPrivateSessions 是条数据抢救逻辑：它看到
+// 「有会话却没联系人」就认定联系人表丢了，照着会话把联系人重建回来，
+// 于是刚删掉的好友立刻复活。这里把用户的主动删除记一笔，让抢救逻辑跳过
+// 它们；重新加好友时 addChatContact 会自动销掉墓碑。
+const REMOVED_CONTACTS_KEY = "ai_phone_removed_contacts_v1";
+registerKvMigration(REMOVED_CONTACTS_KEY);
+
+function loadRemovedContactIds(): Set<string> {
+    if (typeof window === "undefined") return new Set<string>();
+    try {
+        const raw = kvGet(REMOVED_CONTACTS_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        const ids: string[] = Array.isArray(parsed) ? parsed.filter((id: unknown): id is string => typeof id === "string" && !!id) : [];
+        return new Set<string>(ids);
+    } catch {
+        return new Set<string>();
+    }
+}
+
+function saveRemovedContactIds(ids: Set<string>): void {
+    if (typeof window === "undefined") return;
+    kvSet(REMOVED_CONTACTS_KEY, JSON.stringify([...ids]));
+}
+
+function markContactRemoved(characterId: string): void {
+    if (!characterId) return;
+    const ids = loadRemovedContactIds();
+    if (ids.has(characterId)) return;
+    ids.add(characterId);
+    saveRemovedContactIds(ids);
+}
+
+function unmarkContactRemoved(characterId: string): void {
+    if (!characterId) return;
+    const ids = loadRemovedContactIds();
+    if (!ids.delete(characterId)) return;
+    saveRemovedContactIds(ids);
+}
+
 function restoreContactsForPrivateSessions(contacts: ChatContact[], sessions: ChatSession[]): NormalizedList<ChatContact> {
     const characterIds = new Set(loadCharacters().map(character => character.id));
+    const removedByUser = loadRemovedContactIds();
     const privateSessionsWithMessages = sessions.filter(session =>
         !session.isGroup
         && session.contactId
         && characterIds.has(session.contactId)
+        && !removedByUser.has(session.contactId)
         && Boolean(getLastVisibleSessionMessage(session.id))
     );
     if (privateSessionsWithMessages.length === 0 || contacts.length >= privateSessionsWithMessages.length) {
@@ -944,6 +987,9 @@ export function saveChatContacts(contacts: ChatContact[]) {
 }
 
 export function addChatContact(characterId: string): ChatContact | null {
+    // 任何一条"重新加上好友"的路径都会走到这里（通过好友申请、搜索添加、
+    // 后台引擎重新建联系），统一在这里解除删除状态，不会漏。
+    unmarkContactRemoved(characterId);
     const contacts = loadChatContacts();
     if (contacts.find(c => c.characterId === characterId)) return null; // already exists
 
@@ -959,6 +1005,7 @@ export function addChatContact(characterId: string): ChatContact | null {
 export function removeChatContact(characterId: string) {
     const contacts = loadChatContacts();
     saveChatContacts(contacts.filter(c => c.characterId !== characterId));
+    markContactRemoved(characterId);
 }
 
 // ── CRUD for Sessions ─────────────────────────

@@ -273,6 +273,11 @@ export type InstalledCustomApp = {
   updatedAt: string;
   /** 来源标记:从应用广场安装/更新时记录市场条目 id;本地导入的没有此字段 */
   marketItemId?: string;
+  /**
+   * 来源标记:从资源集市导入时记录集市里的文件路径。别人的作品,只能本机玩,
+   * 不能再发布到应用广场——归属判定见 custom-app-ownership.ts。
+   */
+  resourceHubPath?: string;
   /** 关联市场版后,本机编辑/换包过但还没提交更新时为 true;发布成功或重新拉取市场版后清除 */
   hasUnpublishedChanges?: boolean;
 };

@@ -102,8 +102,11 @@ export function BottomSheet({
   children,
 }: BottomSheetProps) {
   useBackHandler(true, onClose);
+  // modal-overlay 默认垂直居中（那是给 modal-dialog 用的）；底部抽屉必须叠加
+  // modal-overlay-bottom 贴到底，否则 .modal-sheet 那套「只有上圆角 + 向上滑入」
+  // 的样式会浮在屏幕中间、下沿方角悬空，看着就像坏了。
   return (
-    <div className="modal-overlay" data-ui="modal" onClick={onClose}>
+    <div className="modal-overlay modal-overlay-bottom" data-ui="modal" onClick={onClose}>
       <div className="modal-sheet" data-ui="modal-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header" data-ui="modal-header">
           <button className="modal-header-btn modal-header-btn-muted" onClick={onClose}><X size={18} /></button>

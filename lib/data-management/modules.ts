@@ -234,6 +234,28 @@ export const DATA_MODULES: DataModuleDefinition[] = [
     ],
   },
   {
+    id: "resource_hub",
+    label: "资源集市",
+    description: "摊主钥匙（自己发布资源的所有权凭证）、昵称头像与集市设置",
+    variant: "teal",
+    sources: [
+      {
+        type: "kv",
+        label: "摊主身份与集市设置",
+        keys: [
+          // 钥匙丢了就再也管不了自己发过的资源，必须跟着备份走
+          "ai_phone_resource_hub_identity_v1",
+          "ai_phone_resource_hub_my_uploads_v1",
+          "ai_phone_resource_hub_profile_v1",
+          "ai_phone_resource_hub_upload_cfg_v1",
+          "ai_phone_resource_hub_source_v1",
+          "ai_phone_resource_hub_flowers_sent_v1",
+          "ai_phone_resource_hub_notice_v2",
+        ],
+      },
+    ],
+  },
+  {
     id: "creative",
     label: "创作与玩法",
     description: "故事、漫卷、地图、住宅、黑市、查手机快照与世界构建素材",

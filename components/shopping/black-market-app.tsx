@@ -146,6 +146,11 @@ type BlackMarketStudioDraft = {
   sourceTemplateTitle?: string;
   /** 关联发布档案后,本机又存过草稿但还没提交更新时为 true;更新发布成功后清除 */
   hasUnpublishedChanges?: boolean;
+  /**
+   * 来源标记:从资源集市导入时记录集市里的文件路径。别人的作品,本机可用,
+   * 但不能上架到黑市。存草稿、导出再导入都会带着它,防止洗掉出处。
+   */
+  importedFrom?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -797,6 +802,7 @@ function normalizeStudioDraftRecord(value: unknown): BlackMarketStudioDraft | nu
     sourceTemplateId: String(record.sourceTemplateId ?? "").trim() || undefined,
     sourceTemplateTitle: String(record.sourceTemplateTitle ?? "").trim() || undefined,
     hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
+    importedFrom: String(record.importedFrom ?? "").trim().slice(0, 400) || undefined,
     createdAt: String(record.createdAt ?? now),
     updatedAt: String(record.updatedAt ?? now),
   };
@@ -914,6 +920,8 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   const defaultDraft = useMemo(() => createDefaultDraft(), []);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  // 当前编辑的草稿来自资源集市时是集市路径，否则 null。别人的作品只能本机用，不能上架。
+  const [editingImportedFrom, setEditingImportedFrom] = useState<string | null>(null);
   const [studioDrafts, setStudioDrafts] = useState<BlackMarketStudioDraft[]>(() => loadBlackMarketStudioDrafts());
   const studioDraftFileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<TheaterDraft>(() => createDefaultDraft());
@@ -1653,6 +1661,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   function resetDraft(): void {
     setEditingTemplateId(null);
     setEditingDraftId(null);
+    setEditingImportedFrom(null);
     setDraft(createDefaultDraft());
     setPreviewNonce(value => value + 1);
   }
@@ -1667,6 +1676,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
     }
     setEditingTemplateId(fullTemplate.id);
     setEditingDraftId(null);
+    setEditingImportedFrom(null);
     setDraft(createDraftFromTemplate(fullTemplate));
     setStudioMode("create");
     setPreviewNonce(value => value + 1);
@@ -1675,6 +1685,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   function beginEditStudioDraft(item: BlackMarketStudioDraft): void {
     setEditingTemplateId(null);
     setEditingDraftId(item.id);
+    setEditingImportedFrom(item.importedFrom || null);
     setDraft(item.draft);
     setStudioMode("create");
     setPreviewNonce(value => value + 1);
@@ -1698,6 +1709,8 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
           sourceTemplateTitle,
           // 关联草稿存了新内容但还没提交更新：卡片在「已发布」旁提示有未发布改动
           hasUnpublishedChanges: sourceTemplateId ? true : undefined,
+          // 来源标记跟着草稿走：改了内容再存也洗不掉，否则禁上架形同虚设
+          importedFrom: editingImportedFrom || existing?.importedFrom,
           createdAt: existing?.createdAt || now,
           updatedAt: now,
         },
@@ -1722,7 +1735,8 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   // 导出剧场草稿为 JSON 文件（blob 下载，不触发页面刷新），可发给别人「从文件导入」
   async function exportStudioDraftFile(item: BlackMarketStudioDraft): Promise<void> {
     try {
-      const payload = { type: "ai-phone-theater-draft", version: 1, title: item.title, draft: item.draft };
+      // 带上来源标记：集市来的作品导出再导入依然禁上架，不能靠转一手洗掉出处
+      const payload = { type: "ai-phone-theater-draft", version: 1, title: item.title, draft: item.draft, importedFrom: item.importedFrom };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       await downloadFile(blob, `${item.title.trim() || "剧场草稿"}.json`);
       showNotice("success", "草稿已导出为文件");
@@ -1752,16 +1766,22 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   // 导入草稿 JSON：整张创建表单自动填好（入口在「创建发布」表单顶部）
   async function importStudioDraftFile(file: File): Promise<void> {
     try {
-      const payload = JSON.parse(await file.text()) as { type?: string; draft?: unknown; title?: string };
+      const payload = JSON.parse(await file.text()) as { type?: string; draft?: unknown; title?: string; importedFrom?: unknown };
       if (payload?.type !== "ai-phone-theater-draft" || !payload.draft || typeof payload.draft !== "object") {
         throw new Error("不是有效的剧场草稿文件（需要从草稿箱「EXPORT」生成）");
       }
+      const importedFrom = typeof payload.importedFrom === "string" && payload.importedFrom.trim()
+        ? payload.importedFrom.trim().slice(0, 400)
+        : null;
       const importedDraft = normalizeStudioDraftPayload(payload.draft);
       setEditingDraftId(null);
+      setEditingImportedFrom(importedFrom);
       setEditingTemplateId(null);
       setDraft(importedDraft);
       const title = (typeof payload.title === "string" && payload.title.trim()) || importedDraft.title.trim() || "导入的剧场";
-      showNotice("success", `已导入草稿「${title}」，检查后可存草稿或发布`);
+      showNotice("success", importedFrom
+        ? `已导入草稿「${title}」，这是集市来的作品，可本机使用但不能上架`
+        : `已导入草稿「${title}」，检查后可存草稿或发布`);
     } catch (err) {
       showNotice("error", err instanceof Error ? err.message : "导入失败");
     }
@@ -1834,6 +1854,11 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   }
 
   async function handlePublishDraft(): Promise<void> {
+    // 集市导入的是别人的作品：本机随便用，但不能借道这里上架到黑市
+    if (editingImportedFrom) {
+      showNotice("error", "这是从资源集市导入的作品，只能本机使用，不能上架");
+      return;
+    }
     setPublishing(true);
     try {
       // 关联发布：修改已发布模式用该档案；否则草稿带关联时解析出原档案 → 同步更新同一条目
@@ -2268,7 +2293,9 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
                     {studioDrafts.map(item => (
                       <article key={item.id} className="cp-black-market-published-card">
                         <div>
-                          <span data-pub={item.sourceTemplateId ? "yes" : "no"}>{item.sourceTemplateId ? "已发布" : "未发布"}</span>
+                          {item.importedFrom
+                            ? <span data-pub="no">集市作品·不可上架</span>
+                            : <span data-pub={item.sourceTemplateId ? "yes" : "no"}>{item.sourceTemplateId ? "已发布" : "未发布"}</span>}
                           {item.sourceTemplateId && item.hasUnpublishedChanges ? <i className="cp-bm-dirty-hint">有未发布改动</i> : null}
                           <strong>{item.title}</strong>
                           <p>{item.sourceTemplateId ? `关联：${item.sourceTemplateTitle || "已发布档案"}` : item.draft.subtitle || item.draft.synopsis || item.draft.storyText}</p>
@@ -2496,11 +2523,16 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
                       <Play size={14} />
                       本机测试
                     </button>
-                    <button type="button" className="is-primary" disabled={publishing} onClick={() => void handlePublishDraft()}>
+                    <button type="button" className="is-primary" disabled={publishing || Boolean(editingImportedFrom)}
+                      title={editingImportedFrom ? "集市导入的作品只能本机使用" : undefined}
+                      onClick={() => void handlePublishDraft()}>
                       <Send size={14} />
-                      {publishing ? "同步中" : editingTemplate ? "保存修改" : editingStudioDraft?.sourceTemplateId ? "更新发布" : "发布共享"}
+                      {editingImportedFrom ? "集市作品·不可上架" : publishing ? "同步中" : editingTemplate ? "保存修改" : editingStudioDraft?.sourceTemplateId ? "更新发布" : "发布共享"}
                     </button>
                   </div>
+                  {editingImportedFrom ? (
+                    <p className="cp-black-market-studio-hint">这是从资源集市导入的作品，可以本机使用、改着自己玩，但不能上架到黑市。</p>
+                  ) : null}
                 </div>
               </>
             ) : null}

@@ -16,9 +16,15 @@ const DIY_TEMPLATES_KEY = "ai_phone_diy_templates_v1";
 registerKvMigration(DIY_TEMPLATES_KEY);
 
 const DEFAULT_WIDGETS: WidgetInstance[] = [
+  // 第一页：大时钟 + 心情气泡
   { id: "default_widget_large_time", type: "largeTime", size: "2x4", page: 1, row: 1, col: 1 },
   { id: "default_widget_mood_pill", type: "moodPill", size: "1x4", page: 1, row: 3, col: 1 },
+  // 第二页：个人名片 + iOS 操作菜单
   { id: "default_widget_my_space", type: "mySpace", size: "3x4", page: 2, row: 1, col: 1 },
+  { id: "default_widget_ios_menu", type: "iosMenu", size: "1x4", page: 2, row: 4, col: 1 },
+  // 第三页：天气卡 + 日历（日历占左半边，右半边是四个图标）
+  { id: "default_widget_weather", type: "freestyleFrame68", size: "2x4", page: 3, row: 2, col: 1 },
+  { id: "default_widget_calendar", type: "calendar", size: "2x2", page: 3, row: 4, col: 1 },
 ];
 
 export function createDefaultWidgets(): WidgetInstance[] {

@@ -107,6 +107,55 @@ export async function fetchShareSubmissionFiles(prNumber: number): Promise<Share
     return result;
 }
 
+// ── 自动审核开关 ──
+// 开关存在资源仓库的 _config.json 里：写它需要仓库写权限，所以"只有仓库
+// 所有者能开"是 GitHub 服务端在裁决，前端伪造管理员身份没有任何用。
+
+const CONFIG_FILE = "_config.json";
+
+/** 当前 token 对资源仓库有没有写权限（决定要不要显示自动审核开关） */
+export async function canManageShareRepo(): Promise<boolean> {
+    try {
+        const { token, owner, repo } = getReviewAuth();
+        const info = await gh<{ permissions?: { push?: boolean } }>(token, "GET", `/repos/${owner}/${repo}`);
+        return info.permissions?.push === true;
+    } catch {
+        return false;
+    }
+}
+
+export async function fetchAutoApprove(): Promise<boolean> {
+    const { token, owner, repo } = getReviewAuth();
+    try {
+        const file = await gh<{ content?: string }>(token, "GET", `/repos/${owner}/${repo}/contents/${CONFIG_FILE}`);
+        const cfg = JSON.parse(decodeBase64Utf8(file.content || "")) as { autoApprove?: boolean };
+        return cfg?.autoApprove === true;
+    } catch {
+        // 没配置过/读不到，一律按关闭处理
+        return false;
+    }
+}
+
+/** 写开关。没有仓库写权限的人会被 GitHub 挡在 403。 */
+export async function setAutoApprove(enabled: boolean): Promise<void> {
+    const { token, owner, repo } = getReviewAuth();
+    let sha: string | undefined;
+    let current: Record<string, unknown> = {};
+    try {
+        const file = await gh<{ sha?: string; content?: string }>(token, "GET", `/repos/${owner}/${repo}/contents/${CONFIG_FILE}`);
+        sha = file.sha;
+        current = JSON.parse(decodeBase64Utf8(file.content || "")) as Record<string, unknown>;
+    } catch { /* 首次写入 */ }
+    const body = JSON.stringify({ ...current, autoApprove: enabled }, null, 2);
+    const content = btoa(unescape(encodeURIComponent(body)));
+    await gh(token, "PUT", `/repos/${owner}/${repo}/contents/${CONFIG_FILE}`, {
+        // 带 [skip-index] 免得为一个开关白跑一次索引重建
+        message: `${enabled ? "开启" : "关闭"}自动审核 [skip-index]`,
+        content,
+        ...(sha ? { sha } : {}),
+    });
+}
+
 /** 通过并上架（合并 PR），并强刷索引的 CDN 缓存让新资源尽快可见。 */
 export async function approveShareSubmission(prNumber: number): Promise<void> {
     const { token, owner, repo } = getReviewAuth();

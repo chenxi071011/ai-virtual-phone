@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { MomentPost, MomentComment } from "@/lib/moments-types";
 import { BilingualTextBlock, MediaImageWithPreview } from "@/components/chat/message-bubble";
@@ -44,6 +44,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
     const [showFallbackPreview, setShowFallbackPreview] = useState(false);
     const [photoRetryError, setPhotoRetryError] = useState("");
     const [showPostActions, setShowPostActions] = useState(false);
+    const postActionsRef = useRef<HTMLDivElement>(null);
+    const postActionsBtnRef = useRef<HTMLButtonElement>(null);
     const [editingPostOpen, setEditingPostOpen] = useState(false);
     const [postContentDraft, setPostContentDraft] = useState("");
     const [postPhotoDescDraft, setPostPhotoDescDraft] = useState("");
@@ -205,6 +207,22 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         dispatchMomentsUpdated();
     };
 
+    // 点击菜单外部收起「更多操作」。这里不能用 portal 到 body 的透明遮罩层：
+    // 手机壳 .phone-shell 是 isolate 层叠上下文，菜单被关在里面，body 上的遮罩
+    // 会盖住菜单，点击只会落在遮罩上（菜单收起、按钮不触发）。
+    useEffect(() => {
+        if (!showPostActions) return;
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node | null;
+            if (!target) return;
+            if (postActionsRef.current?.contains(target)) return;
+            if (postActionsBtnRef.current?.contains(target)) return;
+            setShowPostActions(false);
+        };
+        document.addEventListener("pointerdown", handlePointerDown, true);
+        return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+    }, [showPostActions]);
+
     // Refresh comments when moments update
     useEffect(() => {
         const handler = () => setComments(loadMomentComments(post.id));
@@ -264,6 +282,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                     <span className="feed-post-author-name ts-16 font-medium text-[var(--c-text-title)]">{authorName}</span>
                 </div>
                 <button
+                    ref={postActionsBtnRef}
                     className="feed-post-more-btn p-1 text-[var(--c-icon)] opacity-70"
                     type="button"
                     aria-label="更多操作"
@@ -275,12 +294,8 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
                 >
                     <MoreHorizontal size={18} strokeWidth={1.75} />
                 </button>
-                {showPostActions && typeof document !== "undefined" && createPortal(
-                    <div className="fixed inset-0 z-[11]" onClick={() => setShowPostActions(false)} />,
-                    document.body,
-                )}
                 {showPostActions && (
-                    <div className="feed-post-action-menu" onClick={event => event.stopPropagation()}>
+                    <div ref={postActionsRef} className="feed-post-action-menu" onClick={event => event.stopPropagation()}>
                         <button type="button" onClick={openPostEditor}>
                             <Pencil size={14} strokeWidth={1.75} />
                             <span>编辑动态</span>

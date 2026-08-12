@@ -5,6 +5,8 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import {
     RESOURCE_HUB_DEFAULT_SOURCE,
+    isPreviewImagePath,
+    stripAssetImageMark,
     type ImportDestination,
     type ResourceHubSource,
     type ShareIndex,
@@ -22,6 +24,7 @@ import { createOrGetSession, loadChatSessions, saveChatSessions } from "./chat-s
 import { readThemeProfile, writeThemeProfile } from "./theme-storage";
 import { loadGameDrafts, saveGameDrafts } from "./game-storage";
 import type { GameTemplateDraft } from "./game-types";
+import type { Prompt } from "./settings-types";
 
 const SOURCE_KEY = "ai_phone_resource_hub_source_v1";
 registerKvMigration(SOURCE_KEY);
@@ -157,6 +160,7 @@ function normalizeIndex(raw: unknown): ShareIndex {
             description: typeof item.description === "string" ? item.description : "",
             author: typeof item.author === "string" ? item.author : "",
             avatar: typeof item.avatar === "string" ? item.avatar : "",
+            ownerHash: typeof item.ownerHash === "string" ? item.ownerHash.toLowerCase() : "",
             updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : null,
         });
     }
@@ -169,7 +173,6 @@ function normalizeIndex(raw: unknown): ShareIndex {
     };
 }
 
-const IMAGE_RE = /\.(jpe?g|png|webp|gif)$/i;
 const DESC_NAME_RE = /^(说明\.txt|readme\.(md|txt))$/i;
 // 基建目录（上传服务/索引脚本等），不是资源，不进市场。
 // 索引脚本同样会跳过它们；这里再过滤一层，防御旧索引缓存。
@@ -237,7 +240,8 @@ async function buildIndexFromTree(source: ResourceHubSource): Promise<ShareIndex
                 });
             }
             const entry = entryMap.get(key)!;
-            if (IMAGE_RE.test(base)) entry.images.push(p);
+            // 带 .asset 标记的图片是资源本体（PNG 角色卡等），要进可下载的 files
+            if (isPreviewImagePath(base)) entry.images.push(p);
             else if (!DESC_NAME_RE.test(base)) entry.files.push(p);
         }
     }
@@ -276,7 +280,7 @@ export async function fetchShareIndex(source: ResourceHubSource): Promise<ShareI
 /** 返回给用户看的结果文案——原生壳里写文件是静默的，调用方必须把它显示出来。 */
 export async function downloadResourceHubFile(source: ResourceHubSource, path: string): Promise<string> {
     const buffer = await fetchResourceHubBinary(source, path);
-    const filename = path.split("/").pop() || "resource";
+    const filename = stripAssetImageMark(path.split("/").pop() || "resource");
     const { exportBlob } = await import("./download-utils");
     return await exportBlob(new Blob([buffer]), filename);
 }
@@ -286,7 +290,8 @@ export async function downloadResourceHubFile(source: ResourceHubSource, path: s
 const CHAT_APP_CSS_KEY = "chat-app-custom-css";
 
 function fileBaseName(path: string): string {
-    return (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
+    const name = stripAssetImageMark(path.split("/").pop() || path);
+    return name.replace(/\.[^.]+$/, "");
 }
 
 /** 目的地对文件类型的基本校验；返回错误文案或 null。 */
@@ -310,6 +315,85 @@ export function checkImportFileForDestination(destination: ImportDestination, pa
             return lower.endsWith(".zip") || lower.endsWith(".html") || lower.endsWith(".htm") ? null : "应用需要 zip 安装包或单 HTML 文件";
         case "plugin":
             return lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".txt") ? null : "插件需要 JS 源码文件";
+        case "preset_entry":
+            return isJson ? null : "预设条目需要 JSON 文件";
+        case "theme":
+            // 现在导出的就是 .zip；.ai-theme 是旧版后缀，留作兼容。
+            // 真正的校验在 installThemePackageFile 里按包内 manifest.json 做，
+            // 这里只是个便宜的前置过滤。
+            return lower.endsWith(".zip") || lower.endsWith(".ai-theme") ? null : "主题包需要 zip 文件（旧版 .ai-theme 也可以）";
+    }
+}
+
+/**
+ * 取一条预设条目（供集市的「预设条目」流程用）。
+ * 单独暴露是因为这条路要先让用户选预设和位置，不能一步到底。
+ */
+export async function fetchPresetEntry(source: ResourceHubSource, path: string): Promise<Prompt> {
+    const { ensureSettingsStorageHydrated } = await import("./settings-storage");
+    await ensureSettingsStorageHydrated();
+    const { parseSinglePromptEntry } = await import("./preset-entry-import");
+    const parsed = parseSinglePromptEntry(await fetchResourceHubText(source, path));
+    if (parsed.ok) return parsed.prompt;
+    if (parsed.reason === "multiple") {
+        throw new Error(`这个文件里有 ${parsed.count} 条条目，不是单条。整份预设请改用「预设」目的地导入。`);
+    }
+    throw new Error("解析失败，请确认这是预设条目左滑「导出」生成的 JSON");
+}
+
+/** 把取到的条目插入/覆盖进指定预设，落盘并返回给用户看的说明。 */
+export async function applyPresetEntry(
+    prompt: Prompt,
+    presetId: string,
+    mode: "insert" | "replace",
+    anchorIdentifier: string | null,
+): Promise<string> {
+    const { ensureSettingsStorageHydrated } = await import("./settings-storage");
+    await ensureSettingsStorageHydrated();
+    const { insertPromptAfter, replacePromptEntry } = await import("./preset-entry-import");
+    const presets = loadPresets();
+    const target = presets.find(p => p.id === presetId);
+    if (!target) throw new Error("目标预设不存在，可能已被删除");
+    const next = mode === "replace" && anchorIdentifier
+        ? replacePromptEntry(target, anchorIdentifier, prompt)
+        : insertPromptAfter(target, anchorIdentifier, prompt);
+    savePresets(presets.map(p => p.id === presetId ? next : p));
+    dispatch("settings-presets-updated");
+    const label = prompt.name || prompt.identifier;
+    return mode === "replace"
+        ? `已覆盖预设「${target.name}」里的一条条目为「${label}」`
+        : `条目「${label}」已插入预设「${target.name}」`;
+}
+
+function dispatch(eventName: string): void {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(eventName));
+}
+
+function dispatchWith(eventName: string, detail: unknown): void {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(eventName, { detail }));
+}
+
+/** PNG 字节 → data URL（角色卡的画像就是这张图本身）。 */
+function bytesToPngDataUrl(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    return `data:image/png;base64,${btoa(binary)}`;
+}
+
+/**
+ * 解析器抛的是内部哨兵串（UNSUPPORTED_IMPORT_FORMAT / CHAR_BLOCKED_FIELDS），
+ * 各管理页都会翻译成人话，集市原本直接甩给用户看，会显示成
+ * 「导入失败：UNSUPPORTED_IMPORT_FORMAT」。
+ */
+function translateParseError<T>(run: () => T): T {
+    try {
+        return run();
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === "UNSUPPORTED_IMPORT_FORMAT") throw new Error("不支持该文件的格式，请确认它是本应用导出的");
+        if (message === "CHAR_BLOCKED_FIELDS") throw new Error("不支持包含开场白、场景或示例对话的角色卡");
+        throw err;
     }
 }
 
@@ -323,34 +407,58 @@ export async function importResourceHubFile(
     destination: ImportDestination,
     options?: { contactId?: string },
 ): Promise<string> {
+    // 下面全是"读出来 → 加一条 → 整份写回"。kv 的 kvSet 是无条件覆盖、kvGet 在
+    // 水合前一律返回 null，抢在加载完成前写会把整份旧数据（角色库/主题/草稿/插件）
+    // 抹掉。settings 与 chat 两层自带增量兜底，kv 没有，所以这里统一先等齐。
+    const { hydrateKvDb } = await import("./kv-db");
+    const { hydrateChatStorage } = await import("./chat-storage");
+    const { ensureSettingsStorageHydrated } = await import("./settings-storage");
+    await Promise.all([hydrateKvDb(), hydrateChatStorage(), ensureSettingsStorageHydrated()]);
+
     const lower = path.toLowerCase();
     const displayName = fileBaseName(path);
     switch (destination) {
         case "preset": {
-            const preset = parsePresetFromJson(await fetchResourceHubText(source, path), displayName);
+            const presetText = await fetchResourceHubText(source, path);
+            const preset = translateParseError(() => parsePresetFromJson(presetText, displayName));
             if (!preset) throw new Error("预设解析失败，请确认文件是预设管理页导出的 JSON");
-            savePresets([...loadPresets(), preset]);
+            // 与各管理页一致：新导入的排在最前，别沉到长列表底部
+            savePresets([preset, ...loadPresets()]);
+            dispatch("settings-presets-updated");
             return `预设「${preset.name}」已导入`;
         }
         case "regex": {
-            const regex = parseRegexFromJson(await fetchResourceHubText(source, path), displayName);
+            const regexText = await fetchResourceHubText(source, path);
+            const regex = translateParseError(() => parseRegexFromJson(regexText, displayName));
             if (!regex) throw new Error("正则解析失败，请确认文件是正则管理页导出的 JSON");
-            saveRegexes([...loadRegexes(), regex]);
+            saveRegexes([regex, ...loadRegexes()]);  // saveRegexes 自带事件派发
             return `正则组「${regex.name}」已导入`;
         }
         case "worldbook": {
-            const book = parseWorldBookFromJson(await fetchResourceHubText(source, path));
+            const bookText = await fetchResourceHubText(source, path);
+            const book = translateParseError(() => parseWorldBookFromJson(bookText));
             if (!book) throw new Error("世界书解析失败，请确认文件是世界书管理页导出的 JSON");
-            saveWorldBooks([...loadWorldBooks(), book]);
+            saveWorldBooks([book, ...loadWorldBooks()]);
+            dispatch("settings-worldbooks-updated");
             return `世界书「${book.name}」已导入`;
         }
         case "character": {
-            const data = lower.endsWith(".png")
-                ? parseCharacterFromPng(await fetchResourceHubBinary(source, path))
-                : parseCharacterFromJson(await fetchResourceHubText(source, path));
+            let avatar = "";
+            let data;
+            if (lower.endsWith(".png")) {
+                const buffer = await fetchResourceHubBinary(source, path);
+                data = translateParseError(() => parseCharacterFromPng(buffer));
+                // PNG 角色卡的画就是这张图本身，导出时 avatar 被有意写成 "none"，
+                // 不把图片补回去，导进来的角色就是个空白头像。
+                avatar = bytesToPngDataUrl(buffer);
+            } else {
+                const charText = await fetchResourceHubText(source, path);
+                data = translateParseError(() => parseCharacterFromJson(charText));
+            }
             if (!data) throw new Error("角色卡解析失败");
-            const character = createCharacter(data);
-            saveCharacters([...loadCharacters(), character]);
+            if (!avatar && typeof data.avatar === "string" && data.avatar.trim()) avatar = data.avatar;
+            const character = createCharacter(avatar ? { ...data, avatar } : data);
+            saveCharacters([character, ...loadCharacters()]);
             return `角色「${character.name}」已加入角色库`;
         }
         case "chat_session_css": {
@@ -382,12 +490,42 @@ export async function importResourceHubFile(
             const buffer = await fetchResourceHubBinary(source, path);
             const filename = path.split("/").pop() || "app.zip";
             const file = new File([buffer], filename);
-            const { loadCustomAppPackage, loadSingleHtmlCustomApp, installCustomAppAsync } = await import("./custom-app-storage");
+            const { loadCustomAppPackage, loadSingleHtmlCustomApp, installCustomAppAsync, CUSTOM_APP_PLACE_DESKTOP_EVENT } = await import("./custom-app-storage");
             const { applyCustomAppRegistrationsAsync } = await import("./custom-app-registration");
             const app = lower.endsWith(".zip") ? await loadCustomAppPackage(file) : await loadSingleHtmlCustomApp(file);
-            const installed = await installCustomAppAsync(app);
-            await applyCustomAppRegistrationsAsync(installed);
-            return `应用「${installed.name}」已安装，桌面可找到图标`;
+            // 打来源标记：别人的作品，本机能玩，但不进本地测试、不能再发布到应用广场
+            const tagged = { ...app, resourceHubPath: path };
+            // 重复导入（作者更新了资源）：包每次都会拿到新的随机运行时 id，直接装必然
+            // 撞名报错，而报错文案指向的「换包」入口对集市应用是关着的。这里比照小坊
+            // 的做法原地更新，保住 id 与安装时间，应用数据不丢。
+            const { loadInstalledCustomApps, saveInstalledCustomAppsAsync } = await import("./custom-app-storage");
+            const apps = loadInstalledCustomApps();
+            const existing = apps.find(a =>
+                a.resourceHubPath === path
+                || (a.resourceHubPath && a.name.trim().toLowerCase() === tagged.name.trim().toLowerCase()));
+            let installed;
+            if (existing) {
+                installed = { ...tagged, id: existing.id, installedAt: existing.installedAt };
+                await saveInstalledCustomAppsAsync([installed, ...apps.filter(a => a.id !== existing.id)]);
+            } else {
+                installed = await installCustomAppAsync(tagged);
+            }
+            // 注册（预设/正则等附带声明）失败不阻塞安装：应用已经装上了，
+            // 抛出去会显示成「导入失败」，还会顺带跳过下面的摆图标。
+            let registerWarning = "";
+            try {
+                await applyCustomAppRegistrationsAsync(installed);
+            } catch (err) {
+                registerWarning = `（附带内容注册失败：${err instanceof Error ? err.message : String(err)}）`;
+            }
+            // 请桌面摆图标：应用广场走 onInstallToDesktop 回调，我们够不着它，
+            // 改派同一套事件（小坊装应用也是这么做的）。漏了这步图标不会出现在桌面。
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent(CUSTOM_APP_PLACE_DESKTOP_EVENT, { detail: { appId: installed.id } }));
+            }
+            return existing
+                ? `应用「${installed.name}」已更新（原有数据保留）${registerWarning}`
+                : `应用「${installed.name}」已安装，桌面可找到图标（集市来的作品仅供本机使用，不能再发布）${registerWarning}`;
         }
         case "game": {
             const payload = JSON.parse(await fetchResourceHubText(source, path)) as { type?: string; title?: string; draft?: unknown };
@@ -401,12 +539,14 @@ export async function importResourceHubFile(
                     id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                     title,
                     draft: payload.draft as GameTemplateDraft,
+                    // 别人的作品：本机可试玩，不能发布到共享大厅
+                    importedFrom: path,
                     createdAt: now,
                     updatedAt: now,
                 },
                 ...loadGameDrafts(),
             ]);
-            return `游戏草稿「${title}」已导入草稿箱，可在游戏工作室查看发布`;
+            return `游戏草稿「${title}」已导入草稿箱，可在游戏工作室试玩（集市来的作品不能发布到大厅）`;
         }
         case "theater": {
             const payload = JSON.parse(await fetchResourceHubText(source, path)) as { type?: string; title?: string; draft?: unknown };
@@ -424,20 +564,38 @@ export async function importResourceHubFile(
                 id: `bmdraft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                 title,
                 draft: payload.draft,
+                // 别人的作品：本机可用，不能上架到黑市
+                importedFrom: path,
                 createdAt: now,
                 updatedAt: now,
             });
             kvSet(key, JSON.stringify(drafts.slice(0, 80)));
-            return `剧场草稿「${title}」已导入草稿箱，可在黑市工作室查看上架`;
+            return `剧场草稿「${title}」已导入草稿箱，可在黑市工作室查看（集市来的作品不能上架）`;
         }
+        case "theme": {
+            const buffer = await fetchResourceHubBinary(source, path);
+            const filename = path.split("/").pop() || "theme.zip";
+            const { installThemePackageFile, THEME_PACKAGE_INSTALLED_EVENT } = await import("./theme-package");
+            // installThemePackageFile 自己就把资源/主题档案/组件/布局都落盘了，
+            // 但桌面上那些 React 状态还是旧的，得派事件让 shell 重新落地一次。
+            const result = await installThemePackageFile(new File([buffer], filename));
+            dispatchWith(THEME_PACKAGE_INSTALLED_EVENT, result);
+            return `主题包已应用：${result.summary.assetCount} 个资源，${result.summary.widgetCount} 个桌面组件`;
+        }
+        case "preset_entry":
+            // 这条目的地要先选预设和位置，走 fetchPresetEntry + applyPresetEntry 两步，
+            // 不经过这里。留个明确的兜底，免得以后有人直接调进来静默什么都不做。
+            throw new Error("预设条目需要先选择目标预设与位置");
         case "plugin": {
             const code = await fetchResourceHubText(source, path);
             const { installChatPluginFromCode } = await import("./chat-plugin-loader");
+            // 装插件即执行代码（模块顶层在校验阶段就会跑），与插件管理页同样的告知不能省
             const result = await installChatPluginFromCode(code);
             if (!result.ok) throw new Error(result.error || "插件安装失败");
+            // persistChatPlugin 对新插件直接 enabled: true，装完就已经在跑了
             return result.upgraded
                 ? `插件「${result.name}」已升级（${result.fromVersion} → ${result.toVersion}）`
-                : `插件「${result.name}」已安装，可在聊天设置的插件管理里启用`;
+                : `插件「${result.name}」已安装并启用，可在聊天设置的插件管理里关闭`;
         }
     }
 }

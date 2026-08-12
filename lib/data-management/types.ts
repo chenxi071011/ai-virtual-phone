@@ -6,6 +6,7 @@ export type DataModuleId =
   | "memory"
   | "social"
   | "apps"
+  | "resource_hub"
   | "creative"
   | "cache";
 

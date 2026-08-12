@@ -286,14 +286,17 @@ function buildChatHtmlDocument(html: string, inline = false): string {
                 var t=e.target.closest("[data-action]");
                 if(t){e.preventDefault();window.parent.postMessage({type:"_chat_action",text:t.getAttribute("data-action")},"*")}
             },true);`;
+    // 只量 body，绝不掺 documentElement.scrollHeight：后者至少等于 iframe 视口高，
+    // 而视口高就是父层刚设下去的 iframe 高度——量到的是自己，于是高度只涨不缩，
+    // 内容收起后卡片底下会留一大片空白。body 的高度是内容撑出来的，可涨可缩。
     const resize = inline ? `
             var n=0;
             var send=function(){
                 if(n>=12)return;
                 n++;
                 var b=document.body;
-                var d=document.documentElement;
-                var h=Math.max(b?b.scrollHeight:0,d?d.scrollHeight:0,80);
+                if(!b)return;
+                var h=Math.max(Math.ceil(b.getBoundingClientRect().height),b.scrollHeight||0,80);
                 window.parent.postMessage({type:"_chat_inline_html_resize",h:h},"*");
             };
             window.addEventListener("load",send);

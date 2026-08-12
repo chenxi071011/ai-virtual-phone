@@ -714,6 +714,8 @@ type BmStudioDraftRecord = {
     sourceTemplateId?: string;
     sourceTemplateTitle?: string;
     hasUnpublishedChanges?: boolean;
+    /** 资源集市来源标记：别人的作品，不能上架（与 black-market-app 同字段） */
+    importedFrom?: string;
     createdAt: string;
     updatedAt: string;
 };
@@ -765,6 +767,10 @@ async function fetchMarketOwnershipData(): Promise<MarketOwnershipData> {
 }
 
 async function denyIfOthersMarketApp(app: InstalledCustomApp, action: string): Promise<string | null> {
+    // 资源集市导入的应用不依赖服务端判定，离线也照样拒绝
+    if (app.resourceHubPath) {
+        return `「${app.name}」是从资源集市导入的他人作品，只能在本机使用，${action}仅限作者本人。`;
+    }
     let data: MarketOwnershipData;
     try {
         data = await fetchMarketOwnershipData();
@@ -772,7 +778,7 @@ async function denyIfOthersMarketApp(app: InstalledCustomApp, action: string): P
         // 失败策略与市场 UI 相反（UI 宽容防创作区被离线锁死，这里严格防泄露）：
         // 带市场标记的一律拒绝，宁可等联网确认；仅无标记应用放行——
         // 刚在本机写出的新应用不能因断网而无法继续迭代。
-        if (!app.marketItemId) return null;
+        if (!app.marketItemId) return null;  // 集市导入的已在函数开头拦下，这里只剩纯本地创作
         return `「${app.name}」关联了应用市场条目，当前无法确认你是否为其作者（未登录或网络异常），为保护创作者版权，暂不能${action}。请联网并登录后重试；如果这是你自己发布的应用，届时即可正常操作。`;
     }
     if (classifyInstalledApp(app, data) === "others") {
@@ -963,6 +969,8 @@ const saveGameDraftTool: QaContentTool = {
             publishedTemplateId: existing?.publishedTemplateId,
             // 关联已发布条目的草稿被改动：与 UI 存草稿一致，标记有未发布改动
             hasUnpublishedChanges: existing?.publishedTemplateId ? true : undefined,
+            // 集市来源标记必须原样保留，否则让小坊改一次就把出处洗掉了
+            importedFrom: existing?.importedFrom,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         };
@@ -1046,6 +1054,8 @@ const saveTheaterDraftTool: QaContentTool = {
             sourceTemplateTitle: existing?.sourceTemplateTitle,
             // 关联已发布档案的草稿被改动：与 UI 存草稿一致，标记有未发布改动
             hasUnpublishedChanges: existing?.sourceTemplateId ? true : undefined,
+            // 集市来源标记必须原样保留，否则让小坊改一次就把出处洗掉了
+            importedFrom: existing?.importedFrom,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         };

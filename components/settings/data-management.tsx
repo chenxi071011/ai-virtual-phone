@@ -15,6 +15,7 @@ import {
   Settings2,
   Smartphone,
   Sparkles,
+  Store,
   Trash2,
   Upload,
   UserRound,
@@ -96,6 +97,7 @@ const MODULE_ICONS: Record<DataModuleId, LucideIcon> = {
   memory: Brain,
   social: UsersRound,
   apps: Smartphone,
+  resource_hub: Store,
   creative: Sparkles,
   cache: Archive,
 };
@@ -108,6 +110,7 @@ const MODULE_ACCENTS: Record<DataModuleId, string> = {
   memory: BINDING_ACCENTS.memory,
   social: CONTENT_APP_ACCENTS.moments,
   apps: CONTENT_APP_ACCENTS.calendar,
+  resource_hub: CONTENT_APP_ACCENTS.shopping,
   creative: CONTENT_APP_ACCENTS.story,
   cache: BINDING_ACCENTS.regex,
 };

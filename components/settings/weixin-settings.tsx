@@ -8,8 +8,6 @@ import {
     addExclusiveWeixinBot,
     updateWeixinBot,
     removeWeixinBot,
-    loadKeepAlive,
-    saveKeepAlive,
     type WeixinBotConfig,
 } from "@/lib/weixin-storage";
 import {
@@ -152,7 +150,6 @@ export function WeixinSettings({ onOpenDataManagement }: { onOpenDataManagement?
     const [characters, setCharacters] = useState<Character[]>([]);
     const [statusTick, setStatusTick] = useState(0);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-    const [keepAlive, setKeepAlive] = useState(false);
     const [cloudSyncConfig, setCloudSyncConfig] = useState<WeixinCloudSyncConfig>(loadWeixinCloudSyncConfig);
     const [cloudSyncingId, setCloudSyncingId] = useState<string | null>(null);
     const [cloudSyncNotice, setCloudSyncNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -178,7 +175,6 @@ export function WeixinSettings({ onOpenDataManagement }: { onOpenDataManagement?
     useEffect(() => {
         setBots(loadWeixinBots());
         setCharacters(loadCharacters());
-        setKeepAlive(loadKeepAlive());
         setCloudSyncConfig(loadWeixinCloudSyncConfig());
     }, []);
 
@@ -612,15 +608,6 @@ export function WeixinSettings({ onOpenDataManagement }: { onOpenDataManagement?
                         添加微信 Bot
                     </button>
                 )}
-            </div>
-
-            {/* 保活开关 */}
-            <div className="ui-group-card !flex-row !items-center">
-                <div className="flex-1 flex flex-col gap-1">
-                    <span className="menu-label font-medium">后台保活</span>
-                    <span className="menu-desc !mt-0">切到后台时尽量保持网页运行，不依赖 Bot 是否启用</span>
-                </div>
-                <Toggle checked={keepAlive} onChange={v => { setKeepAlive(v); saveKeepAlive(v); notifyChange(); }} />
             </div>
 
             <div className="ui-group-card !items-stretch">

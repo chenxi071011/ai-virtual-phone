@@ -5,7 +5,10 @@ import type { InstalledCustomApp } from "./custom-app-types";
 // 版权护栏共用，保证两边永不漂移。
 //
 // 归属是"应用 × 当前账号"的关系而非应用属性（换账号登录、条目易主都会改变），
-// 所以不落任何本地标记，每次拿服务端数据现场归类：
+// 所以除资源集市外不落本地标记，每次拿服务端数据现场归类。
+// 例外：从资源集市（GitHub 仓库）导入的应用在市场里没有任何对应条目，无从现场
+// 判定，只能在安装时落一个 resourceHubPath 标记，直接归为 others。
+// 归类结果：
 //   mine       —— 自己的工作副本：纯本地创作，或与自己市场发布关联（含从市场装回自己的 APP）
 //   local-only —— 纯本地创作，市场里没有对应条目
 //   others     —— 别人发布、从市场安装的副本：不进本地测试，小坊拒绝读取/导出/修改
@@ -44,6 +47,8 @@ export function linkedOwnMarketItem(app: InstalledCustomApp, myItems: CustomAppM
 }
 
 export function classifyInstalledApp(app: InstalledCustomApp, market: MarketOwnershipData): InstalledAppOwnership {
+  // 资源集市导入的是别人的作品：本机能玩，但不进本地测试、不能再发布到应用广场
+  if (app.resourceHubPath) return "others";
   const linked = linkedOwnMarketItem(app, market.myItems);
   if (app.marketItemId) {
     // 显式标记：指向自己的条目 → 工作副本；指向他人条目（或已失联）→ others

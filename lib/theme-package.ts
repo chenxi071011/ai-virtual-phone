@@ -427,6 +427,13 @@ export async function inspectThemePackageFile(file: File): Promise<ThemePackageS
   return makeSummary(manifest);
 }
 
+/**
+ * 主题包已装好、请桌面刷新（detail 带 installThemePackageFile 的返回值）。
+ * 资源集市在 lib 里够不着外观页那两个 React 回调，改派这个事件，
+ * 桌面 shell 走与外观页导入完全相同的落地路径。
+ */
+export const THEME_PACKAGE_INSTALLED_EVENT = "ai-phone-theme-package-installed";
+
 export async function installThemePackageFile(file: File): Promise<InstalledThemePackage> {
   const { zip, manifest } = await loadZip(file);
   const records: ThemeAssetRecord[] = [];

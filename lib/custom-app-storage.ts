@@ -755,6 +755,7 @@ function normalizeInstalledApp(raw: unknown): InstalledCustomApp | null {
       installedAt: cleanText(record.installedAt, 80) || new Date().toISOString(),
       updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
       marketItemId: cleanText(record.marketItemId, 160) || undefined,
+      resourceHubPath: cleanText(record.resourceHubPath, 400) || undefined,
       hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
     };
   } catch {

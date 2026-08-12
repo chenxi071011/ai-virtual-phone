@@ -572,7 +572,21 @@
   padding: 20px 12px calc(env(safe-area-inset-bottom, 0px) + 14px);
   z-index: 6;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent 0%, var(--qa-bg-canvas) 55%);
+  background: transparent;
+}
+/* 渐进式模糊（与 .qa-header::before 上下对称）：底部全模糊，向上用 mask 渐变过渡到无模糊，
+   无底色、无硬边界，消息滑到输入栏下方被柔和糊化后自然消隐。
+   比顶栏更轻：模糊更浅、过渡距离更长、mask 曲线更缓，读起来是"淡出"而不是一条糊带 */
+.qa-composer-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -56px 0 0 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  -webkit-mask-image: linear-gradient(0deg, #000 0%, rgba(0, 0, 0, 0.55) 32%, rgba(0, 0, 0, 0.2) 64%, transparent 100%);
+  mask-image: linear-gradient(0deg, #000 0%, rgba(0, 0, 0, 0.55) 32%, rgba(0, 0, 0, 0.2) 64%, transparent 100%);
 }
 /* 两行卡片：上文本框，下工具栏。无描边，柔和阴影 */
 /* 上下文用量：输入栏右上方的小装饰条，满 100% 自动压缩后回落 */

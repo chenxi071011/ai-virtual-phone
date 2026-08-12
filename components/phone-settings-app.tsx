@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, createContext, type CSSProperties, type ReactNode } from "react";
-import { Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Layers, Link2, Loader2, LogOut, MessageSquare, Mic, SlidersHorizontal, UserCircle, Wrench, X } from "lucide-react";
+import { Activity, Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Layers, Link2, Loader2, LogOut, MessageSquare, Mic, SlidersHorizontal, UserCircle, Wrench, X } from "lucide-react";
 import { ConfirmDialog } from "./ui/modal";
 import { useAccount } from "@/lib/account-context";
 import { changeAccountPassword } from "@/lib/account-client";
@@ -24,6 +24,7 @@ import { PageShell } from "./ui/page-shell";
 import { CardGrid, FeaturedCard, type CardItem, type FeaturedCardItem } from "./ui/card-grid";
 import { Toggle } from "./ui/form";
 import { loadChatAppSettings, saveChatAppSettings } from "@/lib/chat-storage";
+import { loadKeepAlive, saveKeepAlive } from "@/lib/weixin-storage";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 
 export const SettingsContext = createContext<{
@@ -72,6 +73,10 @@ const realtimeIconStyle = {
     "--icon-color": CONTENT_APP_ACCENTS.calendar,
 } as CSSProperties;
 
+const keepAliveIconStyle = {
+    "--icon-color": CONTENT_APP_ACCENTS.chat,
+} as CSSProperties;
+
 const promptViewerIconStyle = {
     "--icon-color": BINDING_ACCENTS.preset,
 } as CSSProperties;
@@ -100,6 +105,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
     const [timeAware, setTimeAware] = useState(true);
     const [promptViewerEnabled, setPromptViewerEnabled] = useState(false);
     const [quickActionEnabled, setQuickActionEnabled] = useState(false);
+    const [keepAlive, setKeepAlive] = useState(false);
     const pageBodyRef = useRef<HTMLDivElement | null>(null);
 
     // ── 账号：显示当前登录 / 修改密码 / 退出登录 ──
@@ -219,6 +225,14 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         onNotice(next ? "已开启快捷操作" : "已关闭快捷操作");
     }, [onNotice]);
 
+    const handleKeepAliveChange = useCallback((next: boolean) => {
+        setKeepAlive(next);
+        saveKeepAlive(next);
+        // use-weixin-bridge 监听这个事件来起停保活（与微信 Bot 的启用状态无关）
+        window.dispatchEvent(new CustomEvent("weixin-config-changed"));
+        onNotice(next ? "已开启后台保活" : "已关闭后台保活");
+    }, [onNotice]);
+
     const imageGenerationItem = SETTINGS_MENU.find(i => i.id === "imageGeneration")!;
     const imageGenerationFeaturedItem: FeaturedCardItem = {
         id: imageGenerationItem.id,
@@ -292,6 +306,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         setTimeAware(settings.timeAware !== false);
         setPromptViewerEnabled(settings.promptViewerEnabled === true);
         setQuickActionEnabled(settings.quickActionEnabled === true);
+        setKeepAlive(loadKeepAlive());
     }, []);
 
     // Listen for mascot navigation mode (e.g. jump to worldbook/regex tab)
@@ -357,7 +372,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                             items={SETTINGS_MENU.filter(item => ["weixin", "toolbox"].includes(item.id)).map(makeCardItem)}
                         />
                         <div className="settings-realtime-section">
-                            <h3 className="settings-menu-section-title">Realtime</h3>
+                            <h3 className="settings-menu-section-title">Runtime</h3>
                             <div className="app-card card-featured settings-toggle-card">
                                 <span className="card-icon" style={realtimeIconStyle}>
                                     <Clock size={22} strokeWidth={1.75} />
@@ -367,6 +382,16 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                     <div className="card-featured-desc">控制全局历史事件流中是否注入时间戳</div>
                                 </div>
                                 <Toggle checked={timeAware} onChange={handleTimeAwareChange} className="settings-toggle-control" />
+                            </div>
+                            <div className="app-card card-featured settings-toggle-card">
+                                <span className="card-icon" style={keepAliveIconStyle}>
+                                    <Activity size={22} strokeWidth={1.75} />
+                                </span>
+                                <div className="card-featured-body">
+                                    <div className="card-featured-label">后台保活</div>
+                                    <div className="card-featured-desc">切到后台时尽量保持网页运行，主动消息与轮询不中断</div>
+                                </div>
+                                <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
                             </div>
                         </div>
                         {isAdmin ? (

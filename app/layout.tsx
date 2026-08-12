@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
 import { ChatPluginBootstrap } from "@/components/chat-plugin-bootstrap";
+import { ChatReasoningVisibilityController } from "@/components/chat-reasoning-visibility-controller";
 import { CSSImportEnhancer } from "@/components/css-import-enhancer";
 import { PWARegistrar } from "@/components/pwa-registrar";
 import "../styles/fonts.css";
@@ -63,6 +64,7 @@ export default function RootLayout({
         <PWARegistrar />
         <CSSImportEnhancer />
         <ChatPluginBootstrap />
+        <ChatReasoningVisibilityController />
         {children}
       </body>
     </html>

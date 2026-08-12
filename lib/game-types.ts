@@ -127,6 +127,11 @@ export type GameHallDraft = {
   publishedTemplateId?: string;
   /** 关联发布条目后,本机又存过草稿但还没提交更新时为 true;更新发布成功后清除 */
   hasUnpublishedChanges?: boolean;
+  /**
+   * 来源标记:从资源集市导入时记录集市里的文件路径。别人的作品,本机可试玩,
+   * 但不能发布到共享大厅。存草稿、导出再导入都会带着它,防止洗掉来源。
+   */
+  importedFrom?: string;
   createdAt: string;
   updatedAt: string;
 };

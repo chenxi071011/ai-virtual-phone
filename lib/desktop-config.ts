@@ -56,7 +56,7 @@ export const PAGE_2_DEFAULT: IconId[] = [
   "toydevice"
 ];
 
-// 第三页默认图标（居中放置，位置见 createDefaultDesktopIconLayout）
+// 第三页默认图标：右半边 2×2 排布（左半边留给日历组件），位置见 createDefaultDesktopIconLayout
 export const PAGE_3_DEFAULT: IconId[] = ["worldbuilder", "qa", "resource_hub"];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];

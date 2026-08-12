@@ -6,8 +6,9 @@
 //     由机器人 token 代开 PR。
 
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { ensureIdentityKey } from "./resource-hub-identity";
 import { RESOURCE_ROOT } from "./resource-hub-client";
-import type { ResourceHubSource } from "./resource-hub-types";
+import { markAssetImageName, type ResourceHubSource } from "./resource-hub-types";
 
 const UPLOAD_CFG_KEY = "ai_phone_resource_hub_upload_cfg_v1";
 const MY_UPLOADS_KEY = "ai_phone_resource_hub_my_uploads_v1";
@@ -107,10 +108,17 @@ export function removeMyUploadRecord(path: string): void {
     saveMyUploads(loadMyUploads().filter(r => r.path !== path));
 }
 
-function generateOwnerKey(): string {
-    const bytes = new Uint8Array(24);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+// 发布用的钥匙 = 本机「摊主钥匙」。以前是一个资源一把随机钥匙，换设备就全丢；
+// 现在全部资源共用一把，导出这一行短码就能在新设备上认领回所有发布。
+function generateOwnerKey(): Promise<string> {
+    return ensureIdentityKey();
+}
+
+/** 导入钥匙时把早期的单资源凭证并进本机记录（同路径以已有的为准） */
+export function mergeMyUploads(records: MyUploadRecord[]): void {
+    const existing = loadMyUploads();
+    const known = new Set(existing.map(r => r.path));
+    saveMyUploads([...existing, ...records.filter(r => !known.has(r.path))]);
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -118,7 +126,12 @@ async function sha256Hex(text: string): Promise<string> {
     return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function fileToUploadEntry(file: File): Promise<UploadPayloadFile> {
+/**
+ * 选中的文件 → 上传条目。
+ * asset=true 表示投稿人是从「选择资源文件」进来的：如果它是图片，加上 .asset 标记，
+ * 索引才知道这张图是资源本体（PNG 角色卡、表情包），而不是配图。
+ */
+export async function fileToUploadEntry(file: File, options?: { asset?: boolean }): Promise<UploadPayloadFile> {
     const buffer = await file.arrayBuffer();
     let binary = "";
     const bytes = new Uint8Array(buffer);
@@ -126,13 +139,14 @@ export async function fileToUploadEntry(file: File): Promise<UploadPayloadFile> 
     for (let i = 0; i < bytes.length; i += chunk) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     }
-    return { name: file.name, contentBase64: btoa(binary) };
+    const name = options?.asset ? markAssetImageName(file.name) : file.name;
+    return { name, contentBase64: btoa(binary) };
 }
 
 // ── 方案 B：上传服务 ──
 
 export async function uploadViaService(endpoint: string, payload: UploadPayload): Promise<UploadResult> {
-    const ownerKey = generateOwnerKey();
+    const ownerKey = await generateOwnerKey();
     const ownerKeyHash = await sha256Hex(ownerKey);
     const res = await fetch(endpoint, {
         method: "POST",
@@ -221,7 +235,7 @@ export async function uploadViaToken(token: string, source: ResourceHubSource, p
     const { owner, repo, branch } = source;
     const dirName = safeSegment(payload.name);
     const dir = `${RESOURCE_ROOT}/${payload.folder}/${dirName}`;
-    const ownerKey = generateOwnerKey();
+    const ownerKey = await generateOwnerKey();
     const toWrite: UploadPayloadFile[] = [...payload.files];
     if (payload.description.trim()) {
         toWrite.push({

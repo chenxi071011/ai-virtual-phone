@@ -562,6 +562,7 @@ export function loadGameDrafts(): GameHallDraft[] {
         draft,
         publishedTemplateId: cleanText(record.publishedTemplateId, 160) || undefined,
         hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
+        importedFrom: cleanText(record.importedFrom, 400) || undefined,
         createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
         updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
       } satisfies GameHallDraft;

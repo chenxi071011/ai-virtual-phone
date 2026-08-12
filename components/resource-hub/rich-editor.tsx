@@ -33,6 +33,8 @@ export type RichEditorHandle = {
     setMarkup: (markup: string) => void;
     /** 对选中文字套用标记；没选中返回 false */
     applyTag: (tag: string) => boolean;
+    /** 清掉选中文字的颜色/字号/加粗，回到默认；没选中返回 false */
+    clearFormat: () => boolean;
     /** 在光标处插入贴纸 */
     insertSticker: (name: string) => void;
     focus: () => void;
@@ -140,11 +142,135 @@ function normalizeSizes(root: HTMLElement): void {
     }
 }
 
+/** DOM 位置 → 纯文本偏移（贴纸 <img> 不计长度，与 clearMarkupRange 口径一致） */
+function textOffsetOf(root: HTMLElement, container: Node, offset: number): number {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let total = 0;
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+        if (node === container) return total + offset;
+        total += (node.nodeValue ?? "").length;
+    }
+    // 选区端点落在元素上（比如贴纸前后）：数它前面的文本
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(container, offset);
+    return range.toString().length;
+}
+
+/** 纯文本偏移 → 选中这一段 */
+function selectTextRange(root: HTMLElement, from: number, to: number): void {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let startNode: Node | null = null, startOffset = 0, endNode: Node | null = null, endOffset = 0;
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+        const len = (node.nodeValue ?? "").length;
+        if (!startNode && seen + len >= from) { startNode = node; startOffset = from - seen; }
+        if (!endNode && seen + len >= to) { endNode = node; endOffset = to - seen; }
+        seen += len;
+    }
+    if (!startNode || !endNode) return;
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    const selection = typeof window === "undefined" ? null : window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+}
+
 function selectionInside(root: HTMLElement): Range | null {
     const selection = typeof window === "undefined" ? null : window.getSelection();
     if (!selection || selection.rangeCount === 0) return null;
     const range = selection.getRangeAt(0);
     return root.contains(range.commonAncestorContainer) ? range : null;
+}
+
+/** 一个"字符单位"：普通字符，或一枚贴纸（贴纸是原子，不可再拆） */
+type MarkupUnit = { text: string; tags: string[] };
+
+/** 标记串 → 逐单位展开（每个单位记着它身上盖着哪些标记） */
+function explodeMarkup(markup: string): MarkupUnit[] {
+    const units: MarkupUnit[] = [];
+    const stack: string[] = [];
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    TOKEN_RE.lastIndex = 0;
+    const pushText = (text: string) => {
+        for (const ch of text) units.push({ text: ch, tags: [...stack] });
+    };
+    while ((match = TOKEN_RE.exec(markup)) !== null) {
+        const [raw, slash, tag] = match;
+        pushText(markup.slice(cursor, match.index));
+        cursor = match.index + raw.length;
+        if (STICKERS[tag] && !slash) {
+            units.push({ text: raw, tags: [...stack] });   // 贴纸整体算一个单位
+        } else if (slash) {
+            const at = stack.lastIndexOf(tag);
+            if (at !== -1) stack.splice(at, 1);
+        } else if (openTagHtml(tag)) {
+            stack.push(tag);
+        } else {
+            pushText(raw);   // 不认识的标记按普通文字处理，与渲染侧一致
+        }
+    }
+    pushText(markup.slice(cursor));
+    return units;
+}
+
+/** 逐单位 → 标记串（相邻同标记的合并成一段） */
+function assembleMarkup(units: MarkupUnit[]): string {
+    let out = "";
+    let open: string[] = [];
+    for (const unit of units) {
+        // 先关掉不再需要的（从最内层往外关）
+        let keep = 0;
+        while (keep < open.length && keep < unit.tags.length && open[keep] === unit.tags[keep]) keep++;
+        for (let i = open.length - 1; i >= keep; i--) out += `[/${open[i]}]`;
+        for (let i = keep; i < unit.tags.length; i++) out += `[${unit.tags[i]}]`;
+        open = [...unit.tags];
+        out += unit.text;
+    }
+    for (let i = open.length - 1; i >= 0; i--) out += `[/${open[i]}]`;
+    return out;
+}
+
+/** 单位序列里，一枚贴纸只占 1 个"字符位"——与 DOM 里的文本偏移对不上，所以单独算 */
+function unitTextLength(unit: MarkupUnit): number {
+    return STICKERS[unit.text.replace(/[[\]]/g, "")] ? 0 : unit.text.length;
+}
+
+/**
+ * 把标记串里 [from, to) 这段纯文本上的格式（颜色/字号/加粗）清掉，两侧不动。
+ * from/to 是"纯文本偏移"，贴纸不计入长度（与 DOM 里的文本节点偏移口径一致）。
+ *
+ * 为什么不在 DOM 上做：
+ *  · document.execCommand("removeFormat") 实测（Chromium）在被清的那段含内联贴纸
+ *    <img> 时会清错位置——选中"甲"却把后面的"乙"清了；各浏览器实现本就不一致，
+ *    iOS Safari 只会更不可控。
+ *  · 自己用 Range 抽取再放回也不行：抽完插入点仍然留在原来的颜色 span 内部，
+ *    放回去等于没清，要正确就得手写"在选区边界劈开各层祖先"，同样容易踩浏览器差异。
+ *  · 也不能靠"再套一个黑色/正常字号的标记"还原：那只是在外层 [红] 里再套一层，
+ *    序列化时内层认不出被丢掉，文字仍在 [红] 里。
+ * 在标记串上做，结果只由这几十行代码决定，浏览器怎么想都一样。
+ */
+export function clearMarkupRange(markup: string, from: number, to: number): string {
+    if (to <= from) return markup;
+    const units = explodeMarkup(markup);
+    let offset = 0;
+    for (const unit of units) {
+        const len = unitTextLength(unit);
+        // 贴纸不占文本长度，判定要严格"夹在选区内部"：端点上的贴纸（比如选中
+        // 贴纸右边那个字）不该被牵连——字号标记是会改变贴纸大小的，清错看得见。
+        // 代价是"只选中一枚贴纸"清不掉它的格式：那种选区算出来 from === to，
+        // 上游会直接判定为空选区。贴纸本来也只有字号看得出差别，可以接受。
+        const inside = len === 0
+            ? offset > from && offset < to
+            : offset >= from && offset < to;
+        if (inside) unit.tags = [];
+        offset += len;
+    }
+    return assembleMarkup(units);
 }
 
 export const RichEditor = forwardRef<RichEditorHandle, {
@@ -194,6 +320,30 @@ export const RichEditor = forwardRef<RichEditorHandle, {
             } else {
                 return false;
             }
+            emit();
+            return true;
+        },
+        // 恢复默认没法靠"再套一个标记"实现：给选区套黑色或正常字号只会在原来的
+        // 颜色 span 里再套一层，序列化时内层认不出标记被丢掉，文字仍留在外层
+        // [红] 里。
+        //
+        // 也不能用 document.execCommand("removeFormat")：实测（Chromium）当被清的
+        // 那段里含有内联贴纸 <img> 时，它会清错位置——选中"甲"却把后面的"乙"清了。
+        // execCommand 的实现本来各家就不一致，iOS Safari 只会更不可控。
+        //
+        // 所以自己做：把选区抽出来，递归剥掉格式元素（保留文字、贴纸、换行），
+        // 再放回原处。Range 抽取时会自动把跨边界的 span 切开，正是我们要的。
+        clearFormat: () => {
+            const root = rootRef.current;
+            if (!root) return false;
+            const range = selectionInside(root);
+            if (!range || range.collapsed) return false;
+            const from = textOffsetOf(root, range.startContainer, range.startOffset);
+            const to = textOffsetOf(root, range.endContainer, range.endOffset);
+            if (to <= from) return false;
+            root.innerHTML = markupToHtml(clearMarkupRange(htmlToMarkup(root), from, to));
+            root.focus();
+            selectTextRange(root, from, to);   // 选区留在原处，方便接着改
             emit();
             return true;
         },
