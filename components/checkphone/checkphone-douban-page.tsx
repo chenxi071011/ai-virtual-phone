@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import {
   BookOpen,
@@ -195,7 +196,7 @@ export function CheckPhoneDoubanPage({ character, onBack }: CheckPhoneDoubanPage
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneDoubanPayload> = {
         id: `${character.id}:douban`,
         characterId: character.id,

@@ -1,4 +1,5 @@
 import { reindexCoCreateChapters } from "./cocreate-storage";
+import { appNowISO } from "./app-clock";
 import type { LlmToolCall, LlmToolDefinition } from "./llm-provider-adapter";
 import type {
   CoCreateCastMember,
@@ -175,7 +176,7 @@ export function coCreateNativeToolCallToTextCall(call: LlmToolCall): CoCreateToo
 // ─────────────────────────────────────────────────────────────────────────────
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return appNowISO();
 }
 
 function createId(prefix: string): string {

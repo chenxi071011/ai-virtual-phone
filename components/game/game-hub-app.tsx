@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
@@ -652,7 +653,7 @@ function createTemplateFromDraft(
   if (!gameHtml) throw new Error("游戏 HTML 不能为空。");
   const tags = parseAllowedGameTags(draft.tagsText);
   if (tags.length === 0) throw new Error("请至少选择一个游戏标签。");
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     id: existing?.id || `game_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     title,
@@ -981,7 +982,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
       showNotice("info", "已经有同名收藏夹了");
       return;
     }
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const colors = GAME_COLLECTION_COLORS[state.collectionFolders.length % GAME_COLLECTION_COLORS.length];
     const folder: GameCollectionFolder = {
       id: `collection_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1043,7 +1044,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
         .map(folder => ({
           ...folder,
           gameIds: folder.gameIds.filter(id => !gameIdsToRemove.has(id)),
-          updatedAt: folder.gameIds.some(id => gameIdsToRemove.has(id)) ? new Date().toISOString() : folder.updatedAt,
+          updatedAt: folder.gameIds.some(id => gameIdsToRemove.has(id)) ? appNowISO() : folder.updatedAt,
         })),
       saves: latest.saves.filter(item => !removedLocalIds.has(item.localGameId)),
       gameEvents: latest.gameEvents.filter(item => !removedLocalIds.has(item.localGameId)),
@@ -1156,7 +1157,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
         return {
           ...folder,
           gameIds: [fullTemplate.id, ...folder.gameIds],
-          updatedAt: new Date().toISOString(),
+          updatedAt: appNowISO(),
         };
       });
       setState(saveGameCollectionFolders(nextFolders));
@@ -1294,7 +1295,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
   }
 
   function saveDraft(): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const id = editingDraftId || createDraftId();
     const title = draft.title.trim() || "未命名游戏";
     const tags = parseAllowedGameTags(draft.tagsText);
@@ -1556,7 +1557,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
 
   function localTestDraft(): void {
     try {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const template = { ...createTemplateFromDraft(draft, state, editingTemplate), source: "local" as const, updatedAt: now };
       // 稳定 key：优先用草稿 id；若是未保存的新草稿，先存草稿再测，保证重复测试幂等
       let draftId = editingDraftId;
@@ -1611,7 +1612,7 @@ export function GameHubApp({ onClose, autoOpenLocalId }: { onClose: () => void; 
       setCommunityGames(current => mergeTemplate(current, published));
       // 发布后保留草稿并写入关联：草稿标签变「已发布」，下次发布即同步更新，不产生新条目
       if (editingDraftId) {
-        const now = new Date().toISOString();
+        const now = appNowISO();
         setDrafts(current => saveGameDrafts(current.map(item =>
           item.id === editingDraftId
             ? { ...item, title: draft.title.trim() || item.title, draft, publishedTemplateId: published.id, hasUnpublishedChanges: undefined, updatedAt: now }

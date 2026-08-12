@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import {
   Bell,
   ChevronLeft,
@@ -436,7 +437,7 @@ export function CheckPhoneWeiboPage({
         snapshot?.updatedAt,
       );
       if (payload) {
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const nextSnapshot: CheckPhoneSnapshot<CheckPhoneWeiboPayload> = {
           id: `${character.id}:weibo`,
           characterId: character.id,

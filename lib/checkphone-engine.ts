@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNow, appNowISO } from "./app-clock";
 import { normalizeBilingualTextInput, splitBilingualText } from "./bilingual-text";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
 import { getChatMessagePreview, loadChatMessages, loadChatSessions, type ChatMessage, type ChatSession } from "./chat-storage";
@@ -144,7 +145,7 @@ async function buildCheckPhoneManifestMessages(
     userIdentity,
     appId: "checkphone",
     appTags: getCheckPhonePromptTags("manifest"),
-    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(new Date())),
+    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(appNow())),
     coreMemories: coreMemories ? formatCoreMemories(coreMemories) : "",
     longTermMemories: memories ? formatLongTermMemories(memories) : "",
     worldBookActivationContext: wbActivationContext,
@@ -346,7 +347,7 @@ function normalizeManifest(characterId: string, payload: unknown): CheckPhoneMan
   const normalizedTop = dedupedTop.slice(0, CHECKPHONE_TOP_APP_COUNT);
   if (normalizedTop.length !== CHECKPHONE_TOP_APP_COUNT) return null;
 
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     characterId,
     dockAppIds: [...CHECKPHONE_DOCK_APP_IDS],
@@ -1201,7 +1202,7 @@ async function buildCheckPhoneAppMessages(
     userIdentity,
     appId: "checkphone",
     appTags: getCheckPhonePromptTags(appId),
-    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(new Date())),
+    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(appNow())),
     coreMemories: coreMemories ? formatCoreMemories(coreMemories) : "",
     longTermMemories: memories ? formatLongTermMemories(memories) : "",
     worldBookActivationContext: wbActivationContext,
@@ -4600,7 +4601,7 @@ function parseBrowserBlockPayload(text: string): PhoneBlockParseResult {
       id: `history${order}`,
       title: fields["标题"] || "",
       urlLabel: fields["网址"] || "",
-      createdAt: fields["时间"] || new Date().toISOString(),
+      createdAt: fields["时间"] || appNowISO(),
       content: fields["内容"] || "",
       context: fields["情境"] || "",
       innerThought: fields["内心"] || "",

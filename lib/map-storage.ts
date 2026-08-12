@@ -2,6 +2,7 @@
 // RPG Map Mode — IndexedDB storage
 
 import Dexie from "dexie";
+import { appNowISO } from "./app-clock";
 import type { MapWorld, GameSave, CharacterAgent, StoryDirector, CharStats } from "./map-types";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { kvGet, kvSet, kvRemove, registerKvMigration, registerDynamicPrefix } from "./kv-db";
@@ -128,7 +129,7 @@ export function deleteSave(id: string): void {
 // ── New Game State ──
 
 export function createInitialSave(worldId: string, startNodeId: string): GameSave {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     id: `save_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     worldId,

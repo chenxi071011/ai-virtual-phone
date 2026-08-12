@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { BookOpenText, ChevronLeft, Highlighter, LibraryBig, NotebookText, RefreshCw, Trash2 } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -137,7 +138,7 @@ export function CheckPhoneReadingPage({ character, onBack }: CheckPhoneReadingPa
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneReadingPayload> = {
         id: `${character.id}:reading`,
         characterId: character.id,

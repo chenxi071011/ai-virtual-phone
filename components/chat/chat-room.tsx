@@ -1,6 +1,7 @@
 "use client";
 
 import { useBackHandler } from "@/lib/back-handler";
+import { appNowISO, appNowMs } from "@/lib/app-clock";
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages } from "@/lib/chat-storage";
 import type { StateValue } from "@/lib/chat-storage";
@@ -2043,7 +2044,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             ...(refundReason ? refundOutgoingMoneyMessage(targetMsg, refundReason) : targetMsg.mediaData),
             status: newStatus,
             ...(targetMediaType === "payment_request" ? {
-                paymentResolvedAt: new Date().toISOString(),
+                paymentResolvedAt: appNowISO(),
                 paymentPayerId: session.contactId,
                 paymentPayerName: charN,
             } : {}),
@@ -2198,7 +2199,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
         const updatedData = {
             ...targetMsg.mediaData,
             status: isAccept ? "paid" as const : "declined" as const,
-            paymentResolvedAt: new Date().toISOString(),
+            paymentResolvedAt: appNowISO(),
             paymentPayerName: claimerName,
         };
         if (targetMsg.role === "user") {
@@ -2529,7 +2530,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     coverUrl: detail?.coverUrl,
                     lyrics,
                     liked: false,
-                    addedAt: new Date().toISOString(),
+                    addedAt: appNowISO(),
                 });
             }
             const okMsg = pushChatMessage({ sessionId: session.id, role: "system", content: `${charName}播放了「${playedTitle}」`, mediaType: "music_notify" });
@@ -2674,7 +2675,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                     coverUrl: detail?.coverUrl,
                     lyrics,
                     liked: false,
-                    addedAt: new Date().toISOString(),
+                    addedAt: appNowISO(),
                 });
             }
             clearChatToast();
@@ -2957,7 +2958,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             role,
             content,
             status: "sent",
-            createdAt: new Date().toISOString(),
+            createdAt: appNowISO(),
             ...(mediaType ? { mediaType } : {}),
             ...(mediaData ? { mediaData } : {}),
         };
@@ -3402,7 +3403,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
             giftPreviewIcon: gift.previewIcon,
             giftTone: gift.tone,
             giftDeliveredAt: gift.deliveredAt,
-            giftSentAt: new Date().toISOString(),
+            giftSentAt: appNowISO(),
             senderName: userIdentity?.name || "你",
             ...(recipient ? { recipientId: recipient.id, recipientName: recipient.name } : {}),
         });
@@ -3838,7 +3839,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                 role: "user",
                 content: pendingUserContent.trim(),
                 status: "sent",
-                createdAt: new Date().toISOString(),
+                createdAt: appNowISO(),
             });
         }
         return history;
@@ -5628,7 +5629,7 @@ export function ChatRoom({ session, onBack }: ChatRoomProps) {
                                             ? "chat-system-instruction-card relative cursor-pointer"
                                             : `chat-sys-msg break-all max-w-[90%] relative cursor-pointer${
                                                 // 骰子旁白：等骰子落定再淡入，避免剧透点数
-                                                msg.content.startsWith("🎲 掷出了") && Date.now() - new Date(msg.createdAt).getTime() < 6000
+                                                msg.content.startsWith("🎲 掷出了") && appNowMs() - new Date(msg.createdAt).getTime() < 6000
                                                     ? " dice-aside-reveal"
                                                     : ""
                                             }`}

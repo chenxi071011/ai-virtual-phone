@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type UIEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import {
   ArrowBigDown,
@@ -270,7 +271,7 @@ export function CheckPhoneRedditPage({ character, onBack }: CheckPhoneRedditPage
       debugNormalizeError: nextDebugNormalizeError,
     } = await generateCheckPhoneReddit(character.id, previousPayload, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneRedditPayload> = {
         id: `${character.id}:reddit`,
         characterId: character.id,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, RefreshCw, Trash2 } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -80,7 +81,7 @@ export function CheckPhonePhotosPage({ character, onBack }: CheckPhonePhotosPage
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhonePhotosPayload> = {
         id: `${character.id}:photos`,
         characterId: character.id,

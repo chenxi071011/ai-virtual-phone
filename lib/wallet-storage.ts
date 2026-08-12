@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import type { WalletAccountType, WalletCard, WalletPaymentInput, WalletPaymentResult, WalletState, WalletTransaction } from "./wallet-types";
 
 const WALLET_STATE_KEY = "ai_phone_wallet_state_v1";
@@ -39,7 +40,7 @@ function getAccountType(accountId: string): WalletAccountType {
   return isBalanceAccountId(accountId) ? "balance" : "card";
 }
 
-function createDefaultWalletCard(now = new Date().toISOString()): WalletCard {
+function createDefaultWalletCard(now = appNowISO()): WalletCard {
   return {
     id: DEFAULT_WALLET_BANK_CARD_ID,
     title: "储蓄卡",
@@ -64,7 +65,7 @@ function normalizeCard(value: unknown): WalletCard | null {
   const normalizedTitle = title === "备用余额卡" ? "储蓄卡" : title;
   const rawStyle = cleanText(record.cardStyle, 40);
   const cardStyle = rawStyle === "graphite" || rawStyle === "silver" ? rawStyle : "obsidian";
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     id,
     title: normalizedTitle,
@@ -101,7 +102,7 @@ function normalizeTransaction(value: unknown): WalletTransaction | null {
     amount: normalizeSignedMoney(record.amount),
     kind,
     category: cleanText(record.category, 80) || "余额",
-    createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt, 80) || appNowISO(),
     detail: cleanText(record.detail, 400),
     balanceAfter: normalizeMoney(record.balanceAfter),
     relatedOrderId: cleanText(record.relatedOrderId, 120) || undefined,
@@ -109,7 +110,7 @@ function normalizeTransaction(value: unknown): WalletTransaction | null {
 }
 
 function normalizeWalletState(state: WalletState): WalletState {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const cards = state.cards.length > 0 ? state.cards : [createDefaultWalletCard(now)];
   const defaultCardId = cards.some(card => card.id === state.defaultCardId) ? state.defaultCardId : cards[0].id;
   return {
@@ -126,7 +127,7 @@ function normalizeWalletState(state: WalletState): WalletState {
 }
 
 export function createDefaultWalletState(): WalletState {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const card = createDefaultWalletCard(now);
   return {
     balance: DEFAULT_WALLET_BALANCE,
@@ -149,7 +150,7 @@ export function createDefaultWalletState(): WalletState {
 }
 
 function migrateLegacyParsedState(parsed: Record<string, unknown>): WalletState {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const rawCards = Array.isArray(parsed.cards)
     ? parsed.cards.map(normalizeCard).filter((card): card is WalletCard => Boolean(card))
     : [];
@@ -194,7 +195,7 @@ export function loadWalletState(): WalletState {
 }
 
 export function saveWalletState(state: WalletState): WalletState {
-  const next = normalizeWalletState({ ...state, updatedAt: new Date().toISOString() });
+  const next = normalizeWalletState({ ...state, updatedAt: appNowISO() });
   kvSet(WALLET_STATE_KEY, JSON.stringify(next));
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(WALLET_UPDATED_EVENT, { detail: next }));
@@ -220,7 +221,7 @@ export function getWalletTotalBalance(state: WalletState): number {
 
 export function createWalletCard(input?: Partial<Pick<WalletCard, "title" | "bankLabel" | "maskedNumber" | "cardStyle" | "balance" | "note" | "accentLabel">>): WalletState {
   const current = loadWalletState();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const card: WalletCard = {
     id: generateWalletId("wallet_card"),
     title: cleanText(input?.title, 80) || "储蓄卡",
@@ -283,7 +284,7 @@ function createTransaction(input: {
     amount: normalizeSignedMoney(input.amount),
     kind: input.kind,
     category: cleanText(input.category, 80),
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
     detail: cleanText(input.detail, 400),
     balanceAfter: normalizeMoney(input.balanceAfter),
     relatedOrderId: cleanText(input.relatedOrderId, 120) || undefined,
@@ -299,7 +300,7 @@ export function transferCardToWalletBalance(cardId: string, amount: number): { o
   if (normalizeMoney(card.balance) < transferAmount) {
     return { ok: false, state: current, error: "该银行卡余额不足，无法转入余额。" };
   }
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const balanceAfter = normalizeMoney(current.balance + transferAmount);
   const cardBalanceAfter = normalizeMoney(card.balance - transferAmount);
   const balanceTransaction = createTransaction({
@@ -340,7 +341,7 @@ export function transferWalletBalanceToCard(cardId: string, amount: number): { o
   if (normalizeMoney(current.balance) < transferAmount) {
     return { ok: false, state: current, error: "余额不足，无法提现。" };
   }
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const balanceAfter = normalizeMoney(current.balance - transferAmount);
   const cardBalanceAfter = normalizeMoney(card.balance + transferAmount);
   const balanceTransaction = createTransaction({
@@ -387,7 +388,7 @@ export function adjustWalletCardAccount(
   if (direction === "out" && normalizeMoney(card.balance) < transferAmount) {
     return { ok: false, state: current, error: "该银行卡余额不足，无法转出账户。" };
   }
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const transaction = createTransaction({
     accountId: card.id,
     accountType: "card",
@@ -434,7 +435,7 @@ export function payWithWalletAccount(input: WalletPaymentInput): WalletPaymentRe
   const paymentAmount = normalizeMoney(input.amount);
   if (paymentAmount <= 0) return { ok: false, state: current, error: "付款金额无效。" };
   const accountId = input.accountId || input.cardId || WALLET_BALANCE_ACCOUNT_ID;
-  const now = new Date().toISOString();
+  const now = appNowISO();
 
   if (isBalanceAccountId(accountId)) {
     if (normalizeMoney(current.balance) < paymentAmount) {

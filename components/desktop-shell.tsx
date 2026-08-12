@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, memo, useCallback, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
+import { appNow } from "@/lib/app-clock";
 import { Capacitor } from "@capacitor/core";
 
 import { updateStatusBarTone } from "@/lib/bg-tone";
@@ -528,7 +529,7 @@ function StatusClock() {
   useEffect(() => {
     const update = () => {
       setLabel(
-        new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+        appNow().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
       );
     };
     update();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import {
   BookOpen,
   CheckCircle2,
@@ -893,7 +894,7 @@ export function AppMarketApp({ onClose, onOpenCustomApp, onInstallToDesktop, onN
                 version: app.version,
                 manifest: { ...installed.manifest, version: app.version },
                 hasUnpublishedChanges: undefined,
-                updatedAt: new Date().toISOString(),
+                updatedAt: appNowISO(),
               }
             : installed,
         ));

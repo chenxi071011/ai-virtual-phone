@@ -1,4 +1,5 @@
 import type { Character } from "./character-types";
+import { appNow, appNowISO } from "./app-clock";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import type { AssemblerInput, LLMMessage } from "./llm-prompt-assembler";
@@ -39,7 +40,7 @@ type CalendarAssemblerResolved = {
 };
 
 function buildSyntheticUserCharacter(identity: UserIdentity | null): Character {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const personaLines = [
     identity?.bio?.trim(),
     identity?.occupation ? `职业：${identity.occupation}` : "",
@@ -321,5 +322,5 @@ export function createDefaultScheduleDraft(date: string) {
 }
 
 export function getCurrentWeekStart(): string {
-  return getWeekStartIso(new Date());
+  return getWeekStartIso(appNow());
 }

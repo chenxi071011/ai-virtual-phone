@@ -3,6 +3,7 @@
 // The AI can choose to send a friend request (up to 3 rounds) or give up.
 
 import { loadCharacters } from "./character-storage";
+import { appNowISO } from "./app-clock";
 import {
     ChatSession,
     loadChatSessions,
@@ -147,7 +148,7 @@ async function generateAndStoreFriendRequest(
             role: "system" as const,
             content: `这是你第${round}次做出反应，你最多有${MAX_ROUNDS}次机会。`,
             status: "sent" as const,
-            createdAt: new Date().toISOString(),
+            createdAt: appNowISO(),
         }];
 
         const aiResponse = flattenCompletionResult(await generateChatCompletion(

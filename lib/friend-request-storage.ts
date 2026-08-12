@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNowISO } from "./app-clock";
 import { loadChatContacts } from "./chat-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 // lib/friend-request-storage.ts
@@ -40,7 +41,7 @@ export function addFriendRequest(characterId: string, message: string, round: nu
         message,
         status: "pending",
         round,
-        createdAt: new Date().toISOString(),
+        createdAt: appNowISO(),
     };
     all.push(req);
     saveFriendRequests(all);

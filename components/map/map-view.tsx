@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { ArrowLeft, BookOpen, LogOut, Bug, Map as MapIcon, MessageCircle, Save, Send, Palette, MoreHorizontal, X } from "lucide-react";
 import type { MapWorld, GameSave, NodeInteraction, EventScene, EventChoice, StreamMessage, Declaration } from "@/lib/map-types";
 import {
@@ -349,7 +350,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       agents: movedAgents,
       discoveredNodes: newDiscovered,
       visitedNodes: save.visitedNodes.includes(targetNodeId) ? save.visitedNodes : [...save.visitedNodes, targetNodeId],
-      timestamp: new Date().toISOString(),
+      timestamp: appNowISO(),
     };
 
     persistSave(newSave);
@@ -375,12 +376,12 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       journal: [...save.journal, {
         id: `j_${Date.now()}`,
         timestamp: formatGameTime(save.gameDay + 1, "morning"),
-        realTime: new Date().toISOString(),
+        realTime: appNowISO(),
         locationName: currentNode?.name || "",
         text: restText,
         type: "discovery",
       }],
-      timestamp: new Date().toISOString(),
+      timestamp: appNowISO(),
     };
     persistSave(newSave);
 
@@ -474,12 +475,12 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
           journal: [...save.journal, {
             id: `j_${Date.now()}`,
             timestamp: formatGameTime(save.gameDay, save.gameTime),
-            realTime: new Date().toISOString(),
+            realTime: appNowISO(),
             locationName: currentNode?.name || "",
             text: sceneJournal,
             type: eventType === "main_quest" ? "main" : "side",
           }],
-          timestamp: new Date().toISOString(),
+          timestamp: appNowISO(),
         });
       }
 
@@ -713,7 +714,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       if (ev.journalEntry) {
         newJournal.push({
           id: `j_${Date.now()}`, timestamp: formatGameTime(save.gameDay, save.gameTime),
-          realTime: new Date().toISOString(), locationName: currentNode?.name || "",
+          realTime: appNowISO(), locationName: currentNode?.name || "",
           text: ev.journalEntry, type: activeEventMeta?.type === "main_quest" ? "main" : "side",
         });
       }
@@ -798,7 +799,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
         mainQuestStage: ev.advanceMainQuest ? Math.min(save.mainQuestStage + 1, skeleton.mainQuest.stages.length) : save.mainQuestStage,
         discoveredNodes: newDiscovered,
         visitedNodes: newNodeId !== save.currentNodeId ? [...new Set([...save.visitedNodes, newNodeId])] : save.visitedNodes,
-        timestamp: new Date().toISOString(),
+        timestamp: appNowISO(),
       };
       persistSave(newSave);
 
@@ -1260,7 +1261,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
       }
 
       // Save (simplified — skipping stat/item/position processing here, handled by handlePlayerAction for full events)
-      persistSave({ ...save, timestamp: new Date().toISOString() });
+      persistSave({ ...save, timestamp: appNowISO() });
 
     } catch (e) {
       pushMessages({ id: mkId(), type: "system", text: `裁决失败：${e instanceof Error ? e.message : String(e)}` });
@@ -1309,7 +1310,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
     if (summaryApi?.apiKey) {
       generateAdventureSummary(save, skeleton.world.name, summaryApi).catch(() => undefined);
     }
-    persistSave({ ...save, timestamp: new Date().toISOString() });
+    persistSave({ ...save, timestamp: appNowISO() });
     onBack();
   }, [save, skeleton, onBack]);
 
@@ -3242,7 +3243,7 @@ export default function MapView({ world, save, onSaveUpdate, onBack }: Props) {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={() => { persistSave({ ...save, timestamp: new Date().toISOString() }); onBack(); }} style={{
+              <button onClick={() => { persistSave({ ...save, timestamp: appNowISO() }); onBack(); }} style={{
                 width: "100%", padding: "11px 0", borderRadius: 10,
                 background: "var(--c-adv-accent-dim)", border: "none",
                 color: "var(--c-adv-accent)", fontSize: "calc(13px*var(--app-text-scale,1))", fontWeight: 500,

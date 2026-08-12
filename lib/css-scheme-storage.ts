@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 // lib/css-scheme-storage.ts
 // CSS 方案存储 — 保存/加载/删除用户的 CSS 方案
 
@@ -38,7 +39,7 @@ export function saveScheme(target: string, name: string, css: string): CSSScheme
     name,
     css,
     target,
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
   all.push(scheme);
   saveAll(all);

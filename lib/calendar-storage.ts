@@ -1,4 +1,5 @@
 import type { CalendarColorKey, CalendarOwnerType, CalendarScheduleItem, CalendarWeekPlan } from "./calendar-types";
+import { appNow, appNowISO } from "./app-clock";
 import {
   formatIsoDate,
   getOwnerStorageKey,
@@ -138,7 +139,7 @@ export function saveCalendarWeekPlan(plan: CalendarWeekPlan): CalendarWeekPlan {
   const store = loadStore();
   const normalized: CalendarWeekPlan = {
     ...plan,
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
     items: sortScheduleItems(plan.items.map(item => ({
       ...item,
       weekday: item.weekday || getWeekdayLabel(item.date),
@@ -166,7 +167,7 @@ export function replaceCalendarWeekItems(
     ownerId,
     weekStart,
     items,
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
   return saveCalendarWeekPlan(plan);
 }
@@ -179,7 +180,7 @@ export function upsertCalendarScheduleItem(
 ): CalendarWeekPlan {
   const plan = loadCalendarWeekPlan(ownerType, ownerId, weekStart);
   const existingItems = plan?.items ?? [];
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const normalized: CalendarScheduleItem = {
     id: item.id ?? `calendar_item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     date: item.date,
@@ -247,7 +248,7 @@ export function formatCalendarScheduleItemForPrompt(item: Pick<CalendarScheduleI
 export function getCurrentCalendarScheduleForPrompt(
   ownerType: CalendarOwnerType,
   ownerId: string,
-  now = new Date(),
+  now = appNow(),
 ): string {
   const date = formatIsoDate(now);
   const weekStart = getWeekStartIso(now);
@@ -324,7 +325,7 @@ export function normalizeGeneratedScheduleItems(
     colorKey?: CalendarColorKey;
   }>,
 ): CalendarScheduleItem[] {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return sortScheduleItems(
     rawItems
       .map(item => ({

@@ -1,3 +1,4 @@
+import { appNowISO } from "./app-clock";
 const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "# 小手机自定义 APP 制作说明",
   "",
@@ -490,7 +491,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "await AiPhone.db.update(\"scenes\", sceneId, {",
   "  turns: [",
   "    ...turns,",
-  "    { role: \"user\", content: userAction, createdAt: new Date().toISOString() },",
+  "    { role: \"user\", content: userAction, createdAt: appNowISO() },",
   "    ...result.appendMessages",
   "  ]",
   "});",
@@ -737,7 +738,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "    rating: args.rating,",
   "    comment: args.comment,",
   "    characterId: context.characterId || \"\",",
-  "    createdAt: new Date().toISOString()",
+  "    createdAt: appNowISO()",
   "  });",
   "",
   "  return {",
@@ -964,7 +965,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "    content: text,",
   "    characterId: payload.characterId,",
   "    messageId: payload.message.id,",
-  "    createdAt: new Date().toISOString()",
+  "    createdAt: appNowISO()",
   "  });",
   "});",
   "// 不再需要时：",

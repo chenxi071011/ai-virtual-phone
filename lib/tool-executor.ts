@@ -1,4 +1,5 @@
 import CryptoJS from "crypto-js";
+import { appNow, appNowISO } from "./app-clock";
 import type {
     CompositeToolConfig,
     CompositeToolPackageConfig,
@@ -1838,7 +1839,7 @@ function parseCalendarDraft(args: Record<string, unknown>): CalendarDraftParseRe
 
 function normalizeCalendarDate(value: unknown, options?: { fallbackToToday?: boolean }): string | null {
     const rawInput = cleanToolString(value, 24);
-    const raw = rawInput || (options?.fallbackToToday ? formatIsoDate(new Date()) : "");
+    const raw = rawInput || (options?.fallbackToToday ? formatIsoDate(appNow()) : "");
     if (!raw) return null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
     const date = parseIsoDate(raw);
@@ -1875,7 +1876,7 @@ function findCalendarItemByArgs(
 function getCalendarSearchWeekStarts(dateHint: string | null): string[] {
     const starts = new Set<string>();
     if (dateHint) starts.add(getWeekStartIso(parseIsoDate(dateHint)));
-    const now = new Date();
+    const now = appNow();
     for (let offset = -4; offset <= 4; offset++) {
         const d = new Date(now);
         d.setDate(d.getDate() + offset * 7);
@@ -2235,7 +2236,7 @@ async function resolveMusicTrackById(source: string, songId: unknown): Promise<M
         coverUrl: detail?.coverUrl,
         lyrics,
         liked: false,
-        addedAt: new Date().toISOString(),
+        addedAt: appNowISO(),
     };
 }
 
@@ -2248,7 +2249,7 @@ function neteaseResultToTrack(result: NeteaseSearchResult): MusicTrack {
         duration: result.duration / 1000,
         coverUrl: result.coverUrl,
         liked: false,
-        addedAt: new Date().toISOString(),
+        addedAt: appNowISO(),
     };
 }
 
@@ -2722,7 +2723,7 @@ async function persistMemoryWriteRequest(
         };
     }
 
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const entry: MemoryEntry = {
         id: `mem_lt_manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         characterId: request.characterId,

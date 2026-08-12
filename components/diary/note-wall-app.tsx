@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent, type TextareaHTMLAttributes, type TouchEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { Bot, ChevronLeft, Clock3, Flame, MessageCircle, PenLine, RotateCw, Trash2, UserRound, WandSparkles, X } from "lucide-react";
 import { CardsThree, DotsThree } from "@phosphor-icons/react";
 
@@ -923,7 +924,7 @@ export function NoteWallApp({ onBack, onNotice }: NoteWallAppProps) {
         if (due) {
           await handleGenerateForCharacter(characterId, "timer");
           await handleReplyForCharacter(characterId);
-          const stamp = new Date().toISOString();
+          const stamp = appNowISO();
           setTimerSettings(prev => ({
             ...prev,
             lastRunAtByCharacter: { ...prev.lastRunAtByCharacter, [characterId]: stamp },
@@ -1351,7 +1352,7 @@ function NoteComposer({ draft, userName, submitting, onChange, onClose, onSubmit
 }) {
   const previewStyle = styleFromSafeStyle(sanitizeNoteWallCss(draft.rawCss));
   const previewAuthorName = draft.isAnonymous ? "匿名" : draft.signature.trim() || userName;
-  const previewDate = formatCardDate(new Date().toISOString());
+  const previewDate = formatCardDate(appNowISO());
 
   return (
     <div className="nw-modal-backdrop" role="dialog" aria-modal="true">

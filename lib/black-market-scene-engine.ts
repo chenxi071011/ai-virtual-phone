@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNow, appNowISO } from "./app-clock";
 import type { Character } from "./character-types";
 import type { ChatMessage } from "./chat-storage";
 import { buildCalendarScheduleMarker } from "./calendar-storage";
@@ -145,7 +146,7 @@ async function buildScenePromptMessages(session: BlackMarketSceneSession, templa
     userIdentity,
     appId: BLACK_MARKET_PROMPT_APP_ID,
     appTags: BLACK_MARKET_PROMPT_TAGS,
-    scheduleSummary: buildCalendarScheduleMarker("character", session.characterId, getWeekStartIso(new Date())),
+    scheduleSummary: buildCalendarScheduleMarker("character", session.characterId, getWeekStartIso(appNow())),
     coreMemories: coreMemories ? formatCoreMemories(coreMemories) : "",
     longTermMemories: memories ? formatLongTermMemories(memories) : "",
     worldBookActivationContext: wbActivationContext,
@@ -240,7 +241,7 @@ export async function summarizeAndRecordBlackMarketScene(sessionId: string): Pro
 
   const ended = endBlackMarketSceneSession(sessionId, summary);
   const finalSession = ended ?? session;
-  const timestamp = finalSession.endedAt || new Date().toISOString();
+  const timestamp = finalSession.endedAt || appNowISO();
   recordBlackMarketTheaterProjectionEvent({
     sessionId,
     characterId: finalSession.characterId,

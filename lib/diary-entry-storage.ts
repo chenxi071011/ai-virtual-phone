@@ -1,4 +1,5 @@
 import { kvGet, kvRemove, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import {
   DEFAULT_DIARY_ENTRY_TIMER_SETTINGS,
   type DiaryEntry,
@@ -175,7 +176,7 @@ export function normalizeDiaryEntry(raw: unknown): DiaryEntry | null {
     ? record.createdAt
     : typeof record.created_at === "string"
       ? record.created_at
-      : new Date().toISOString();
+      : appNowISO();
   const body = cleanMultilineText(record.body ?? record.content ?? record.text, 6000);
   const blocks = normalizeBlocks(record.blocks, body);
   const title = cleanText(record.title, 80) || body.slice(0, 20) || "未命名日记";
@@ -228,7 +229,7 @@ export function saveDiaryEntries(entries: DiaryEntry[]): void {
 }
 
 export function createDiaryEntry(input: DiaryEntryInput): DiaryEntry {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const body = cleanMultilineText(input.body, 6000);
   const entry: DiaryEntry = {
     id: generateId("diary_entry"),

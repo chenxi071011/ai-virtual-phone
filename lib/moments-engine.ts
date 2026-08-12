@@ -5,6 +5,7 @@
 // ensuring full character settings, world books, long-term memory, and user persona.
 
 import { loadCharacters } from "./character-storage";
+import { appNow, appNowISO } from "./app-clock";
 import { loadChatContacts } from "./chat-storage";
 import { getSiblingCharacterIds } from "./settings-storage";
 import type { Character } from "./character-types";
@@ -260,7 +261,7 @@ async function resolveAssemblerInput(
     const { recentBlocks, wbActivationContext, unifiedRecentItems } = prepareShortTermContext(characterId, "moments");
 
     // Calendar schedule (NPC doesn't get character's schedule)
-    const scheduleSummary = isNPC ? undefined : buildCalendarScheduleMarker("character", characterId, getWeekStartIso(new Date()));
+    const scheduleSummary = isNPC ? undefined : buildCalendarScheduleMarker("character", characterId, getWeekStartIso(appNow()));
 
     const input: AssemblerInput = {
         character,
@@ -525,7 +526,7 @@ async function generateNPCReactionsViaLLM(
                 if (hasSameLike(p.likes, actor)) continue;
                 p.likes.push({
                     ...actor,
-                    createdAt: new Date().toISOString(),
+                    createdAt: appNowISO(),
                 });
             }
             saveMomentPosts(posts);

@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import type { ShoppingCategory, ShoppingSearchResult, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
 import { DEFAULT_SHOPPING_REFRESH_PROMPT, DEFAULT_SHOPPING_SEARCH_PROMPT, SHOPPING_RECOMMENDATION_CATEGORIES } from "./shopping-engine";
 
@@ -163,7 +164,7 @@ function normalizeSearchResult(value: unknown): ShoppingSearchResult | undefined
   return {
     query,
     items,
-    generatedAt: typeof record.generatedAt === "string" ? record.generatedAt : new Date().toISOString(),
+    generatedAt: typeof record.generatedAt === "string" ? record.generatedAt : appNowISO(),
   };
 }
 
@@ -182,7 +183,7 @@ export function createDefaultShoppingState(): ShoppingState {
       deliveryMinMinutes: DEFAULT_DELIVERY_MIN_MINUTES,
       deliveryMaxMinutes: DEFAULT_DELIVERY_MAX_MINUTES,
     },
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -230,7 +231,7 @@ export function loadShoppingState(): ShoppingState {
         deliveryMaxMinutes: Math.max(deliveryMinMinutes, deliveryMaxMinutes),
       },
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : undefined,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : appNowISO(),
     };
   } catch {
     return createDefaultShoppingState();
@@ -238,7 +239,7 @@ export function loadShoppingState(): ShoppingState {
 }
 
 export function saveShoppingState(state: ShoppingState): ShoppingState {
-  const next = { ...state, updatedAt: new Date().toISOString() };
+  const next = { ...state, updatedAt: appNowISO() };
   kvSet(SHOPPING_STATE_KEY, JSON.stringify(next));
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(SHOPPING_STATE_UPDATED_EVENT));

@@ -1,4 +1,5 @@
 import { kvGet, kvKeysWithPrefix, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import type { XiaohongshuComment, XiaohongshuNote } from "./xiaohongshu-types";
 
@@ -128,7 +129,7 @@ function belongsToNote(entry: XiaohongshuProjectionEntry, noteId: string): boole
 }
 
 export function recordXiaohongshuPostEvent(input: RecordXiaohongshuPostEventInput): void {
-  const timestamp = input.note.createdAt || new Date().toISOString();
+  const timestamp = input.note.createdAt || appNowISO();
   const time = formatChatTimestamp(timestamp);
   const characterName = cleanEventText(input.characterName, 80) || "角色";
   const title = noteTitle(input.note);
@@ -145,7 +146,7 @@ export function recordXiaohongshuPostEvent(input: RecordXiaohongshuPostEventInpu
 
 export function recordXiaohongshuCommentEvent(input: RecordXiaohongshuCommentEventInput): void {
   if (!input.comment.text.trim()) return;
-  const timestamp = input.comment.createdAt || new Date().toISOString();
+  const timestamp = input.comment.createdAt || appNowISO();
   const time = formatChatTimestamp(timestamp);
   const characterName = cleanEventText(input.characterName, 80) || "角色";
   const authorLabel = formatAuthorLabel(input.note.source, input.note.authorName, "小红书用户");
@@ -163,7 +164,7 @@ export function recordXiaohongshuCommentEvent(input: RecordXiaohongshuCommentEve
 
 export function recordXiaohongshuReplyEvent(input: RecordXiaohongshuReplyEventInput): void {
   if (!input.comment.text.trim()) return;
-  const timestamp = input.comment.createdAt || new Date().toISOString();
+  const timestamp = input.comment.createdAt || appNowISO();
   const time = formatChatTimestamp(timestamp);
   const characterName = cleanEventText(input.characterName, 80) || "角色";
   const targetLabel = input.targetComment
@@ -183,7 +184,7 @@ export function recordXiaohongshuReplyEvent(input: RecordXiaohongshuReplyEventIn
 }
 
 export function recordXiaohongshuFollowUserEvent(input: RecordXiaohongshuFollowUserEventInput): void {
-  const timestamp = input.timestamp || new Date().toISOString();
+  const timestamp = input.timestamp || appNowISO();
   const time = formatChatTimestamp(timestamp);
   const characterName = cleanEventText(input.characterName, 80) || "角色";
   const userDisplayName = cleanEventText(input.userDisplayName, 80) || "小红书用户";

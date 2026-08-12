@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { Bookmark, ChevronLeft, Clock3, Heart, House, Music2, RefreshCw, Trash2, UserRound, Disc3, Pause, Shuffle, SkipBack, SkipForward, ListMusic } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -312,7 +313,7 @@ export function CheckPhoneMusicPage({ character, onBack }: CheckPhoneMusicPagePr
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneMusicPayload> = {
         id: `${character.id}:music`,
         characterId: character.id,

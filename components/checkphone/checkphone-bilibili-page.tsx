@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, PlaySquare, User, RotateCcw, Eraser } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -146,7 +147,7 @@ export function CheckPhoneBilibiliPage({ character, onBack }: CheckPhoneBilibili
       debugNormalizeError: nextDebugNormalizeError,
     } = await generateCheckPhoneBilibili(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneBilibiliPayload> = {
         id: `${character.id}:bilibili`,
         characterId: character.id,

@@ -1,4 +1,5 @@
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
+import { appNowISO } from "./app-clock";
 import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
 import type { CheckPhoneShoppingProduct, CheckPhoneShoppingTone } from "./checkphone-config";
 import type { ApiConfig } from "./settings-types";
@@ -359,7 +360,7 @@ export async function generateShoppingSearchResults(query: string, searchPrompt:
       result: {
         query: normalizedQuery,
         items,
-        generatedAt: new Date().toISOString(),
+        generatedAt: appNowISO(),
       },
       rawOutput,
     };

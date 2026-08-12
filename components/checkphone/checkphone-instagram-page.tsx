@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import {
   Bookmark,
@@ -128,7 +129,7 @@ export function CheckPhoneInstagramPage({ character, onBack }: CheckPhoneInstagr
       debugNormalizeError: nextDebugNormalizeError,
     } = await generateCheckPhoneInstagram(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneInstagramPayload> = {
         id: `${character.id}:instagram`,
         characterId: character.id,

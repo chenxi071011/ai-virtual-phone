@@ -1,4 +1,5 @@
 import { BLACK_MARKET_BUILTIN_THEATERS } from "./black-market-builtins";
+import { appNow, appNowISO } from "./app-clock";
 import { kvGet, kvKeysWithPrefix, kvSet, registerDynamicPrefix, registerKvMigration } from "./kv-db";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import type {
@@ -71,7 +72,7 @@ function normalizePrice(value: unknown): number {
   return clampCredits(value, BLACK_MARKET_MAX_PRICE);
 }
 
-function localDateKey(date = new Date()): string {
+function localDateKey(date = appNow()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -152,8 +153,8 @@ export function normalizeBlackMarketTheaterTemplate(value: unknown): BlackMarket
     memorySummaryPrompt: cleanText(record.memorySummaryPrompt, 12000),
     purchaseCount: clampCredits(record.purchaseCount),
     rating: Math.min(5, Math.max(0, Number(record.rating) || 0)),
-    createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
-    updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt, 80) || appNowISO(),
+    updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
   };
 }
 
@@ -167,7 +168,7 @@ function normalizeOwnedTheater(value: unknown): BlackMarketOwnedTheater | null {
   return {
     localId,
     remoteTemplateId,
-    purchasedAt: cleanText(record.purchasedAt, 80) || new Date().toISOString(),
+    purchasedAt: cleanText(record.purchasedAt, 80) || appNowISO(),
     templateSnapshot,
     status: normalizeStatus(record.status),
     useCount: clampCredits(record.useCount, 9999),
@@ -186,7 +187,7 @@ function normalizeSceneMessage(value: unknown): BlackMarketSceneMessage | null {
     id,
     role: record.role === "assistant" ? "assistant" : "user",
     content,
-    createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt, 80) || appNowISO(),
   };
 }
 
@@ -209,8 +210,8 @@ function normalizeSceneSession(value: unknown): BlackMarketSceneSession | null {
     characterId,
     characterName,
     userName,
-    startedAt: cleanText(record.startedAt, 80) || new Date().toISOString(),
-    updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+    startedAt: cleanText(record.startedAt, 80) || appNowISO(),
+    updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
     endedAt: cleanText(record.endedAt, 80) || undefined,
     status: record.status === "ended" ? "ended" : "active",
     messages: normalizeArray(record.messages, normalizeSceneMessage).slice(0, 80),
@@ -237,7 +238,7 @@ function normalizeActiveTheater(value: unknown): ActiveBlackMarketTheater | null
     targetCharacterName: cleanText(record.targetCharacterName, 80) || undefined,
     chatId,
     startedAtMessageId: cleanText(record.startedAtMessageId, 160) || undefined,
-    startedAt: cleanText(record.startedAt, 80) || new Date().toISOString(),
+    startedAt: cleanText(record.startedAt, 80) || appNowISO(),
     aiInstruction: cleanText(record.aiInstruction, 30000),
     outputContract: cleanText(record.outputContract, 12000),
     renderRules: normalizeArray(record.renderRules, normalizeRenderRule).slice(0, 20),
@@ -265,7 +266,7 @@ function normalizeTransaction(value: unknown): BlackMarketTransaction | null {
     counterpartyId: cleanText(record.counterpartyId, 160) || undefined,
     counterpartyName: cleanText(record.counterpartyName, 80) || undefined,
     balanceAfter: clampCredits(record.balanceAfter),
-    createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt, 80) || appNowISO(),
   };
 }
 
@@ -279,7 +280,7 @@ function normalizeWallet(value: unknown): BlackMarketWalletState {
     balance: clampCredits(record.balance),
     lastCheckinDate: cleanText(record.lastCheckinDate, 20) || undefined,
     transactions: normalizeArray(record.transactions, normalizeTransaction).slice(0, 200),
-    updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+    updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
   };
 }
 
@@ -287,7 +288,7 @@ function createTransaction(input: Omit<BlackMarketTransaction, "id" | "createdAt
   return {
     ...input,
     id: createId("sc_tx"),
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
 }
 
@@ -304,7 +305,7 @@ function createDefaultWalletState(): BlackMarketWalletState {
     displayName: "本地玩家",
     balance: BLACK_MARKET_INITIAL_CREDITS,
     transactions: [initial],
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -313,7 +314,7 @@ export function createDefaultBlackMarketState(): BlackMarketState {
     wallet: createDefaultWalletState(),
     ownedTheaters: [],
     activeTheaters: [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -327,7 +328,7 @@ export function loadBlackMarketState(): BlackMarketState {
       wallet: normalizeWallet(parsed.wallet),
       ownedTheaters: normalizeArray(parsed.ownedTheaters, normalizeOwnedTheater).slice(0, 200),
       activeTheaters: normalizeArray(parsed.activeTheaters, normalizeActiveTheater).slice(0, 20),
-      updatedAt: cleanText(parsed.updatedAt, 80) || new Date().toISOString(),
+      updatedAt: cleanText(parsed.updatedAt, 80) || appNowISO(),
     };
   } catch {
     return createDefaultBlackMarketState();
@@ -341,11 +342,11 @@ export function saveBlackMarketState(state: BlackMarketState): BlackMarketState 
       ...state.wallet,
       balance: clampCredits(state.wallet.balance),
       transactions: state.wallet.transactions.slice(0, 200),
-      updatedAt: new Date().toISOString(),
+      updatedAt: appNowISO(),
     },
     ownedTheaters: state.ownedTheaters.slice(0, 200),
     activeTheaters: state.activeTheaters.slice(0, 20),
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
   kvSet(BLACK_MARKET_STATE_KEY, JSON.stringify(next));
   if (typeof window !== "undefined") {
@@ -439,7 +440,7 @@ export function startBlackMarketSceneSession(input: {
   const owned = state.ownedTheaters.find(item => item.localId === input.localTheaterId);
   if (!owned) return { ok: false, state, error: "暗柜中没有找到这份夜间档案。" };
   const template = owned.templateSnapshot;
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const session: BlackMarketSceneSession = {
     id: createId("bm_scene"),
     localTheaterId: owned.localId,
@@ -467,7 +468,7 @@ export function appendBlackMarketSceneMessage(sessionId: string, role: BlackMark
   const text = cleanText(content, 30000);
   if (!text) return getBlackMarketSceneSession(sessionId);
   const sessions = loadBlackMarketSceneSessions();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   let updated: BlackMarketSceneSession | undefined;
   const next = sessions.map(session => {
     if (session.id !== sessionId) return session;
@@ -494,7 +495,7 @@ export function updateBlackMarketSceneMessageAndTrimAfter(sessionId: string, mes
   const text = cleanText(content, 30000);
   if (!text) return getBlackMarketSceneSession(sessionId);
   const sessions = loadBlackMarketSceneSessions();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   let updated: BlackMarketSceneSession | undefined;
   const next = sessions.map(session => {
     if (session.id !== sessionId) return session;
@@ -515,7 +516,7 @@ export function updateBlackMarketSceneMessageAndTrimAfter(sessionId: string, mes
 
 export function trimBlackMarketSceneMessagesFrom(sessionId: string, messageId: string): BlackMarketSceneSession | undefined {
   const sessions = loadBlackMarketSceneSessions();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   let updated: BlackMarketSceneSession | undefined;
   const next = sessions.map(session => {
     if (session.id !== sessionId) return session;
@@ -534,7 +535,7 @@ export function trimBlackMarketSceneMessagesFrom(sessionId: string, messageId: s
 
 export function endBlackMarketSceneSession(sessionId: string, summary?: string): BlackMarketSceneSession | undefined {
   const sessions = loadBlackMarketSceneSessions();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   let updated: BlackMarketSceneSession | undefined;
   const next = sessions.map(session => {
     if (session.id !== sessionId) return session;
@@ -635,7 +636,7 @@ export function recordBlackMarketTheaterProjectionEvent(input: {
 }): BlackMarketTheaterProjectionEntry | null {
   const summary = cleanText(input.summary, 2400);
   if (!summary) return null;
-  const timestamp = input.timestamp || new Date().toISOString();
+  const timestamp = input.timestamp || appNowISO();
   const time = formatChatTimestamp(timestamp);
   const characterName = cleanText(input.characterName, 80) || "角色";
   const userName = cleanText(input.userName, 80) || "用户";
@@ -742,7 +743,7 @@ export function purchaseBlackMarketTheater(template: BlackMarketTheaterTemplate)
   const ownedTheater: BlackMarketOwnedTheater = {
     localId: createId("owned_theater"),
     remoteTemplateId: normalized.id,
-    purchasedAt: new Date().toISOString(),
+    purchasedAt: appNowISO(),
     templateSnapshot: normalized,
     status: "unused",
     useCount: 0,
@@ -783,7 +784,7 @@ export function copyBlackMarketTheaterToVault(template: BlackMarketTheaterTempla
   const ownedTheater: BlackMarketOwnedTheater = {
     localId: createId("owned_theater"),
     remoteTemplateId: normalized.id,
-    purchasedAt: new Date().toISOString(),
+    purchasedAt: appNowISO(),
     templateSnapshot: normalized,
     status: "unused",
     useCount: 0,
@@ -819,7 +820,7 @@ export function upsertLocalTestTheater(
     : {
         localId,
         remoteTemplateId: normalized.id,
-        purchasedAt: new Date().toISOString(),
+        purchasedAt: appNowISO(),
         templateSnapshot: normalized,
         status: "unused",
         useCount: 0,
@@ -923,7 +924,7 @@ export function activateBlackMarketTheater(input: {
     targetCharacterName: input.targetCharacterName,
     chatId: input.chatId,
     startedAtMessageId: input.startedAtMessageId,
-    startedAt: new Date().toISOString(),
+    startedAt: appNowISO(),
     aiInstruction: template.aiInstruction,
     outputContract: template.outputContract,
     renderRules: template.renderRules,
@@ -945,7 +946,7 @@ export function activateBlackMarketTheater(input: {
 export function endBlackMarketTheater(instanceId: string): BlackMarketState {
   const state = loadBlackMarketState();
   const ending = state.activeTheaters.find(item => item.instanceId === instanceId);
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return saveBlackMarketState({
     ...state,
     activeTheaters: state.activeTheaters.filter(item => item.instanceId !== instanceId),

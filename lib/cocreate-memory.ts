@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerDynamicPrefix } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { deleteMemoryEntries, loadMemoryEntries } from "./memory-storage";
 
@@ -83,7 +84,7 @@ export function recordCoCreateProjectionEvent(input: RecordCoCreateProjectionInp
   const memory = cleanText(input.memory, 1200);
   if (!characterId || !sessionId || !memory) return null;
 
-  const timestamp = input.timestamp || new Date().toISOString();
+  const timestamp = input.timestamp || appNowISO();
   const title = cleanText(input.title, 80) || "未命名共创";
   const partnerName = cleanText(input.partnerName, 80) || "共创搭档";
   const userName = cleanText(input.userName, 80) || "用户";

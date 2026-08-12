@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNow } from "./app-clock";
 import {
   loadBindingConfig,
   loadApiConfigs,
@@ -199,7 +200,7 @@ async function buildStoryPromptMessages(
     retrieveCoreMemoriesForPrompt(characterId, memConfig).catch(() => null),
   ]);
 
-  const now = new Date();
+  const now = appNow();
 
   return assemblePromptPayload({
     character,

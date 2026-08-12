@@ -1,4 +1,5 @@
 import { kvGet, kvKeysWithPrefix, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import { normalizeUserNameToMacro, USER_NAME_MACRO } from "./user-macro";
 
@@ -82,7 +83,7 @@ export function recordInterviewMagazineProjectionEvent(input: RecordInterviewMag
   const summary = normalizeUserNameToMacro(cleanText(input.summary, 1800), userName);
   if (!summary) return null;
 
-  const timestamp = input.timestamp || new Date().toISOString();
+  const timestamp = input.timestamp || appNowISO();
   const characterNames = input.characterNames.map((name) => cleanText(name, 80)).filter(Boolean);
   const theme = cleanText(input.theme, 120) || "未命名主题";
   const title = cleanText(input.title, 80) || "未命名刊物";

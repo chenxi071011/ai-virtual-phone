@@ -1,4 +1,5 @@
 import { loadShoppingState, saveShoppingState } from "./shopping-storage";
+import { appNow } from "./app-clock";
 import type { ShoppingOrder, ShoppingShippingEvent, ShoppingState } from "./shopping-types";
 
 export type ShoppingPaymentStatus =
@@ -163,7 +164,7 @@ export function settleShoppingPaymentRequest(input: {
   if (!input.orderId && !input.requestId) return null;
   const state = loadShoppingState();
   let updatedOrder: ShoppingOrder | null = null;
-  const now = new Date();
+  const now = appNow();
   const nextOrders = state.orders.map(order => {
     const matches = (input.orderId && order.id === input.orderId)
       || (input.requestId && order.paymentRequestId === input.requestId);

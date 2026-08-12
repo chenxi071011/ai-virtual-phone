@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import {
   AlertCircle,
   Check,
@@ -645,7 +646,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       persist(current => ({
         ...current,
         catalog: result.catalog!,
-        generatedAt: new Date().toISOString(),
+        generatedAt: appNowISO(),
       }));
       setSelectedProduct(null);
       setSelectedOrderId(null);
@@ -866,7 +867,7 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       setPaymentRequestError("请选择代付对象。");
       return;
     }
-    const paymentRequestedAt = new Date().toISOString();
+    const paymentRequestedAt = appNowISO();
     const paymentRequestId = createShoppingPaymentRequestId();
     const order = buildOrderFromCart(
       state.cartItems,

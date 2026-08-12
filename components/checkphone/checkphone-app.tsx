@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { appNow } from "@/lib/app-clock";
 import {
   AtSign,
   BookOpenText,
@@ -291,8 +292,8 @@ export function CheckPhoneApp({ onClose }: CheckPhoneAppProps) {
   // Real Date State
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   useEffect(() => {
-    setCurrentDate(new Date());
-    const timer = setInterval(() => setCurrentDate(new Date()), 60000);
+    setCurrentDate(appNow());
+    const timer = setInterval(() => setCurrentDate(appNow()), 60000);
     return () => clearInterval(timer);
   }, []);
 

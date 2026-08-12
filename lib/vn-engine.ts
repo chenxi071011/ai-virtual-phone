@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNow } from "./app-clock";
 import {
   loadBindingConfig,
   loadApiConfigs,
@@ -166,7 +167,7 @@ async function buildVnPromptMessages(
     regexes,
     userIdentity,
     appId: "vn",
-    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(new Date())),
+    scheduleSummary: buildCalendarScheduleMarker("character", characterId, getWeekStartIso(appNow())),
     coreMemories: coreMemories ? formatCoreMemories(coreMemories) : "",
     longTermMemories: memories ? formatLongTermMemories(memories) : "",
     worldBookActivationContext: wbActivationContext,

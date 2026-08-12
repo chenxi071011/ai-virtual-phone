@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowRight, Clock, EyeOff, Play, Pause, Volume2, Eye, ChevronDown, Send, MessageSquare, BookOpen, Archive, MapPin, RotateCcw, ListOrdered, Plus, Trash2, ChevronRight, Loader2 } from "lucide-react";
 import { BilingualTextBlock } from "@/components/chat/message-bubble";
@@ -211,7 +212,7 @@ export function VnPlayer({ characterId, chapterIndex, onClose, onChapterEnd, vnT
       const audio: VnFrameAudio = {
         audioDataUrl,
         synthesizedFromText: speechText,
-        updatedAt: new Date().toISOString(),
+        updatedAt: appNowISO(),
       };
       updateVnMessageFrameAudio(messageId, frameIndex, audio);
       applyFrameAudioToState(messageId, frameIndex, audio);

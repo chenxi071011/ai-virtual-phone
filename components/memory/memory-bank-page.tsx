@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, useState, useEffect, useCallback, type CSSProperties, type ReactNode } from "react";
+import { appNowISO, appNowMs } from "@/lib/app-clock";
 import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
@@ -138,7 +139,7 @@ function MemorySettingsSliderItem({
 }
 
 function relativeTime(isoStr: string): string {
-    const diff = Date.now() - new Date(isoStr).getTime();
+    const diff = appNowMs() - new Date(isoStr).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "刚刚";
     if (mins < 60) return `${mins}分钟前`;
@@ -488,7 +489,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
 
         setSavingMemory(true);
         try {
-            const now = new Date().toISOString();
+            const now = appNowISO();
             const type = memoryEditor.type;
             const source = memoryEditor.entry;
             const contentChanged = !source || source.content.trim() !== content;

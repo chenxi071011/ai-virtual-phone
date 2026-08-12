@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, Heart, RefreshCw, Search, ShoppingBag, Store, Trash2, Truck, ShoppingCart, Home, User, Star, Plus, type LucideIcon } from "lucide-react";
 import { CheckPhoneBilingualText, normalizeCheckPhoneText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -172,7 +173,7 @@ export function CheckPhoneShoppingPage({ character, onBack }: CheckPhoneShopping
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneShoppingPayload> = {
         id: `${character.id}:shopping`,
         characterId: character.id,

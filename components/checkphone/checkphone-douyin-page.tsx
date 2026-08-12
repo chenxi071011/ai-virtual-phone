@@ -10,6 +10,7 @@ import {
   type WheelEvent,
 } from "react";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
+import { appNowISO } from "@/lib/app-clock";
 import {
   ChevronLeft,
   Bell,
@@ -240,7 +241,7 @@ export function CheckPhoneDouyinPage({
       previousSnapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneDouyinPayload> = {
         id: `${character.id}:douyin`,
         characterId: character.id,

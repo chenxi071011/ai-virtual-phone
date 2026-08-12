@@ -5,6 +5,7 @@
 // play history which needs an account.
 
 import { kvGet, kvSet } from "./kv-db";
+import { appNowISO } from "./app-clock";
 
 const KEY = "music_play_history_v1";
 const MAX_ENTRIES = 100;
@@ -33,7 +34,7 @@ export function getPlayHistory(): PlayHistoryEntry[] {
 export function recordPlayHistory(entry: Omit<PlayHistoryEntry, "playedAt">): void {
     try {
         const list = getPlayHistory().filter((e) => e.id !== entry.id);
-        list.unshift({ ...entry, playedAt: new Date().toISOString() });
+        list.unshift({ ...entry, playedAt: appNowISO() });
         kvSet(KEY, JSON.stringify(list.slice(0, MAX_ENTRIES)));
         if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("music-history-updated"));

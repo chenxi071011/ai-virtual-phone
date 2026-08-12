@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { createPortal } from "react-dom";
 import {
   AlertCircle,
@@ -967,7 +968,7 @@ function updateIconSkin(draft: ThemeProfile, iconId: DesktopIconId, assetId: str
 
   const schemes = draft.iconSchemes.map(s =>
     s.id === draft.activeIconSchemeId
-      ? { ...s, iconSkins: { ...skins }, updatedAt: new Date().toISOString() }
+      ? { ...s, iconSkins: { ...skins }, updatedAt: appNowISO() }
       : s
   );
 
@@ -1124,7 +1125,7 @@ function IconSkinPage({
       iconSkins: {},
       iconSchemes: draft.iconSchemes.map(s =>
         s.id === draft.activeIconSchemeId
-          ? { ...s, iconSkins: {}, updatedAt: new Date().toISOString() }
+          ? { ...s, iconSkins: {}, updatedAt: appNowISO() }
           : s
       ),
       dockSkinAssetId: null,

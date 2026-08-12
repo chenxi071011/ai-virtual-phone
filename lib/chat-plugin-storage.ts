@@ -3,6 +3,7 @@
 // 运行时（加载执行、hook 总线、ctx 构建）见 chat-plugin-runtime.ts。
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import type {
     ChatPluginErrorEntry,
     ChatPluginManifest,
@@ -101,7 +102,7 @@ export function validateChatPluginManifest(input: unknown): { manifest?: ChatPlu
 export function persistChatPlugin(manifest: ChatPluginManifest, code: string): { ok: boolean; error?: string } {
     if (code.length > MAX_CODE_LENGTH) return { ok: false, error: `插件源码过长（上限 ${MAX_CODE_LENGTH / 1000}KB）` };
     const plugins = loadChatPlugins();
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const idx = plugins.findIndex(p => p.manifest.id === manifest.id);
     const defaults: Record<string, unknown> = {};
     for (const f of manifest.settings ?? []) {
@@ -243,7 +244,7 @@ export function clearChatPluginErrors(): void {
 
 export function recordChatPluginLog(entry: Omit<ChatPluginErrorEntry, "at">): void {
     const list = loadChatPluginErrors();
-    list.push({ ...entry, at: new Date().toISOString() });
+    list.push({ ...entry, at: appNowISO() });
     while (list.length > MAX_ERROR_ENTRIES) list.shift();
     writeJson(ERRORS_KEY, list);
     emit(CHAT_PLUGIN_ERROR_EVENT, entry);

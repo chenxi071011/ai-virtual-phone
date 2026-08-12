@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { appNowISO } from "./app-clock";
 
 import { loadCharacters } from "./character-storage";
 import type { Character } from "./character-types";
@@ -120,7 +121,7 @@ export function makeInterviewMessage(
     targetCharacterName: options?.targetCharacterName,
     speakerCharacterId: options?.speakerCharacterId,
     speakerName: options?.speakerName,
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
 }
 

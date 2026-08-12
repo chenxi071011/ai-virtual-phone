@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { appNowISO, appNowMs } from "@/lib/app-clock";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -1475,7 +1476,7 @@ const DICE_BUBBLE_ORIENTATIONS: Record<number, [number, number]> = {
 function DiceBubble({ msg }: { msg: ChatMessage }) {
     const face = Math.min(6, Math.max(1, Number(msg.mediaData?.diceFace) || 1));
     // 挂载瞬间判定一次：只有刚发出的消息播翻滚动画
-    const rollingRef = useRef(Date.now() - new Date(msg.createdAt).getTime() < 6000);
+    const rollingRef = useRef(appNowMs() - new Date(msg.createdAt).getTime() < 6000);
     const [rx, ry] = DICE_BUBBLE_ORIENTATIONS[face];
 
     return (
@@ -1725,7 +1726,7 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
         const updatedData = {
             ...d,
             status: "paid" as const,
-            paymentResolvedAt: new Date().toISOString(),
+            paymentResolvedAt: appNowISO(),
             paymentPayerName: userName,
             paymentWalletTransactionId: result.transaction.id,
         };
@@ -1737,7 +1738,7 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
         const updatedData = {
             ...d,
             status: "declined" as const,
-            paymentResolvedAt: new Date().toISOString(),
+            paymentResolvedAt: appNowISO(),
             paymentPayerName: userName,
         };
         updateMessageMediaData(msg.id, updatedData);

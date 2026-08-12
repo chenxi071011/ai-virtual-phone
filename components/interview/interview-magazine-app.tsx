@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import {
   ChevronLeft,
   ChevronRight,
@@ -298,7 +299,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
     const trimmedTheme = theme.trim();
     if (!trimmedTheme || selectedCharacterIds.length === 0) return null;
     const previousDraft = activeDraftId ? drafts.find((draft) => draft.id === activeDraftId) : null;
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const action = status === "awaiting_user"
       ? { type: "awaitUser" as const }
       : status === "done"
@@ -674,7 +675,7 @@ export function InterviewMagazineApp({ onClose }: Props) {
         issueNumber,
       });
       if (composeRunRef.current !== composeRunId) return;
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const issue: InterviewIssue = {
         id: `issue_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         issueNumber,

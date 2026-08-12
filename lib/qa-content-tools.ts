@@ -3,6 +3,7 @@
 // 黑市剧场（工作室·本机测试）。全部只写浏览器本地存储，可在对应 UI 里删除，不碰远端。
 
 import { getQaPageChars } from "./qa-prefs";
+import { appNowISO } from "./app-clock";
 import { createCustomAppPackageFile } from "./custom-app-package";
 import { downloadFile } from "./download-utils";
 import {
@@ -253,7 +254,7 @@ const installAppTool: QaContentTool = {
             ? ([...new Set(args.permissions.filter((v): v is string => typeof v === "string" && v.length < 60))] as CustomAppPermission[])
             : null;
         const perms = customPerms?.length ? customPerms : SINGLE_HTML_APP_PERMISSIONS;
-        const now = new Date().toISOString();
+        const now = appNowISO();
 
         const apps = loadInstalledCustomApps();
         const existing = apps.find((app) => app.name.trim().toLowerCase() === name.toLowerCase());
@@ -569,7 +570,7 @@ const installGameTool: QaContentTool = {
         if (roleSlots.length > 0 && !pickerHtml) return "启用 roleSlots 时必须提供 pickerHtml（角色选择界面）。";
 
         const slug = stableSlug(title);
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const template: GameTemplate = {
             id: `qa_game_${slug}`,
             title,
@@ -655,7 +656,7 @@ const installTheaterTool: QaContentTool = {
         if (!openingHtml) return "缺少 openingHtml（开场画面）。";
 
         const slug = stableSlug(title);
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const rarity = args.rarity === "rare" || args.rarity === "legend" || args.rarity === "encrypted" ? args.rarity : "common";
         const durationTurns = Math.min(30, Math.max(1, Number(args.durationTurns) || 8));
         const template: BlackMarketTheaterTemplate = {
@@ -961,7 +962,7 @@ const saveGameDraftTool: QaContentTool = {
             playNote: typeof args.playNote === "string" ? text(args.playNote, 3000) : base.playNote,
             tagsText: Array.isArray(args.tags) ? normalizeStringArray(args.tags, 8, 24).join(" ") : base.tagsText,
         };
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const record: GameHallDraft = {
             id: existing?.id ?? `qa_draft_${stableSlug(title)}`,
             title,
@@ -1045,7 +1046,7 @@ const saveTheaterDraftTool: QaContentTool = {
             storyText: typeof args.storyText === "string" ? text(args.storyText, 2000) : base.storyText,
             tagsText: Array.isArray(args.tags) ? normalizeStringArray(args.tags, 8, 24).join(",") : base.tagsText,
         };
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const record: BmStudioDraftRecord = {
             id: existing?.id ?? `qa_draft_${stableSlug(title)}`,
             title,
@@ -1213,7 +1214,7 @@ function findOrMaterializeGameDraft(name: string): { record: GameHallDraft; mate
         .find((g) => isLocalTestGameId(g.localId) && norm(g.templateSnapshot.title) === norm(name));
     if (!installed) return { error: `草稿箱和本机测试里都没有「${name}」。先用「清单」确认名称。` };
     const t = installed.templateSnapshot;
-    const now = new Date().toISOString();
+    const now = appNowISO();
     return {
         materialized: true,
         record: {
@@ -1239,7 +1240,7 @@ function findOrMaterializeTheaterDraft(name: string): { record: BmStudioDraftRec
         .find((t) => isLocalTestTheaterId(t.localId) && norm(t.templateSnapshot.title) === norm(name));
     if (!owned) return { error: `草稿箱和本机测试里都没有「${name}」。先用「清单」确认名称。` };
     const t = owned.templateSnapshot;
-    const now = new Date().toISOString();
+    const now = appNowISO();
     return {
         materialized: true,
         record: {
@@ -1260,7 +1261,7 @@ function findOrMaterializeTheaterDraft(name: string): { record: BmStudioDraftRec
 }
 
 function saveGameDraftRecord(record: GameHallDraft, draft: GameTemplateDraft): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const next: GameHallDraft = {
         ...record,
         draft,
@@ -1271,7 +1272,7 @@ function saveGameDraftRecord(record: GameHallDraft, draft: GameTemplateDraft): v
 }
 
 function saveBmDraftRecord(record: BmStudioDraftRecord, draft: Record<string, unknown>): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const next: BmStudioDraftRecord = {
         ...record,
         draft,
@@ -1303,7 +1304,7 @@ export async function workbenchWriteLocal(args: Record<string, unknown>): Promis
         const prev = String(base[mapped] ?? "");
         const next = append ? prev + content : content;
         if (next.length > WB_FIELD_CHAR_LIMIT) return `${key} 超过 ${WB_FIELD_CHAR_LIMIT.toLocaleString()} 字符上限。`;
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const record: GameHallDraft = existing ?? { id: `qa_draft_${stableSlug(name)}`, title: name, draft: base, createdAt: now, updatedAt: now };
         saveGameDraftRecord(record, { ...base, title: name, [mapped]: next });
         return `✓ 已写入游戏草稿「${name}」的 ${key}（当前 ${next.length.toLocaleString()} 字符${append ? "，本次为追加" : ""}）。继续写其他字段或分段追加；全部写完后用「发布」type=game 装进本机测试。`;
@@ -1322,7 +1323,7 @@ export async function workbenchWriteLocal(args: Record<string, unknown>): Promis
         const prev = String(base[mapped] ?? "");
         const next = append ? prev + content : content;
         if (next.length > WB_FIELD_CHAR_LIMIT) return `${key} 超过 ${WB_FIELD_CHAR_LIMIT.toLocaleString()} 字符上限。`;
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const record: BmStudioDraftRecord = existing ?? { id: `qa_draft_${stableSlug(name)}`, title: name, draft: base, createdAt: now, updatedAt: now };
         saveBmDraftRecord(record, { ...base, title: name, [mapped]: next });
         return `✓ 已写入剧场草稿「${name}」的 ${key}（当前 ${next.length.toLocaleString()} 字符${append ? "，本次为追加" : ""}）。继续写其他字段或分段追加；全部写完后用「发布」type=theater 上架本机测试。`;
@@ -1363,7 +1364,7 @@ export async function workbenchEditLocal(args: Record<string, unknown>, context?
             ...app,
             entryHtml: result.next,
             hasUnpublishedChanges: app.marketItemId ? true : app.hasUnpublishedChanges,
-            updatedAt: new Date().toISOString(),
+            updatedAt: appNowISO(),
         };
         await saveInstalledCustomAppsAsync([updated, ...apps.filter((item) => item.id !== app.id)]);
         context?.onContentCreated?.({ type: "app", refId: app.id, title: app.name });

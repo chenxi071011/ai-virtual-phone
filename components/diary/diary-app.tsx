@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { appNow } from "@/lib/app-clock";
 import { BookOpenText, ChevronLeft, StickyNote } from "lucide-react";
 
 import { DiaryEntriesApp } from "./diary-entries-app";
@@ -20,7 +21,7 @@ export function DiaryApp({ onClose, onNotice }: DiaryAppProps) {
   const todayLabel = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "2-digit",
-  }).format(new Date()).toUpperCase();
+  }).format(appNow()).toUpperCase();
 
   if (NOTE_WALL_UI_ENABLED && view === "notewall") {
     return <NoteWallApp onBack={() => setView("home")} onNotice={onNotice} />;

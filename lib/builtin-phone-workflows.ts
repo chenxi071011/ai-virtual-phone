@@ -1,4 +1,5 @@
 import type { CompositeToolConfig, CompositeToolPackageConfig, CompositeToolStep } from "./settings-types";
+import { appNow } from "./app-clock";
 
 export const BUILTIN_PHONE_WORKFLOW_PACKAGE_ID = "builtin_phone_lookup_workflows";
 
@@ -186,7 +187,7 @@ function getWeekStartIso(date) {
 }
 
 function getWeekDates(weekStart) {
-    var base = parseIsoDate(weekStart) || new Date();
+    var base = parseIsoDate(weekStart) || appNow();
     var dates = [];
     for (var index = 0; index < 7; index += 1) {
         var current = new Date(base);
@@ -592,7 +593,7 @@ return [
 const CALENDAR_SCRIPT = `
 ${COMMON_HELPERS}
 
-var anchor = parseIsoDate(input.date) || parseIsoDate(input.weekStart) || new Date();
+var anchor = parseIsoDate(input.date) || parseIsoDate(input.weekStart) || appNow();
 var weekStart = parseIsoDate(input.weekStart) ? String(input.weekStart).slice(0, 10) : getWeekStartIso(anchor);
 var weekDates = getWeekDates(weekStart);
 var raw = await readPhoneKv("ai_phone_calendar_plans_v1");

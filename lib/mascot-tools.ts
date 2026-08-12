@@ -11,6 +11,7 @@
 //   - 导航工具 (navigate)             — 1 个独立工具（直接暴露）
 
 import type { LlmToolDefinition } from "./llm-provider-adapter";
+import { appNowISO } from "./app-clock";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
 import type { Prompt } from "./settings-types";
@@ -1397,7 +1398,7 @@ async function handleCreateCharacter(args: Record<string, unknown>): Promise<Too
     const { loadCharacters, saveCharacters } = await import("./character-storage");
     const chars = loadCharacters();
     if (chars.find((c) => c.name === args.name)) return { name: "创建角色", success: false, error: "已存在同名角色" };
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const newChar = {
         id: `char_${Date.now()}`,
         name: args.name as string,
@@ -1425,7 +1426,7 @@ async function handleUpdateCharacterField(args: Record<string, unknown>): Promis
     } else {
         return { name: "更新角色字段", success: false, error: `不支持的字段：${field}` };
     }
-    char.updatedAt = new Date().toISOString();
+    char.updatedAt = appNowISO();
     chars[idx] = char as typeof chars[number];
     saveCharacters(chars);
     return { name: "更新角色字段", success: true, data: `已更新 ${args.name} 的 ${field}` };

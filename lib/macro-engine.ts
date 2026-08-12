@@ -3,6 +3,7 @@
 // Uses regex-based iterative innermost-first expansion.
 
 import { buildCharacterTimeContext, getSystemTimeZone } from "./character-time";
+import { appNow, appNowISO } from "./app-clock";
 
 const TRIM_SENTINEL = "\x00TRIM\x00";
 
@@ -239,13 +240,13 @@ export class MacroEngine {
 
         // time — shortcut for current datetime like "2026年3月2日15:40"
         if (body === "time") {
-            const now = new Date();
+            const now = appNow();
             return `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
         }
 
         if (body === "weekday") {
             const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-            return weekdays[new Date().getDay()];
+            return weekdays[appNow().getDay()];
         }
 
         // uuid
@@ -320,7 +321,7 @@ export class MacroEngine {
             return formatTimestamp(format);
         }
         if (body === "timestamp") {
-            return new Date().toISOString();
+            return appNowISO();
         }
 
         // Unrecognized macro — leave as-is (return with braces so it doesn't loop)
@@ -336,7 +337,7 @@ export function postProcessTrim(text: string): string {
 
 /** Simple timestamp formatter. Supports common tokens: YYYY, MM, DD, HH, mm, ss, etc. */
 function formatTimestamp(format: string): string {
-    const now = new Date();
+    const now = appNow();
     const pad = (n: number, len = 2) => String(n).padStart(len, "0");
 
     return format

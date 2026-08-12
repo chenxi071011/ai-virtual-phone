@@ -3,6 +3,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useMusicPlayer } from "@/lib/music-context";
 import type { MusicTrack } from "@/lib/music-storage";
 import {
@@ -86,7 +87,7 @@ export default function MusicArtistPage({ artistId, artistName, onClose }: Props
             coverUrl: detail?.coverUrl || song.coverUrl,
             lyrics,
             liked: false,
-            addedAt: new Date().toISOString(),
+            addedAt: appNowISO(),
         };
         if (!player.queue.some(t => t.id === track.id)) {
             player.setQueue([track, ...player.queue]);

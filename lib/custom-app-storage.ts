@@ -1,4 +1,5 @@
 import { hydrateKvDb, kvGet, kvKeysWithPrefix, kvRemove, kvSet, kvSetAsync, registerDynamicPrefix, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import { deleteMediaRef } from "./media-cache-storage";
 import type {
   CustomAppAsset,
@@ -752,8 +753,8 @@ function normalizeInstalledApp(raw: unknown): InstalledCustomApp | null {
         : manifest.permissions ?? [],
       manifest,
       assets,
-      installedAt: cleanText(record.installedAt, 80) || new Date().toISOString(),
-      updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+      installedAt: cleanText(record.installedAt, 80) || appNowISO(),
+      updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
       marketItemId: cleanText(record.marketItemId, 160) || undefined,
       resourceHubPath: cleanText(record.resourceHubPath, 400) || undefined,
       hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
@@ -941,7 +942,7 @@ function loadCustomAppTimelineForApp(appId: string): CustomAppTimelineEntry[] {
         summary,
         detail: cleanText(record.detail, 120) || undefined,
         appLabel: cleanText(record.appLabel, 80) || undefined,
-        createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
+        createdAt: cleanText(record.createdAt, 80) || appNowISO(),
         data: cleanRecord(record.data),
       } satisfies CustomAppTimelineEntry;
     }).filter(Boolean) as CustomAppTimelineEntry[];
@@ -988,7 +989,7 @@ export function appendCustomAppTimelineEntry(
     summary,
     detail: cleanText(input.detail, 120) || undefined,
     appLabel: cleanText(input.appLabel, 80) || undefined,
-    createdAt: Number.isNaN(timestamp.getTime()) ? new Date().toISOString() : timestamp.toISOString(),
+    createdAt: Number.isNaN(timestamp.getTime()) ? appNowISO() : timestamp.toISOString(),
     data: Object.keys(data).length > 0 ? data : undefined,
   };
   const next = [entry, ...loadCustomAppTimelineForApp(appId)]
@@ -1102,8 +1103,8 @@ export async function loadCustomAppPackage(file: File): Promise<InstalledCustomA
     permissions: manifest.permissions ?? [],
     manifest,
     assets,
-    installedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    installedAt: appNowISO(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -1148,8 +1149,8 @@ export async function loadSingleHtmlCustomApp(file: File): Promise<InstalledCust
       permissions,
     },
     assets: {},
-    installedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    installedAt: appNowISO(),
+    updatedAt: appNowISO(),
   };
 }
 

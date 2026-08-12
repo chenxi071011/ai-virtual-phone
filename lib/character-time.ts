@@ -1,3 +1,5 @@
+import { appNow } from "./app-clock";
+
 export type CharacterTimeContext = {
   systemTime: string;
   systemWeekday: string;
@@ -112,7 +114,7 @@ export function hasTimeZoneDifference(date: Date, characterTimeZone: string, sys
     || systemParts.minute !== characterParts.minute;
 }
 
-export function buildCharacterTimeContext(timeZone?: string | null, now = new Date()): CharacterTimeContext {
+export function buildCharacterTimeContext(timeZone?: string | null, now = appNow()): CharacterTimeContext {
   const systemTimeZone = getSystemTimeZone();
   const systemTime = formatZonedChineseDateTime(now, systemTimeZone);
   const systemWeekday = getZonedWeekday(now, systemTimeZone);
@@ -150,7 +152,7 @@ export function buildCharacterTimeContext(timeZone?: string | null, now = new Da
   };
 }
 
-export function buildGroupTimeContext(members: GroupTimeMember[], now = new Date()): CharacterTimeContext {
+export function buildGroupTimeContext(members: GroupTimeMember[], now = appNow()): CharacterTimeContext {
   const systemTimeZone = getSystemTimeZone();
   const systemTime = formatZonedChineseDateTime(now, systemTimeZone);
   const systemWeekday = getZonedWeekday(now, systemTimeZone);

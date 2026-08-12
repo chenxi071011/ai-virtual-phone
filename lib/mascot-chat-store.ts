@@ -1,4 +1,5 @@
 import { getMascotContext, type MascotPageContext } from "./mascot-context";
+import { appNowISO } from "./app-clock";
 import { mascotFillField } from "./mascot-events";
 import {
     mascotChatWithTools,
@@ -76,7 +77,7 @@ function persistMessages(nextMessages: MascotMsg[]) {
 }
 
 function withTimestamp(msg: MascotMsg): MascotMsg {
-    return msg.createdAt ? msg : { ...msg, createdAt: new Date().toISOString() };
+    return msg.createdAt ? msg : { ...msg, createdAt: appNowISO() };
 }
 
 function normalizeMessages(nextMessages: MascotMsg[]): MascotMsg[] {
@@ -269,7 +270,7 @@ export function setMascotMessages(updater: MascotMsg[] | ((prev: MascotMsg[]) =>
 
 function defaultGreetingMessage(): MascotMsg | null {
     const greeting = PAGE_GREETINGS["desktop"];
-    return greeting ? { role: "mascot", text: greeting, createdAt: new Date().toISOString() } : null;
+    return greeting ? { role: "mascot", text: greeting, createdAt: appNowISO() } : null;
 }
 
 export function resetMascotConversation(options: { withGreeting?: boolean } = {}) {
@@ -351,8 +352,8 @@ export async function sendMascotMessage({
     if ((!trimmed && images.length === 0) || isThinking) return;
 
     const userMsg: MascotMsg = images.length > 0
-        ? { role: "user", text: trimmed, images, createdAt: new Date().toISOString() }
-        : { role: "user", text: trimmed, createdAt: new Date().toISOString() };
+        ? { role: "user", text: trimmed, images, createdAt: appNowISO() }
+        : { role: "user", text: trimmed, createdAt: appNowISO() };
     let workingMessages = normalizeMessages([...messages, userMsg]);
     publishMessages(workingMessages);
     setThinking(true);
@@ -384,7 +385,7 @@ export async function sendMascotMessage({
                         role: "mascot",
                         text: streamedDisplay,
                         displayText: streamedDisplay,
-                        createdAt: new Date().toISOString(),
+                        createdAt: appNowISO(),
                     });
                 }
                 liveItems.push(...streamToolMessages.map(withTimestamp));
@@ -414,7 +415,7 @@ export async function sendMascotMessage({
                                 displayText: `正在调用 ${info.name}…`,
                                 toolName: info.name,
                                 toolDisplayName: info.name,
-                                createdAt: new Date().toISOString(),
+                                createdAt: appNowISO(),
                             });
                             await paintStream(true);
                         },
@@ -431,7 +432,7 @@ export async function sendMascotMessage({
                 role: "mascot",
                 text: response.rawAssistant,
                 displayText: displayReply || (response.toolCalls.length > 0 || response.toolFetches.length > 0 ? "（调用工具中...）" : "（无内容）"),
-                createdAt: new Date().toISOString(),
+                createdAt: appNowISO(),
             };
             if (response.protocol === "native" && response.nativeToolCalls && response.nativeToolCalls.length > 0) {
                 assistantMsg.toolCalls = response.nativeToolCalls;
@@ -466,7 +467,7 @@ export async function sendMascotMessage({
                             toolName: loaderCall?.name || loaderName,
                             toolDisplayName: `展开${pkg.label}`,
                             toolSuccess: true,
-                            createdAt: new Date().toISOString(),
+                            createdAt: appNowISO(),
                         }]);
                     } else {
                         workingMessages = normalizeMessages([...workingMessages, {
@@ -477,7 +478,7 @@ export async function sendMascotMessage({
                             toolName: `展开${pkg.label}`,
                             toolDisplayName: `展开${pkg.label}`,
                             toolSuccess: true,
-                            createdAt: new Date().toISOString(),
+                            createdAt: appNowISO(),
                         }]);
                     }
                     publishMessages(workingMessages);
@@ -501,7 +502,7 @@ export async function sendMascotMessage({
                         displayText: `正在调用 ${displayName}…`,
                         toolName: protocolName,
                         toolDisplayName: displayName,
-                        createdAt: new Date().toISOString(),
+                        createdAt: appNowISO(),
                     };
                     workingMessages = normalizeMessages([...workingMessages, runningMessage]);
                     const runningIdx = workingMessages.length - 1;
@@ -523,7 +524,7 @@ export async function sendMascotMessage({
                         toolName: protocolName,
                         toolDisplayName: displayName,
                         toolSuccess: result.success,
-                        createdAt: updated[runningIdx]?.createdAt || new Date().toISOString(),
+                        createdAt: updated[runningIdx]?.createdAt || appNowISO(),
                     };
                     workingMessages = normalizeMessages(updated);
                     publishMessages(workingMessages);
@@ -535,14 +536,14 @@ export async function sendMascotMessage({
         }
 
         if (abortRequested) {
-            publishMessages([...workingMessages, { role: "user", text: "[用户中止了操作]", hidden: false, createdAt: new Date().toISOString() }]);
+            publishMessages([...workingMessages, { role: "user", text: "[用户中止了操作]", hidden: false, createdAt: appNowISO() }]);
         }
         if (!isMascotPanelOpen() && typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("global-notice", { detail: abortRequested ? "操作已中止" : "AI助手已完成操作 ✓" }));
         }
     } catch (err) {
         if ((err as Error).name !== "AbortError" && !abortRequested) {
-            publishMessages([...workingMessages, { role: "mascot", text: `出错了...${(err as Error).message}`, createdAt: new Date().toISOString() }]);
+            publishMessages([...workingMessages, { role: "mascot", text: `出错了...${(err as Error).message}`, createdAt: appNowISO() }]);
             if (!isMascotPanelOpen() && typeof window !== "undefined") {
                 window.dispatchEvent(new CustomEvent("global-notice", { detail: "AI助手生成失败了..." }));
             }

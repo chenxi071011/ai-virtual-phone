@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { appNowISO } from "./app-clock";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 import type { VnSession, VnMessage, VnChapterMeta, VnLayoutPrefs, VnBeat, VnFrameAudio } from "./vn-types";
 export type { VnSession, VnMessage, VnChapterMeta, VnLayoutPrefs, VnBeat };
@@ -125,7 +126,7 @@ export function createOrGetVnSession(characterId: string): VnSession {
   const session: VnSession = {
     id: generateId("vn_sess"),
     characterId,
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
     chapters: [],
     activeChapterIndex: -1,
   };
@@ -152,7 +153,7 @@ export function pushVnMessage(
   const message: VnMessage = {
     ...input,
     id: generateId("vn_msg"),
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
   _messagesCache.push(message);
   vnDb.messages.put(message).catch(() => undefined);
@@ -217,7 +218,7 @@ function updateVnSession(sessionId: string, updates: Partial<VnSession>): VnSess
   const next: VnSession = {
     ..._sessionsCache[idx],
     ...updates,
-    updatedAt: updates.updatedAt || new Date().toISOString(),
+    updatedAt: updates.updatedAt || appNowISO(),
   };
   _sessionsCache[idx] = next;
   vnDb.sessions.put(next).catch(() => undefined);
@@ -324,7 +325,7 @@ export function updateChapterSummary(
   chapters[chapterIndex] = {
     ...ch,
     summaryContent: summary,
-    summaryTimestamp: new Date().toISOString(),
+    summaryTimestamp: appNowISO(),
   };
 
   updateVnSession(sessionId, { chapters });

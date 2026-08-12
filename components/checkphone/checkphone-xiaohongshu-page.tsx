@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type TouchEvent, type UIEvent, type WheelEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronDown, ChevronLeft, CirclePlus, Eraser, Heart, House, MessageCircleMore, Mic, MoreHorizontal, RotateCcw, Settings, Smile, Plus, Search, Share } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -454,7 +455,7 @@ export function CheckPhoneXiaohongshuPage({ character, onBack }: CheckPhoneXiaoh
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneXiaohongshuPayload> = {
         id: `${character.id}:xiaohongshu`,
         characterId: character.id,

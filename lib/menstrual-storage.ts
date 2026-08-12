@@ -1,4 +1,5 @@
 import { formatIsoDate, parseIsoDate } from "./calendar-utils";
+import { appNow, appNowISO } from "./app-clock";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
 const MENSTRUAL_CONFIG_KEY = "ai_phone_menstrual_config_v1";
@@ -195,7 +196,7 @@ export function validateMenstrualSettings(input: {
   return null;
 }
 
-export function startCurrentPeriod(dateText = formatIsoDate(new Date())): MenstrualConfig {
+export function startCurrentPeriod(dateText = formatIsoDate(appNow())): MenstrualConfig {
   const current = loadMenstrualConfig();
   return saveMenstrualConfig({
     ...current,
@@ -204,7 +205,7 @@ export function startCurrentPeriod(dateText = formatIsoDate(new Date())): Menstr
   });
 }
 
-export function cancelCurrentPeriodStart(dateText = formatIsoDate(new Date())): MenstrualConfig {
+export function cancelCurrentPeriodStart(dateText = formatIsoDate(appNow())): MenstrualConfig {
   const current = loadMenstrualConfig();
   if (current.currentPeriodStartDate !== dateText) return current;
   const hasHistory = loadMenstrualRecords().length > 0;
@@ -215,7 +216,7 @@ export function cancelCurrentPeriodStart(dateText = formatIsoDate(new Date())): 
   });
 }
 
-export function finishCurrentPeriod(dateText = formatIsoDate(new Date())): {
+export function finishCurrentPeriod(dateText = formatIsoDate(appNow())): {
   config: MenstrualConfig;
   records: MenstrualRecord[];
   saved: boolean;
@@ -224,7 +225,7 @@ export function finishCurrentPeriod(dateText = formatIsoDate(new Date())): {
   if (!current.currentPeriodStartDate || current.currentPeriodStartDate > dateText) {
     return { config: current, records: loadMenstrualRecords(), saved: false };
   }
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const records = loadMenstrualRecords();
   const nextRecords = saveMenstrualRecords([
     {
@@ -243,7 +244,7 @@ export function finishCurrentPeriod(dateText = formatIsoDate(new Date())): {
   return { config: nextConfig, records: nextRecords, saved: true };
 }
 
-export function cancelFinishCurrentPeriod(dateText = formatIsoDate(new Date())): {
+export function cancelFinishCurrentPeriod(dateText = formatIsoDate(appNow())): {
   config: MenstrualConfig;
   records: MenstrualRecord[];
   restored: boolean;
@@ -298,7 +299,7 @@ export function saveMenstrualPeriodCareTrigger(input: {
     characterId: input.characterId,
     sessionId: input.sessionId,
     cycleKey: input.cycleKey,
-    triggeredAt: new Date().toISOString(),
+    triggeredAt: appNowISO(),
   };
   if (typeof window !== "undefined") {
     kvSet(MENSTRUAL_PERIOD_CARE_TRIGGERS_KEY, JSON.stringify([trigger, ...loadMenstrualPeriodCareTriggers()]));
@@ -329,7 +330,7 @@ export function buildMenstrualDayMap(
 ): Map<string, MenstrualDayState> {
   const result = new Map<string, MenstrualDayState>();
   if (!config.enabled) return result;
-  const today = formatIsoDate(new Date());
+  const today = formatIsoDate(appNow());
 
   for (const record of records) {
     for (const date of eachDateInclusive(record.startDate, record.endDate)) {
@@ -397,7 +398,7 @@ export function buildMenstrualDayMap(
 export function getNextPredictedPeriodStart(
   records: MenstrualRecord[],
   config: MenstrualConfig,
-  fromDate = formatIsoDate(new Date()),
+  fromDate = formatIsoDate(appNow()),
 ): string | null {
   if (!config.enabled) return null;
   const anchorDate = getPredictionAnchorDate(records, config);
@@ -412,7 +413,7 @@ export function getNextPredictedPeriodStart(
 export function getMenstrualPeriodCareEvent(
   records: MenstrualRecord[],
   config: MenstrualConfig,
-  targetDate = formatIsoDate(new Date()),
+  targetDate = formatIsoDate(appNow()),
 ): MenstrualPeriodCareEvent | null {
   if (!config.enabled || !config.periodCareEnabled) return null;
 
@@ -494,8 +495,8 @@ export function getMenstrualPeriodCareEvent(
   return null;
 }
 
-export function getMenstrualSummary(records: MenstrualRecord[], config: MenstrualConfig, targetDate = formatIsoDate(new Date())) {
-  const today = formatIsoDate(new Date());
+export function getMenstrualSummary(records: MenstrualRecord[], config: MenstrualConfig, targetDate = formatIsoDate(appNow())) {
+  const today = formatIsoDate(appNow());
   const latest = records[0] ?? null;
   const nextPredicted = getNextPredictedPeriodStart(records, config);
   const todayState = buildMenstrualDayMap(targetDate, targetDate, records, config).get(targetDate) ?? null;

@@ -1,4 +1,5 @@
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
+import { appNowISO } from "./app-clock";
 
 /* ═══════════════════════════════════════════
    Asset types (wallpaper + icon skin + font)
@@ -155,7 +156,7 @@ export function createDefaultIconScheme(): IconSkinScheme {
     id: "icon_scheme_default",
     name: "默认图标方案",
     iconSkins: {},
-    updatedAt: new Date().toISOString()
+    updatedAt: appNowISO()
   };
 }
 
@@ -185,7 +186,7 @@ export const DEFAULT_THEME_PROFILE: ThemeProfile = {
   enableGlobalShadows: true,
   enableGlobalBorder: false,
   globalBorderColor: "#000000",
-  updatedAt: new Date().toISOString()
+  updatedAt: appNowISO()
 };
 
 /* ═══════════════════════════════════════════
@@ -248,7 +249,7 @@ function normalizeIconScheme(raw: unknown): IconSkinScheme | null {
       ? decodeEscapedUnicode(source.name.trim())
       : "图标方案",
     iconSkins: normalizeIconSkins(source.iconSkins),
-    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date().toISOString()
+    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : appNowISO()
   };
 }
 
@@ -369,7 +370,7 @@ export function normalizeThemeProfile(raw: unknown): ThemeProfile {
     base.cssOverrides["--desktop-global-shadow"] = base.enableGlobalShadows ? "0.5" : "0";
   }
 
-  base.updatedAt = typeof source.updatedAt === "string" ? source.updatedAt as string : new Date().toISOString();
+  base.updatedAt = typeof source.updatedAt === "string" ? source.updatedAt as string : appNowISO();
 
   return base;
 }

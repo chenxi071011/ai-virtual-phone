@@ -1,4 +1,5 @@
 import { GAME_BUILTIN_TEMPLATES } from "./game-builtins";
+import { appNowISO } from "./app-clock";
 import { GAME_SINGLE_FILE_EXAMPLE_HTML } from "./game-creator-guide";
 import type {
   GameCollectionFolder,
@@ -113,8 +114,8 @@ export function normalizeGameTemplate(value: unknown): GameTemplate | null {
     favoriteCount: clampNumber(record.favoriteCount ?? record.favorite_count, 0, Number.MAX_SAFE_INTEGER, 0),
     commentCount: clampNumber(record.commentCount ?? record.comment_count, 0, Number.MAX_SAFE_INTEGER, 0),
     likedByMe: record.likedByMe === true || record.liked_by_me === true,
-    createdAt: cleanText(record.createdAt ?? record.created_at, 80) || new Date().toISOString(),
-    updatedAt: cleanText(record.updatedAt ?? record.updated_at, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt ?? record.created_at, 80) || appNowISO(),
+    updatedAt: cleanText(record.updatedAt ?? record.updated_at, 80) || appNowISO(),
   };
 }
 
@@ -139,7 +140,7 @@ function normalizeInstalledGame(value: unknown): GameInstalledItem | null {
   return {
     localId,
     remoteTemplateId,
-    installedAt: cleanText(record.installedAt, 80) || new Date().toISOString(),
+    installedAt: cleanText(record.installedAt, 80) || appNowISO(),
     templateSnapshot,
     roleAssignments: Array.isArray(record.roleAssignments)
       ? record.roleAssignments.map(normalizeAssignment).filter(Boolean) as GameRoleAssignment[]
@@ -165,8 +166,8 @@ function normalizeCollectionFolder(value: unknown): GameCollectionFolder | null 
     gameIds: Array.isArray(record.gameIds)
       ? [...new Set(record.gameIds.map(item => cleanText(item, 160)).filter(Boolean))].slice(0, 200)
       : [],
-    createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
-    updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+    createdAt: cleanText(record.createdAt, 80) || appNowISO(),
+    updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
   };
 }
 
@@ -179,7 +180,7 @@ function normalizeSave(value: unknown): GameSaveRecord | null {
   return {
     id,
     localGameId,
-    updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+    updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
     data: record.data ?? null,
   };
 }
@@ -227,7 +228,7 @@ function normalizeGameProjectionEntry(value: unknown): GameProjectionEntry | nul
     characterName,
     playerName: playerName || "玩家",
     summary,
-    timestamp: cleanText(record.timestamp, 80) || new Date().toISOString(),
+    timestamp: cleanText(record.timestamp, 80) || appNowISO(),
   };
 }
 
@@ -242,7 +243,7 @@ function createDefaultGameState(): GameState {
     hiddenDefaultCollectionIds: [],
     saves: [],
     gameEvents: [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -273,7 +274,7 @@ export function loadGameState(): GameState {
       gameEvents: Array.isArray(parsed.gameEvents)
         ? parsed.gameEvents.map(normalizeGameProjectionEntry).filter(Boolean).slice(-MAX_GAME_PROJECTION_EVENTS) as GameProjectionEntry[]
         : [],
-      updatedAt: cleanText(parsed.updatedAt, 80) || new Date().toISOString(),
+      updatedAt: cleanText(parsed.updatedAt, 80) || appNowISO(),
     };
   } catch {
     return createDefaultGameState();
@@ -296,7 +297,7 @@ export function saveGameState(state: GameState): GameState {
     gameEvents: [...(state.gameEvents ?? [])]
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       .slice(-MAX_GAME_PROJECTION_EVENTS),
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
   kvSet(GAME_STATE_KEY, JSON.stringify(next));
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(GAME_UPDATED_EVENT));
@@ -316,7 +317,7 @@ export function installGameTemplate(template: GameTemplate): GameInstallResult {
   const installedGame: GameInstalledItem = {
     localId: createId("installed_game"),
     remoteTemplateId: normalized.id,
-    installedAt: new Date().toISOString(),
+    installedAt: appNowISO(),
     templateSnapshot: normalized,
     roleAssignments: [],
     status: "installed",
@@ -378,7 +379,7 @@ export function upsertLocalTestGame(
     : {
         localId,
         remoteTemplateId: normalized.id,
-        installedAt: new Date().toISOString(),
+        installedAt: appNowISO(),
         templateSnapshot: normalized,
         roleAssignments: [],
         status: "installed",
@@ -403,7 +404,7 @@ export function deleteInstalledGame(localId: string): { ok: boolean; state: Game
       collectionFolders: state.collectionFolders.map(folder => ({
         ...folder,
         gameIds: folder.gameIds.filter(id => id !== existing.remoteTemplateId),
-        updatedAt: folder.gameIds.includes(existing.remoteTemplateId) ? new Date().toISOString() : folder.updatedAt,
+        updatedAt: folder.gameIds.includes(existing.remoteTemplateId) ? appNowISO() : folder.updatedAt,
       })),
       saves: state.saves.filter(item => item.localGameId !== localId),
       gameEvents: state.gameEvents.filter(item => item.localGameId !== localId),
@@ -423,7 +424,7 @@ export function saveGameRoleAssignments(localId: string, roleAssignments: GameRo
 
 export function markGamePlayed(localId: string): GameState {
   const state = loadGameState();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return saveGameState({
     ...state,
     installedGames: state.installedGames.map(item => item.localId === localId
@@ -438,7 +439,7 @@ export function loadGameSave(localId: string): unknown {
 
 export function saveGameSave(localId: string, data: unknown): GameState {
   const state = loadGameState();
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const existing = state.saves.find(item => item.localGameId === localId);
   const save: GameSaveRecord = {
     id: existing?.id || createId("game_save"),
@@ -466,7 +467,7 @@ export function recordGameProjectionEvent(input: {
   const state = loadGameState();
   const summary = cleanText(input.summary, Infinity);
   if (!summary) return { entry: null, state };
-  const timestamp = input.timestamp || new Date().toISOString();
+  const timestamp = input.timestamp || appNowISO();
   const localGameId = cleanText(input.localGameId, 160);
   const remoteTemplateId = cleanText(input.remoteTemplateId, 160);
   const characterId = cleanText(input.characterId, 160);
@@ -563,8 +564,8 @@ export function loadGameDrafts(): GameHallDraft[] {
         publishedTemplateId: cleanText(record.publishedTemplateId, 160) || undefined,
         hasUnpublishedChanges: record.hasUnpublishedChanges === true ? true : undefined,
         importedFrom: cleanText(record.importedFrom, 400) || undefined,
-        createdAt: cleanText(record.createdAt, 80) || new Date().toISOString(),
-        updatedAt: cleanText(record.updatedAt, 80) || new Date().toISOString(),
+        createdAt: cleanText(record.createdAt, 80) || appNowISO(),
+        updatedAt: cleanText(record.updatedAt, 80) || appNowISO(),
       } satisfies GameHallDraft;
     }).filter(Boolean) as GameHallDraft[];
   } catch {

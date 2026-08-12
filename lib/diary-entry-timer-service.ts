@@ -1,4 +1,5 @@
 import { bgSetInterval } from "./bg-timer";
+import { appNowISO } from "./app-clock";
 import { loadCharacters } from "./character-storage";
 import type { Character } from "./character-types";
 import { generateDiaryEntryForCharacter } from "./diary-entry-engine";
@@ -76,7 +77,7 @@ export async function runDiaryEntryTimerCheck(): Promise<void> {
 
   running = true;
   const attemptedIds = dueTargets.map(character => character.id);
-  const stamp = new Date().toISOString();
+  const stamp = appNowISO();
   let createdCount = 0;
   const createdNames: string[] = [];
   const failedNames: string[] = [];

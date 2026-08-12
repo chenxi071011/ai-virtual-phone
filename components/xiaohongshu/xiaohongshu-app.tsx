@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type TouchEvent, type UIEvent, type WheelEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { ShareFat } from "@phosphor-icons/react";
 import {
   AtSign,
@@ -235,7 +236,7 @@ function makeNpcAccount(name: string): XiaohongshuAccount {
     type: "npc",
     id: makeXiaohongshuNpcId(name),
     name,
-    followedAt: new Date().toISOString(),
+    followedAt: appNowISO(),
   };
 }
 
@@ -357,7 +358,7 @@ function isCharacterXiaohongshuAuthor(authorName: string, character: Character, 
 
 function createCharacterPost(character: Character, activity: ParsedXiaohongshuCharacterActivity): XiaohongshuNote | null {
   if (!activity.post) return null;
-  const now = new Date().toISOString();
+  const now = appNowISO();
   const displayName = resolveCharacterXiaohongshuDisplayName(character);
   const noteId = `xhs_char_note_${character.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const comments = activity.post.comments
@@ -1009,7 +1010,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
     });
   }
 
-  function createOutgoingDmMessage(thread: XiaohongshuDmThread, text: string, createdAt = new Date().toISOString()): XiaohongshuNotification {
+  function createOutgoingDmMessage(thread: XiaohongshuDmThread, text: string, createdAt = appNowISO()): XiaohongshuNotification {
     const userName = state.profile.nickname || userIdentity?.name || "我";
     return {
       ...makeXiaohongshuNotification({
@@ -1046,7 +1047,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
     clearErrorState();
     setDmEmojiOpen(false);
     const pendingText = dmDraft.trim();
-    const pendingMessage = pendingText ? createOutgoingDmMessage(thread, pendingText, new Date().toISOString()) : null;
+    const pendingMessage = pendingText ? createOutgoingDmMessage(thread, pendingText, appNowISO()) : null;
     if (pendingMessage) setDmDraft("");
     let current = pendingMessage
       ? saveXiaohongshuState({
@@ -1141,7 +1142,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
       id: character.id,
       name: resolveCharacterXiaohongshuDisplayName(character),
       avatar: character.avatar || undefined,
-      followedAt: new Date().toISOString(),
+      followedAt: appNowISO(),
     };
   }
 
@@ -1151,7 +1152,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
       type: note.source,
       id: note.authorId || (note.source === "npc" ? makeXiaohongshuNpcId(note.authorName) : note.source),
       name: note.authorName,
-      followedAt: new Date().toISOString(),
+      followedAt: appNowISO(),
     };
   }
 
@@ -1165,7 +1166,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
     const existing = new Set(current.socialGraph.followers.map(accountKey));
     const added = dedupeAccounts(accounts.filter(account => account.name.trim()))
       .filter(account => !existing.has(accountKey(account)))
-      .map(account => ({ ...account, followedAt: account.followedAt || new Date().toISOString() }));
+      .map(account => ({ ...account, followedAt: account.followedAt || appNowISO() }));
     if (added.length === 0) return { next: current, added };
     const notifications = added.map(account => makeXiaohongshuNotification({
       type: "follow" as const,
@@ -1646,7 +1647,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
           ...item,
           liked: nextLiked,
           likeCount: Math.max(0, item.likeCount + (item.liked ? -1 : 1)),
-          updatedAt: new Date().toISOString(),
+          updatedAt: appNowISO(),
         };
       });
       return saveXiaohongshuState({
@@ -1670,7 +1671,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
           ...item,
           saved: nextSaved,
           saveCount: Math.max(0, item.saveCount + (item.saved ? -1 : 1)),
-          updatedAt: new Date().toISOString(),
+          updatedAt: appNowISO(),
         };
       });
       return saveXiaohongshuState({
@@ -1693,7 +1694,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
       const exists = following.some(item => accountKey(item) === key);
       const nextFollowing = exists
         ? following.filter(item => accountKey(item) !== key)
-        : [{ ...account, followedAt: new Date().toISOString() }, ...following];
+        : [{ ...account, followedAt: appNowISO() }, ...following];
       return saveXiaohongshuState({
         ...current,
         profile: {
@@ -1736,7 +1737,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
               likeCount: disliked && item.liked ? Math.max(0, item.likeCount - 1) : item.likeCount,
             };
           }),
-          updatedAt: new Date().toISOString(),
+          updatedAt: appNowISO(),
         };
       }),
     }));
@@ -1765,7 +1766,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
             ...note,
             comments: [...note.comments, userComment],
             commentCount: note.commentCount + 1,
-            updatedAt: new Date().toISOString(),
+            updatedAt: appNowISO(),
           }
         : note),
       userInteractions: {
@@ -1919,7 +1920,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
           ...note,
           comments,
           commentCount: Math.max(0, note.commentCount - deletedCommentIds.size),
-          updatedAt: new Date().toISOString(),
+          updatedAt: appNowISO(),
         };
       });
       const targetNote = notes.find(note => note.id === comment.noteId);

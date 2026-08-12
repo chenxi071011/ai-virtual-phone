@@ -1430,6 +1430,63 @@
 .settings-toggle-control {
   flex: 0 0 auto;
 }
+/* 自定义时间：展开的面板要换行独占一整行，卡片本身仍是「图标 + 文案 + 开关」的横排 */
+.settings-custom-time-card {
+  flex-wrap: wrap;
+}
+.settings-custom-time-panel {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.settings-custom-time-now {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.settings-custom-time-now-label,
+.settings-custom-time-field-label {
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--c-text);
+  flex: 0 0 auto;
+}
+.settings-custom-time-now-value {
+  font-size: calc(15px*var(--app-text-scale,1));
+  font-weight: 700;
+  color: var(--c-text-title);
+  font-variant-numeric: tabular-nums;
+}
+.settings-custom-time-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-custom-time-input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-custom-time-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-custom-time-offset {
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--c-text);
+  min-width: 0;
+}
+.settings-custom-time-reset {
+  flex: 0 0 auto;
+}
+.settings-custom-time-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .settings-tools-menu {
   margin-top: 10px;
 }

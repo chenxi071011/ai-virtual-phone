@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -227,12 +228,12 @@ function appendBackendLog(session: CoCreateSession, log: Omit<CoCreateBackendLog
   const nextLog: CoCreateBackendLog = {
     ...log,
     id: createClientId("cocreate_backend"),
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
   return {
     ...session,
     backendLogs: [...(session.backendLogs || []), nextLog].slice(-60),
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
   };
 }
 
@@ -293,7 +294,7 @@ function clearCoCreateToolHistory(session: CoCreateSession): ClearCoCreateToolHi
     session: {
       ...session,
       messages,
-      updatedAt: deletedMessages || cleanedMessages ? new Date().toISOString() : session.updatedAt,
+      updatedAt: deletedMessages || cleanedMessages ? appNowISO() : session.updatedAt,
     },
     deletedMessages,
     cleanedMessages,
@@ -672,7 +673,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
     persistSession({
       ...session,
       seenArchiveNoteChapterIds: Array.from(new Set([...seenArchiveNoteChapterIds, previousArchiveNoteChapterId])),
-      updatedAt: new Date().toISOString(),
+      updatedAt: appNowISO(),
     });
   }, [
     hasSeenPreviousArchiveNote,
@@ -821,7 +822,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
     const updated = {
       ...editingWork,
       title: editingWorkTitle.trim() || "未命名共创",
-      updatedAt: new Date().toISOString(),
+      updatedAt: appNowISO(),
     };
     const nextLibrary = saveCoCreateLibrary({
       ...library,
@@ -982,7 +983,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
       setChapterReaderEditing(false);
       return;
     }
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const changedParts: string[] = [];
     if (titleChanged) changedParts.push("标题");
     if (contentChanged) changedParts.push("正文");
@@ -1586,7 +1587,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
       if (!target || !target.content?.trim()) return;
       const result = await generateCoCreateChapterAutoArchive(snapshot, target);
       if (!result) return;
-      const archivedAt = new Date().toISOString();
+      const archivedAt = appNowISO();
       setSession((current) => {
         if (!current.chapters.some((chapter) => chapter.id === chapterId)) return current;
         const next = {
@@ -1621,7 +1622,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
         setStatus("最近没有足够的新对话可以总结。");
         return;
       }
-      const summarizedAt = new Date().toISOString();
+      const summarizedAt = appNowISO();
       const targetChapterId = sessionRef.current.activeChapterId;
       setSession((current) => {
         const chapters = current.chapters.map((chapter) => {

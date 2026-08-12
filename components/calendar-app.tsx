@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { appNow } from "@/lib/app-clock";
 import { Bot, Check, ChevronLeft, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
@@ -131,7 +132,7 @@ export function PhoneCalendarApp({
   onClose: () => void;
   onNotice?: (text: string) => void;
 }) {
-  const todayIso = formatIsoDate(new Date());
+  const todayIso = formatIsoDate(appNow());
   const [owners, setOwners] = useState<OwnerOption[]>(() => buildOwnerOptions());
   const [selectedKey, setSelectedKey] = useState<string>(() => owners[0]?.key ?? "user:me");
   const [view, setView] = useState<"month" | "detail">("month");

@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { appNowISO } from "./app-clock";
 
 // ── Types ──────────────────────────────────────
 
@@ -124,7 +125,7 @@ export async function loadDwellingLayout(characterId: string): Promise<CachedLay
 }
 
 export async function saveDwellingLayout(characterId: string, layout: DwellingLayout): Promise<void> {
-    const updatedAt = new Date().toISOString();
+    const updatedAt = appNowISO();
     _layoutCache.set(characterId, { layout, updatedAt });
     try {
         await db.layouts.put({

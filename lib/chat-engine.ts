@@ -69,6 +69,7 @@ import { getActiveAppTags } from "./content-tag-utils";
 import { isNeteaseConfigured, getUserPlaylists, getPlaylistTracks, checkLoginStatus, loadMusicApiConfig } from "./music-service";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
+import { appNow, appNowISO } from "./app-clock";
 import { buildCharacterTimeContext } from "./character-time";
 import { getPromptTimestampOptionsForTimeContext } from "./prompt-time";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
@@ -503,7 +504,7 @@ export function publishDebugPromptSnapshot(params: {
     const { request, config, preset, meta, options, requestKind, tools } = params;
     const snapshot: DebugPromptSnapshot = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        timestamp: new Date().toISOString(),
+        timestamp: appNowISO(),
         requestKind,
         provider: config.provider,
         providerKind: request.providerKind,
@@ -813,7 +814,7 @@ export async function sendLLMStreamRequest(
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse: rawOutput,
-            timestamp: new Date().toISOString(),
+            timestamp: appNowISO(),
         };
         const logs = _loadLogs();
         logs.push(logEntry);
@@ -979,7 +980,7 @@ export async function sendLLMRequest(
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse: rawOutput,
-            timestamp: new Date().toISOString(),
+            timestamp: appNowISO(),
             usage: parsed.usage,
         };
         const logs = _loadLogs();
@@ -1208,7 +1209,7 @@ export async function sendLLMToolStreamRequest(
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse: JSON.stringify({ content, reasoning, toolCalls, raw: rawResponse }),
-            timestamp: new Date().toISOString(),
+            timestamp: appNowISO(),
         };
         const logs = _loadLogs();
         logs.push(logEntry);
@@ -1332,7 +1333,7 @@ export async function sendLLMToolRequest(
             model: config.defaultModel,
             messages: sanitizedMessages,
             rawResponse,
-            timestamp: new Date().toISOString(),
+            timestamp: appNowISO(),
             usage: parsed.usage,
         };
         const logs = _loadLogs();
@@ -1404,7 +1405,7 @@ export function clearMusicCloudSyncData(): void {
         loggedIn: false,
         playlistSummary: "",
         localSummary: prev?.localSummary ?? "",
-        syncedAt: new Date().toISOString(),
+        syncedAt: appNowISO(),
     });
 }
 
@@ -1470,7 +1471,7 @@ export async function syncMusicData(): Promise<MusicSyncData> {
         loggedIn,
         playlistSummary,
         localSummary,
-        syncedAt: new Date().toISOString(),
+        syncedAt: appNowISO(),
     };
     saveMusicSyncData(data);
     return data;
@@ -1857,7 +1858,7 @@ export async function buildChatPromptMessages(
                 role: "user",
                 content: "",
                 status: "sent",
-                createdAt: new Date().toISOString(),
+                createdAt: appNowISO(),
                 mediaType: "image",
                 mediaUrl: imageUrl,
                 mediaData: { label: "视频通话当前画面" },
@@ -1865,7 +1866,7 @@ export async function buildChatPromptMessages(
         ]
         : history;
 
-    const now = new Date();
+    const now = appNow();
     const promptTimeContext = buildCharacterTimeContext(character.timeZone, now);
     const promptTimestampOptions = getPromptTimestampOptionsForTimeContext(promptTimeContext);
     const memConfig = loadMemoryConfig();
@@ -2588,7 +2589,7 @@ export async function previewPromptPayload(
             role: "system",
             content: `[对方没有回复你的消息，距上次回复已过约${finalSilenceSec}秒]`,
             status: "sent",
-            createdAt: new Date().toISOString(),
+            createdAt: appNowISO(),
         });
         effectiveHistory = annotated;
     }
@@ -2650,7 +2651,7 @@ export async function previewPromptRequestSnapshot(
             role: "system",
             content: `[对方没有回复你的消息，距上次回复已过约${finalSilenceSec}秒]`,
             status: "sent",
-            createdAt: new Date().toISOString(),
+            createdAt: appNowISO(),
         });
         effectiveHistory = annotated;
     }

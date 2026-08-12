@@ -1,4 +1,5 @@
 import { DEFAULT_THEME_PROFILE, normalizeThemeProfile, type ThemeAssetType, type ThemeProfile } from "@/lib/theme-types";
+import { appNowISO } from "./app-clock";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { openIndexedDbAtLeast } from "./idb-open";
 
@@ -271,7 +272,7 @@ export async function writeThemeAssetRecords(records: ThemeAssetRecord[]): Promi
     }
     uniqueRecords.set(record.id, {
       ...record,
-      updatedAt: record.updatedAt || new Date().toISOString()
+      updatedAt: record.updatedAt || appNowISO()
     });
   });
 
@@ -306,7 +307,7 @@ export async function saveThemeAssetFromBlob(
     type,
     mimeType,
     dataUrl,
-    updatedAt: new Date().toISOString()
+    updatedAt: appNowISO()
   };
   await saveAssetRecord(record);
   return id;
@@ -333,7 +334,7 @@ export function readThemeProfile(): ThemeProfile {
 export function writeThemeProfile(profile: ThemeProfile): ThemeProfile {
   const normalized = normalizeThemeProfile({
     ...profile,
-    updatedAt: new Date().toISOString()
+    updatedAt: appNowISO()
   });
 
   if (hasLocalStorage()) {

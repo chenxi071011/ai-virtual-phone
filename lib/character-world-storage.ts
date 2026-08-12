@@ -1,4 +1,5 @@
 import { loadCharacters } from "./character-storage";
+import { appNowISO } from "./app-clock";
 import { loadChatContacts } from "./chat-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import type { Character } from "./character-types";
@@ -41,7 +42,7 @@ function dispatchUpdated(): void {
     }
 }
 
-function createDefaultGroup(memberIds: string[], now = new Date().toISOString()): CharacterWorldGroup {
+function createDefaultGroup(memberIds: string[], now = appNowISO()): CharacterWorldGroup {
     return {
         id: DEFAULT_CHARACTER_WORLD_ID,
         name: "默认世界",
@@ -64,7 +65,7 @@ function parseGroups(raw: string | null): CharacterWorldGroup[] {
 }
 
 function normalizeGroups(groups: CharacterWorldGroup[], characters: Character[]): { groups: CharacterWorldGroup[]; changed: boolean } {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const validIds = new Set(characters.map(character => character.id));
     const assigned = new Set<string>();
     let changed = false;
@@ -154,7 +155,7 @@ export function saveCharacterWorldGroups(groups: CharacterWorldGroup[]): void {
 
 export function createCharacterWorldGroup(name: string): CharacterWorldGroup {
     const groups = loadCharacterWorldGroups();
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const group: CharacterWorldGroup = {
         id: generateId("world"),
         name: name.trim() || "新的世界",
@@ -169,7 +170,7 @@ export function createCharacterWorldGroup(name: string): CharacterWorldGroup {
 }
 
 export function renameCharacterWorldGroup(groupId: string, name: string): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(loadCharacterWorldGroups().map(group =>
         group.id === groupId
             ? { ...group, name: name.trim() || group.name, updatedAt: now }
@@ -178,7 +179,7 @@ export function renameCharacterWorldGroup(groupId: string, name: string): void {
 }
 
 export function updateCharacterWorldDescription(groupId: string, description: string): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(loadCharacterWorldGroups().map(group =>
         group.id === groupId
             ? { ...group, description, updatedAt: now }
@@ -191,7 +192,7 @@ export function deleteCharacterWorldGroup(groupId: string): void {
     const groups = loadCharacterWorldGroups();
     const target = groups.find(group => group.id === groupId);
     if (!target) return;
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(groups
         .filter(group => group.id !== groupId)
         .map(group => group.id === DEFAULT_CHARACTER_WORLD_ID
@@ -201,7 +202,7 @@ export function deleteCharacterWorldGroup(groupId: string): void {
 }
 
 export function moveCharacterToWorld(characterId: string, groupId: string): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(loadCharacterWorldGroups().map(group => {
         const nextMemberIds = group.memberIds.filter(id => id !== characterId);
         const receivesMember = group.id === groupId;
@@ -221,7 +222,7 @@ export function moveCharacterToWorld(characterId: string, groupId: string): void
 export function addCharacterWorldRelation(groupId: string, fromCharacterId: string, toCharacterId: string, label: string): void {
     const trimmedLabel = label.trim();
     if (!trimmedLabel || fromCharacterId === toCharacterId) return;
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(loadCharacterWorldGroups().map(group => {
         if (group.id !== groupId) return group;
         const memberSet = new Set(group.memberIds);
@@ -243,7 +244,7 @@ export function addCharacterWorldRelation(groupId: string, fromCharacterId: stri
 }
 
 export function deleteCharacterWorldRelation(groupId: string, relationId: string): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     saveCharacterWorldGroups(loadCharacterWorldGroups().map(group =>
         group.id === groupId
             ? { ...group, relations: group.relations.filter(relation => relation.id !== relationId), updatedAt: now }

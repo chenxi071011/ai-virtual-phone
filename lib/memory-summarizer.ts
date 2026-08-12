@@ -3,6 +3,7 @@
 // Trigger: every N events (configurable). Short-term events are NOT deleted after summarization.
 
 import type { MemoryEntry } from "./memory-types";
+import { appNowISO } from "./app-clock";
 import { DEFAULT_SUMMARIZATION_PROMPT } from "./memory-types";
 import {
     loadMemoryConfig,
@@ -140,7 +141,7 @@ export async function runSummarizationPipeline(
     ));
 
     // Save as long-term memory
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const longTermEntry: MemoryEntry = {
         id: `mem_lt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         characterId,

@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { appNowISO } from "./app-clock";
 import {
   DEFAULT_NOTE_WALL_BOARD,
   NOTE_WALL_BOARD_ID,
@@ -219,8 +220,8 @@ export function normalizeNoteWallNote(raw: unknown): NoteWallNote | null {
     updatedBy: typeof record.updated_by === "string" ? record.updated_by : undefined,
     deletedBy: typeof record.deleted_by === "string" ? record.deleted_by : undefined,
     deletedAt: typeof record.deleted_at === "string" ? record.deleted_at : null,
-    createdAt: typeof record.created_at === "string" ? record.created_at : new Date().toISOString(),
-    updatedAt: typeof record.updated_at === "string" ? record.updated_at : new Date().toISOString(),
+    createdAt: typeof record.created_at === "string" ? record.created_at : appNowISO(),
+    updatedAt: typeof record.updated_at === "string" ? record.updated_at : appNowISO(),
   };
 }
 
@@ -253,7 +254,7 @@ export function buildNoteWallInsertPayload(input: NoteWallNoteInput): Record<str
 
 export function buildNoteWallPatchPayload(input: NoteWallNotePatch): Record<string, unknown> {
   const patch: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
+    updated_at: appNowISO(),
   };
   if (input.summary !== undefined) patch.summary = cleanText(input.summary, 180) || "想在这里留一张便签";
   if (input.body !== undefined) patch.body = cleanText(input.body, 5000) || "……";
@@ -294,8 +295,8 @@ export function normalizeNoteWallComment(raw: unknown): NoteWallComment | null {
     createdBy: typeof record.created_by === "string" ? record.created_by : undefined,
     deletedBy: typeof record.deleted_by === "string" ? record.deleted_by : undefined,
     deletedAt: typeof record.deleted_at === "string" ? record.deleted_at : null,
-    createdAt: typeof record.created_at === "string" ? record.created_at : new Date().toISOString(),
-    updatedAt: typeof record.updated_at === "string" ? record.updated_at : new Date().toISOString(),
+    createdAt: typeof record.created_at === "string" ? record.created_at : appNowISO(),
+    updatedAt: typeof record.updated_at === "string" ? record.updated_at : appNowISO(),
   };
 }
 

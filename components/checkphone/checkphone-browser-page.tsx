@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, RefreshCw, Search, Trash2, Clock, Bookmark, Globe } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -75,7 +76,7 @@ export function CheckPhoneBrowserPage({ character, onBack }: CheckPhoneBrowserPa
       debugParseError: nextDebugParseError,
     } = await generateCheckPhoneBrowser(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneBrowserPayload> = {
         id: `${character.id}:browser`,
         characterId: character.id,

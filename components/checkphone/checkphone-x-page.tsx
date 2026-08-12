@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import {
   BarChart3,
@@ -256,7 +257,7 @@ export function CheckPhoneXPage({ character, onBack }: CheckPhoneXPageProps) {
       debugNormalizeError: nextDebugNormalizeError,
     } = await generateCheckPhoneX(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneXPayload> = {
         id: `${character.id}:x`,
         characterId: character.id,

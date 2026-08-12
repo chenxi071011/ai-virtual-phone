@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import {
   Archive,
   Check,
@@ -794,7 +795,7 @@ function normalizeStudioDraftRecord(value: unknown): BlackMarketStudioDraft | nu
   const id = String(record.id ?? "").trim();
   if (!id) return null;
   const draft = normalizeStudioDraftPayload(record.draft);
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     id,
     title: String(record.title ?? draft.title ?? "未命名草稿").trim() || "未命名草稿",
@@ -1692,7 +1693,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
   }
 
   function handleSaveStudioDraft(): void {
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const id = editingDraftId || createStudioDraftId();
     const title = draft.title.trim() || "未命名草稿";
     const existingDraft = editingDraftId ? studioDrafts.find(item => item.id === editingDraftId) : null;
@@ -1794,7 +1795,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
     if (!title) throw new Error("商品标题不能为空。");
     if (!openingHtml) throw new Error("开场画布不能为空。");
     if (!aiInstruction) throw new Error("剧情指令不能为空。");
-    const now = new Date().toISOString();
+    const now = appNowISO();
     return {
       id: existing?.id || `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       title,
@@ -1833,7 +1834,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
       let draftId = editingDraftId;
       if (!draftId) {
         draftId = createStudioDraftId();
-        const now = new Date().toISOString();
+        const now = appNowISO();
         const title = draft.title.trim() || "未命名草稿";
         setEditingDraftId(draftId);
         setStudioDrafts(current => saveBlackMarketStudioDrafts([
@@ -1884,7 +1885,7 @@ export function BlackMarketApp({ onClose, autoOpenLocalId }: BlackMarketAppProps
       }
       // 发布后保留草稿并写入关联：标签变「已发布」，下次发布即同步更新，不产生新档案
       if (editingDraftId) {
-        const now = new Date().toISOString();
+        const now = appNowISO();
         setStudioDrafts(current => saveBlackMarketStudioDrafts(current.map(item =>
           item.id === editingDraftId
             ? {

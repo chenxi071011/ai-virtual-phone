@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, Paperclip, RefreshCw, Star, Trash2, Menu, Edit2, Mail, Video, Archive, MoreVertical, ChevronDown, CornerUpLeft, CornerUpRight, Smile } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -102,7 +103,7 @@ export function CheckPhoneEmailPage({ character, onBack }: CheckPhoneEmailPagePr
       snapshot?.updatedAt,
     );
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneEmailPayload> = {
         id: `${character.id}:email`,
         characterId: character.id,

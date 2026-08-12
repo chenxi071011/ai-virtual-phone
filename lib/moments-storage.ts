@@ -2,6 +2,7 @@
 // KV-DB persistence for Moments (朋友圈) feature.
 
 import type { MomentPost, MomentComment, AIMomentSchedule, PendingReaction } from "./moments-types";
+import { appNowISO } from "./app-clock";
 import { loadCharacters } from "./character-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { DEFAULT_MOMENTS_BILINGUAL_PROMPT } from "./bilingual-prompt-defaults";
@@ -109,7 +110,7 @@ export function addMomentPost(post: Omit<MomentPost, "id" | "likes" | "createdAt
         ...post,
         id: generateId("moment"),
         likes: [],
-        createdAt: new Date().toISOString(),
+        createdAt: appNowISO(),
     };
     _postsCache = [newPost, ...loadMomentPosts()]; // newest first
     dbPutPost(newPost);
@@ -152,7 +153,7 @@ export function addMomentComment(comment: Omit<MomentComment, "id" | "createdAt"
     const newComment: MomentComment = {
         ...comment,
         id: generateId("mc"),
-        createdAt: comment.createdAt ?? new Date().toISOString(),
+        createdAt: comment.createdAt ?? appNowISO(),
     };
     _commentsCache = [...loadAllMomentComments(), newComment];
     dbPutComment(newComment);
@@ -225,7 +226,7 @@ export function toggleMomentLike(
         post.likes.push({
             authorType,
             authorId,
-            createdAt: new Date().toISOString(),
+            createdAt: appNowISO(),
         });
         dbPutPost(post);
         return true; // liked

@@ -70,6 +70,7 @@ import { parseOfflineResponse, type ParsedOfflineResponse } from "./chat-offline
 import { buildProviderRequest, nativeToolProtocolForConfig, toLlmRequestMessages, type LlmRequestMessage, type LlmToolCall } from "./llm-provider-adapter";
 import type { DebugPromptSnapshot } from "./debug-store";
 import { throwIfAborted } from "./abort-utils";
+import { appNow, appNowISO } from "./app-clock";
 import { buildCharacterTimeContext, buildGroupTimeContext } from "./character-time";
 import { getPromptTimestampOptionsForTimeContext } from "./prompt-time";
 
@@ -321,7 +322,7 @@ async function buildGroupChatPromptMessages(
     const memConfig = loadMemoryConfig();
     const allWorldBooks = loadWorldBooks();
 
-    const now = new Date();
+    const now = appNow();
     const memberTimeContexts: Record<string, ReturnType<typeof buildCharacterTimeContext>> = {};
     const memberDataPromises = participantIds.map(async (charId): Promise<GroupMemberData | null> => {
         const character = charMap.get(charId);

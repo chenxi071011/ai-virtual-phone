@@ -1,6 +1,7 @@
 // lib/music-storage.ts — IndexedDB local music storage (audio blobs + metadata)
 
 import { openIndexedDbAtLeast } from "./idb-open";
+import { appNowISO } from "./app-clock";
 
 export type MusicTrack = {
     id: string;
@@ -100,7 +101,7 @@ export async function updateTrackMeta(trackId: string, updates: Partial<MusicTra
     });
 }
 
-export async function markTrackPlayed(trackId: string, playedAt = new Date().toISOString()): Promise<void> {
+export async function markTrackPlayed(trackId: string, playedAt = appNowISO()): Promise<void> {
     await updateTrackMeta(trackId, { lastPlayedAt: playedAt });
 }
 

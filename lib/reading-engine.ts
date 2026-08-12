@@ -2,6 +2,7 @@
 // All prompts go through the preset system via assemblePromptPayload. No extra message push.
 
 import type { Book, BookChapter, ReadingAnnotation } from "./reading-types";
+import { appNowISO } from "./app-clock";
 import type { ChatSession } from "./chat-storage";
 import { loadChatMessages, pushChatMessage } from "./chat-storage";
 import { loadCharacters } from "./character-storage";
@@ -332,7 +333,7 @@ export async function generateAnnotationBatch(
                 characterId,
                 characterName: character.name,
                 content,
-                createdAt: new Date().toISOString(),
+                createdAt: appNowISO(),
             });
         }
     }

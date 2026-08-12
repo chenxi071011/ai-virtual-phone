@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 // lib/weixin-storage.ts
 // WeChat iLink Bot 配置持久化（localStorage）
 
@@ -32,7 +33,7 @@ export function addWeixinBot(bot: Omit<WeixinBotConfig, "id" | "addedAt">): Weix
     const newBot: WeixinBotConfig = {
         ...bot,
         id: `wxbot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        addedAt: new Date().toISOString(),
+        addedAt: appNowISO(),
     };
     const bots = loadWeixinBots();
     saveWeixinBots([...bots, newBot]);
@@ -43,7 +44,7 @@ export function addExclusiveWeixinBot(bot: Omit<WeixinBotConfig, "id" | "addedAt
     const newBot: WeixinBotConfig = {
         ...bot,
         id: `wxbot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        addedAt: new Date().toISOString(),
+        addedAt: appNowISO(),
         enabled: true,
     };
     const disabledBots = loadWeixinBots().map(item => ({ ...item, enabled: false }));

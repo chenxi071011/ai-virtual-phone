@@ -1,4 +1,5 @@
 import type { Character, CanvasBgItem } from "./character-types";
+import { appNowISO } from "./app-clock";
 import { normalizeTimeZone } from "./character-time";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
@@ -124,7 +125,7 @@ function isValidCharacter(x: unknown): x is Character {
 export function createCharacter(
   data: Omit<Character, "id" | "createdAt" | "updatedAt" | "wechatID"> & { wechatID?: string }
 ): Character {
-  const now = new Date().toISOString();
+  const now = appNowISO();
   return {
     ...data,
     id: `char_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,

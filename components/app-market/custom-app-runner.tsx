@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { CheckCircle2, Circle, FileJson, Layers, LoaderCircle, MoreHorizontal, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 
 import type { InstalledCustomApp } from "@/lib/custom-app-types";
@@ -674,7 +675,7 @@ function buildLaunchEventPayload(app: InstalledCustomApp, launchContext?: Record
     appId: app.id,
     appName: app.name,
     launchContext: launchContext ?? null,
-    launchedAt: new Date().toISOString(),
+    launchedAt: appNowISO(),
   };
 }
 
@@ -1174,8 +1175,8 @@ export function CustomAppRunner({
         const row = {
           ...(record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : {}),
           id: recordId((record.data as Record<string, unknown> | undefined)?.id),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: appNowISO(),
+          updatedAt: appNowISO(),
         };
         writeCustomAppCollection(app.id, collection, [row, ...rows]);
         return row;
@@ -1186,7 +1187,7 @@ export function CustomAppRunner({
         let updated: Record<string, unknown> | null = null;
         writeCustomAppCollection(app.id, collection, rows.map(row => {
           if (String(row.id) !== id) return row;
-          updated = { ...row, ...patch, id, updatedAt: new Date().toISOString() };
+          updated = { ...row, ...patch, id, updatedAt: appNowISO() };
           return updated;
         }));
         return updated;
@@ -1299,7 +1300,7 @@ export function CustomAppRunner({
       const stored = await storeMediaBase64(base64, declaredMime);
       const refRows = readCustomAppCollection(app.id, CUSTOM_APP_MEDIA_REFS_COLLECTION);
       writeCustomAppCollection(app.id, CUSTOM_APP_MEDIA_REFS_COLLECTION, [
-        { id: stored.ref, mime: stored.mime, category: stored.category, createdAt: new Date().toISOString() },
+        { id: stored.ref, mime: stored.mime, category: stored.category, createdAt: appNowISO() },
         ...refRows,
       ]);
       return { ref: stored.ref, mime: stored.mime, category: stored.category };

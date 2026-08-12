@@ -18,6 +18,7 @@ import {
     getLatestCharacterStateValues,
 } from "./chat-storage";
 import type { ChatMessage, StateValue } from "./chat-storage";
+import { appNowISO, appNowMs } from "./app-clock";
 import { generateChatCompletion, flattenCompletionResult } from "./chat-engine";
 import { loadFollowUpConfig } from "./settings-storage";
 import { parseAIResponse } from "./rich-message-parser";
@@ -278,7 +279,9 @@ async function fireFollowUp(sched: { sessionId: string; count: number; delaySec?
 
         // Find the last user message timestamp to calculate silence duration
         const lastUserMsg = [...latestMessages].reverse().find(m => m.role === "user");
-        const lastUserTime = lastUserMsg ? new Date(lastUserMsg.createdAt).getTime() : Date.now();
+        // 跟消息 createdAt（应用时钟）比大小，这里必须同样用应用时钟，
+        // 否则开了自定义时间后沉默时长会整整差一个偏移量。
+        const lastUserTime = lastUserMsg ? new Date(lastUserMsg.createdAt).getTime() : appNowMs();
 
         // Build message list with follow-up round markers so AI knows its history
         const annotatedMessages: ChatMessage[] = [];
@@ -301,7 +304,7 @@ async function fireFollowUp(sched: { sessionId: string; count: number; delaySec?
             annotatedMessages.push(msg);
         }
 
-        const nowMs = Date.now();
+        const nowMs = appNowMs();
         const finalSilenceSec = Math.round((nowMs - lastUserTime) / 1000);
         const messagesWithHint: ChatMessage[] = [
             ...annotatedMessages,
@@ -311,7 +314,7 @@ async function fireFollowUp(sched: { sessionId: string; count: number; delaySec?
                 role: "system",
                 content: `[对方没有回复你的消息，距上次回复已过约${finalSilenceSec}秒]`,
                 status: "sent",
-                createdAt: new Date().toISOString(),
+                createdAt: appNowISO(),
             },
         ];
 
@@ -532,7 +535,7 @@ function handleFollowUpMediaAction(
         updateMessageMediaData(targetMsg.id, {
             ...targetMsg.mediaData,
             status: newStatus,
-            paymentResolvedAt: new Date().toISOString(),
+            paymentResolvedAt: appNowISO(),
             paymentPayerName: charName,
         });
     } else {

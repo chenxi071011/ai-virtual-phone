@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { appNowISO } from "@/lib/app-clock";
 import { useCheckPhoneRefresh } from "@/lib/checkphone-refresh-tracker";
 import { ChevronLeft, RefreshCw, Trash2 } from "lucide-react";
 import { CheckPhoneBilingualText } from "@/components/checkphone/checkphone-bilingual-text";
@@ -178,7 +179,7 @@ export function CheckPhoneSteamPage({ character, onBack }: CheckPhoneSteamPagePr
       debugNormalizeError: nextDebugNormalizeError,
     } = await generateCheckPhoneSteam(character.id, snapshot?.payload ?? null, snapshot?.updatedAt);
     if (payload) {
-      const now = new Date().toISOString();
+      const now = appNowISO();
       const nextSnapshot: CheckPhoneSnapshot<CheckPhoneSteamPayload> = {
         id: `${character.id}:steam`,
         characterId: character.id,

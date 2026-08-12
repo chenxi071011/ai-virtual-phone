@@ -1,4 +1,5 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
+import { appNowISO } from "./app-clock";
 import type {
   CoCreateCastMember,
   CoCreateChapter,
@@ -70,7 +71,7 @@ function normalizeSettings(value: unknown): CoCreateSettings {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return appNowISO();
 }
 
 function createId(prefix: string): string {

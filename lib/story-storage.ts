@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { appNowISO } from "./app-clock";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 
 export type StoryUiPrefs = {
@@ -164,7 +165,7 @@ export function createOrGetStorySession(characterId: string): StorySession {
   const session: StorySession = {
     id: generateId("story_sess"),
     characterId,
-    updatedAt: new Date().toISOString(),
+    updatedAt: appNowISO(),
     uiPrefs: {},
   };
   _sessionsCache.unshift(session);
@@ -179,7 +180,7 @@ export function updateStorySession(sessionId: string, updates: Partial<StorySess
     ..._sessionsCache[idx],
     ...updates,
     uiPrefs: { ..._sessionsCache[idx].uiPrefs, ...updates.uiPrefs },
-    updatedAt: updates.updatedAt || new Date().toISOString(),
+    updatedAt: updates.updatedAt || appNowISO(),
   };
   _sessionsCache[idx] = next;
   storyDb.sessions.put(next).catch(() => undefined);
@@ -192,7 +193,7 @@ export function pushStoryMessage(
   const message: StoryMessage = {
     ...input,
     id: generateId("story_msg"),
-    createdAt: new Date().toISOString(),
+    createdAt: appNowISO(),
   };
   _messagesCache.push(message);
   storyDb.messages.put(message).catch(() => undefined);

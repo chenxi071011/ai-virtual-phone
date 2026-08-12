@@ -7,6 +7,7 @@
 // 标签格式输出。API 配置仍沿用角色的聊天绑定（只取 config，不取预设/正则）。
 
 import { simpleLLMCall } from "./api-helpers";
+import { appNowISO } from "./app-clock";
 import { loadApiConfigs, loadBindingConfig, resolveBinding } from "./settings-storage";
 import { createCharacter, loadCharacters, saveCharacters } from "./character-storage";
 import {
@@ -281,7 +282,7 @@ export function materializeSupportingCharacter(
 ): Character {
     const characters = loadCharacters();
     const target = characters.find(c => c.id === targetCharacterId);
-    const now = new Date().toISOString();
+    const now = appNowISO();
     const index = options.placementIndex ?? 0;
 
     const newChar = createCharacter({
