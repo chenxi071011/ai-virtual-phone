@@ -273,11 +273,12 @@ export async function fetchShareIndex(source: ResourceHubSource): Promise<ShareI
 
 // ── 下载 ──
 
-export async function downloadResourceHubFile(source: ResourceHubSource, path: string): Promise<void> {
+/** 返回给用户看的结果文案——原生壳里写文件是静默的，调用方必须把它显示出来。 */
+export async function downloadResourceHubFile(source: ResourceHubSource, path: string): Promise<string> {
     const buffer = await fetchResourceHubBinary(source, path);
     const filename = path.split("/").pop() || "resource";
-    const { downloadFile } = await import("./download-utils");
-    await downloadFile(new Blob([buffer]), filename);
+    const { exportBlob } = await import("./download-utils");
+    return await exportBlob(new Blob([buffer]), filename);
 }
 
 // ── 导入 ──

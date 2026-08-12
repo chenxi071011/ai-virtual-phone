@@ -304,7 +304,7 @@ export function WeixinSettings({ onOpenDataManagement }: { onOpenDataManagement?
             if (!coreRes.ok) throw new Error("下载助手核心模块失败，请重新部署后再试。");
             const assistantCoreScript = await coreRes.text();
             const JSZip = (await import("jszip")).default;
-            const { downloadFile } = await import("@/lib/download-utils");
+            const { exportBlob } = await import("@/lib/download-utils");
             const zip = new JSZip();
             zip.file("assistant.mjs", assistantScript);
             zip.file("assistant-core.mjs", assistantCoreScript);
@@ -322,12 +322,12 @@ export function WeixinSettings({ onOpenDataManagement }: { onOpenDataManagement?
                 });
             }
             const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
-            await downloadFile(blob, `ai-phone-weixin-local-assistant-${new Date().toISOString().slice(0, 10)}.zip`);
+            const savedText = await exportBlob(blob, `ai-phone-weixin-local-assistant-${new Date().toISOString().slice(0, 10)}.zip`);
             const totalBytes = results.reduce((sum, item) => sum + item.bytes, 0);
             setCloudSyncConfig(loadWeixinCloudSyncConfig());
             setCloudSyncNotice({
                 ok: true,
-                text: `已生成本地助手包，并同步运行包 ${formatCloudSyncBytes(totalBytes)}。解压后双击「启动助手.bat」即可运行。`,
+                text: `${savedText}（本地助手包，含运行包 ${formatCloudSyncBytes(totalBytes)}）。解压后双击「启动助手.bat」即可运行。`,
             });
         } catch (err) {
             setCloudSyncNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });

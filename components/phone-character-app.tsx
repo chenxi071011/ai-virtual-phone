@@ -274,15 +274,22 @@ export function PhoneCharacterApp({ onClose, onNotice }: PhoneCharacterAppProps)
               setView({ type: "list", id: null, isEditing: false });
               onNotice("已删除档案");
             }}
-            onExportJson={() => {
+            onExportJson={async () => {
               const c = view.id ? characters.find(x => x.id === view.id) : null;
-              if (c) exportCharacterAsJson(c);
+              if (!c) return;
+              try {
+                onNotice(await exportCharacterAsJson(c));
+              } catch (error) {
+                onNotice(error instanceof Error ? error.message : "导出失败，请稍后重试。");
+              }
             }}
             onExportPng={async () => {
               const c = view.id ? characters.find(x => x.id === view.id) : null;
-              if (c) {
-                await exportCharacterAsPng(c);
-                onNotice("导出成功");
+              if (!c) return;
+              try {
+                onNotice(await exportCharacterAsPng(c));
+              } catch (error) {
+                onNotice(error instanceof Error ? error.message : "导出失败，请稍后重试。");
               }
             }}
           />

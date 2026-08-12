@@ -137,7 +137,7 @@ export function createCharacter(
 
 // ── JSON import/export ───────────────────────────────
 
-export function exportCharacterAsJson(char: Character): void {
+export async function exportCharacterAsJson(char: Character): Promise<string> {
   const payload = {
     schema: "ai_phone_character",
     schema_version: "1.0",
@@ -152,7 +152,7 @@ export function exportCharacterAsJson(char: Character): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
-  triggerDownload(blob, `${sanitizeFilename(char.name)}.json`);
+  return await triggerDownload(blob, `${sanitizeFilename(char.name)}.json`);
 }
 
 export type CharacterImportData = Omit<
@@ -397,7 +397,7 @@ async function avatarToPngBytes(avatar: string | null, name: string): Promise<Ui
   return canvasToPngBytes(canvas);
 }
 
-export async function exportCharacterAsPng(char: Character): Promise<void> {
+export async function exportCharacterAsPng(char: Character): Promise<string> {
   const payload = {
     schema: "ai_phone_character",
     schema_version: "1.0",
@@ -417,7 +417,7 @@ export async function exportCharacterAsPng(char: Character): Promise<void> {
   const finalBytes = injectPngTextChunk(pngBytes, textChunk);
 
   const blob = new Blob([finalBytes.buffer as ArrayBuffer], { type: "image/png" });
-  triggerDownload(blob, `${sanitizeFilename(char.name)}.png`);
+  return await triggerDownload(blob, `${sanitizeFilename(char.name)}.png`);
 }
 
 // ── 工具函数 ─────────────────────────────────────────
@@ -426,7 +426,8 @@ function sanitizeFilename(name: string): string {
   return (name || "角色").replace(/[/\\:*?"<>|]/g, "_").slice(0, 60);
 }
 
-async function triggerDownload(blob: Blob, filename: string): Promise<void> {
-  const { downloadFile } = await import("./download-utils");
-  await downloadFile(blob, filename);
+/** 返回给用户看的结果文案——原生壳里写文件是静默的，调用方必须把它显示出来。 */
+async function triggerDownload(blob: Blob, filename: string): Promise<string> {
+  const { exportBlob } = await import("./download-utils");
+  return await exportBlob(blob, filename);
 }

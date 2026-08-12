@@ -26,6 +26,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     const [isLoaded, setIsLoaded] = useState(false);
     const [expandUid, setExpandUid] = useState<string | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    // 原生壳里导出是静默写文件的，不给这一条提示的话用户看不到任何反应。
+    const [exportNotice, setExportNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -314,9 +316,13 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     };
 
     const handleExport = async (book: WorldBookConfig) => {
-        const { downloadFile } = await import("@/lib/download-utils");
-        const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${book.name || "worldbook"}.json`);
+        try {
+            const { exportBlob } = await import("@/lib/download-utils");
+            const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${book.name || "worldbook"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     // --- Entry Level Operations ---
@@ -429,9 +435,13 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     };
 
     const exportEntry = async (entry: WorldBookEntry) => {
-        const { downloadFile } = await import("@/lib/download-utils");
-        const blob = new Blob([JSON.stringify(entry, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${entry.comment || entry.key || "worldbook-entry"}.json`);
+        try {
+            const { exportBlob } = await import("@/lib/download-utils");
+            const blob = new Blob([JSON.stringify(entry, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${entry.comment || entry.key || "worldbook-entry"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     const handleEntryImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -884,6 +894,19 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                     cancelLabel=""
                     onConfirm={() => setImportError(null)}
                     onCancel={() => setImportError(null)}
+                />
+            )}
+
+            {exportNotice && (
+                <ConfirmDialog
+                    title={exportNotice.ok ? "导出完成" : "导出失败"}
+                    message={exportNotice.text}
+                    icon={exportNotice.ok ? Download : AlertCircle}
+                    variant={exportNotice.ok ? "default" : "danger"}
+                    confirmLabel="知道了"
+                    cancelLabel=""
+                    onConfirm={() => setExportNotice(null)}
+                    onCancel={() => setExportNotice(null)}
                 />
             )}
 

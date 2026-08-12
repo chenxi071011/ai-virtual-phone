@@ -22,7 +22,7 @@ import {
 import { CUSTOM_APPS_UPDATED_EVENT, loadInstalledCustomApps, saveInstalledCustomAppsAsync } from "@/lib/custom-app-storage";
 import { loadCustomAppChatTools, type RegisteredCustomAppExtension } from "@/lib/custom-app-sdk-registry";
 import type { CustomAppToolDefinition } from "@/lib/custom-app-types";
-import { downloadFile } from "@/lib/download-utils";
+import { exportBlob } from "@/lib/download-utils";
 import {
     CALENDAR_MANAGEMENT_CAPABILITY_ID,
     LOCAL_DATA_LIBRARY_CAPABILITY_ID,
@@ -541,7 +541,14 @@ export function ToolboxSettings() {
         }
         const exportData = buildExportFile(exportSelection);
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" });
-        await downloadFile(blob, `ai-phone-tools-${new Date().toISOString().slice(0, 10)}.json`);
+        try {
+            const savedText = await exportBlob(blob, `ai-phone-tools-${new Date().toISOString().slice(0, 10)}.json`);
+            setToolboxImportError(null);
+            setToolboxImportMessage(`${savedText}（${exportSelection.length} 个工具）`);
+        } catch (error) {
+            setToolboxImportMessage(null);
+            setToolboxImportError(error instanceof Error ? error.message : "导出失败，请稍后重试。");
+        }
         setShowExportDialog(false);
     }
 

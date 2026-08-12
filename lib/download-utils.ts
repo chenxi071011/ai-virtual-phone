@@ -26,6 +26,36 @@ export function isIOSBrowser(): boolean {
     return /iPad|iPhone|iPod/i.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
+/**
+ * 文件名清洗。原生壳走 Filesystem.writeFile，`/` 会被 recursive 当成目录悄悄建出来，
+ * `:` `?` 这类字符则直接写失败——两种都表现为「点了没反应」，所以在唯一出口统一挡掉。
+ */
+export function sanitizeFilename(name: string, fallback = "download"): string {
+    // eslint-disable-next-line no-control-regex
+    const illegal = /[\\/:*?"<>|\u0000-\u001f]/g;
+    const raw = (name || "").trim();
+    const dot = raw.lastIndexOf(".");
+    const hasExt = dot > 0 && dot > raw.length - 12;
+    const stem = (hasExt ? raw.slice(0, dot) : raw)
+        .replace(illegal, "_")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 60);
+    return (stem || fallback) + (hasExt ? raw.slice(dot).replace(illegal, "_") : "");
+}
+
+/**
+ * 导出的统一入口，返回一句给用户看的结果文案。
+ * 原生壳里 downloadFile 是静默写文件的（不弹下载框、不弹分享面板），调用方必须把这句话显示出来，
+ * 否则用户按下按钮什么都看不见，跟功能坏了没区别。
+ */
+export async function exportBlob(blob: Blob, filename: string, options: DownloadFileOptions = {}): Promise<string> {
+    const savedPath = await downloadFile(blob, filename, options);
+    if (typeof savedPath === "string" && savedPath) return `已保存到手机存储：${savedPath}`;
+    if (usesNativeShareSheet()) return "已打开系统分享，请选择保存位置。";
+    return "已开始下载文件。";
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -58,7 +88,8 @@ async function saveFileNative(blob: Blob, filename: string): Promise<string> {
 }
 
 /** 返回值：Capacitor 原生壳直接写文件成功时给出保存路径（其余环境走下载/分享，没有路径可给）。 */
-export async function downloadFile(blob: Blob, filename: string, options: DownloadFileOptions = {}): Promise<string | void> {
+export async function downloadFile(blob: Blob, rawFilename: string, options: DownloadFileOptions = {}): Promise<string | void> {
+    const filename = sanitizeFilename(rawFilename);
     if (Capacitor.isNativePlatform() && !options.disableNativeShare) {
         return await saveFileNative(blob, filename);
     }

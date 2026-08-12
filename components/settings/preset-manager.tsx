@@ -129,6 +129,8 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     const [paramsOpen, setParamsOpen] = useState(false);
     const [expandTarget, setExpandTarget] = useState<{ identifier: string; field: string } | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    // 原生壳里导出是静默写文件的，不给这一条提示的话用户看不到任何反应。
+    const [exportNotice, setExportNotice] = useState<{ ok: boolean; text: string } | null>(null);
     const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -615,9 +617,13 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     };
 
     const exportPrompt = async (prompt: Prompt) => {
-        const { downloadFile } = await import("@/lib/download-utils");
-        const blob = new Blob([JSON.stringify(prompt, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${prompt.name || prompt.identifier || "prompt"}.json`);
+        try {
+            const { exportBlob } = await import("@/lib/download-utils");
+            const blob = new Blob([JSON.stringify(prompt, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${prompt.name || prompt.identifier || "prompt"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     const handleEntryImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -679,10 +685,14 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
     };
 
     const handleExport = async (preset: PresetConfig) => {
-        const exportData = { ...preset };
-        const { downloadFile } = await import("@/lib/download-utils");
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${preset.name || "preset"}.json`);
+        try {
+            const exportData = { ...preset };
+            const { exportBlob } = await import("@/lib/download-utils");
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${preset.name || "preset"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     if (!isLoaded) return null; // loading state
@@ -1426,6 +1436,19 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                         setConfirmDeleteEntry(null);
                     }}
                     onCancel={() => setConfirmDeleteEntry(null)}
+                />
+            )}
+
+            {exportNotice && (
+                <ConfirmDialog
+                    title={exportNotice.ok ? "导出完成" : "导出失败"}
+                    message={exportNotice.text}
+                    icon={exportNotice.ok ? Download : AlertCircle}
+                    variant={exportNotice.ok ? "default" : "danger"}
+                    confirmLabel="知道了"
+                    cancelLabel=""
+                    onConfirm={() => setExportNotice(null)}
+                    onCancel={() => setExportNotice(null)}
                 />
             )}
 

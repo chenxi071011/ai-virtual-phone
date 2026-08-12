@@ -87,6 +87,8 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
     const [groupTestInput, setGroupTestInput] = useState("");
     const [groupTestExpandStep, setGroupTestExpandStep] = useState<number | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    // 原生壳里导出是静默写文件的，不给这一条提示的话用户看不到任何反应。
+    const [exportNotice, setExportNotice] = useState<{ ok: boolean; text: string } | null>(null);
     const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -251,10 +253,14 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
     };
 
     const handleExport = async (group: RegexConfig) => {
-        const { downloadFile } = await import("@/lib/download-utils");
-        const exportData = { name: group.name, description: group.description, rules: group.rules };
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${group.name || "regex_group"}.json`);
+        try {
+            const { exportBlob } = await import("@/lib/download-utils");
+            const exportData = { name: group.name, description: group.description, rules: group.rules };
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${group.name || "regex_group"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     // --- Rule Level Operations ---
@@ -360,9 +366,13 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
     };
 
     const exportRule = async (rule: RegexRule) => {
-        const { downloadFile } = await import("@/lib/download-utils");
-        const blob = new Blob([JSON.stringify(rule, null, 2)], { type: "application/json" });
-        await downloadFile(blob, `${rule.scriptName || "regex-rule"}.json`);
+        try {
+            const { exportBlob } = await import("@/lib/download-utils");
+            const blob = new Blob([JSON.stringify(rule, null, 2)], { type: "application/json" });
+            setExportNotice({ ok: true, text: await exportBlob(blob, `${rule.scriptName || "regex-rule"}.json`) });
+        } catch (error) {
+            setExportNotice({ ok: false, text: error instanceof Error ? error.message : "导出失败，请稍后重试。" });
+        }
     };
 
     const handleRuleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -957,6 +967,19 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
                         setConfirmDeleteTarget(null);
                     }}
                     onCancel={() => setConfirmDeleteTarget(null)}
+                />
+            )}
+
+            {exportNotice && (
+                <ConfirmDialog
+                    title={exportNotice.ok ? "导出完成" : "导出失败"}
+                    message={exportNotice.text}
+                    icon={exportNotice.ok ? Download : AlertCircle}
+                    variant={exportNotice.ok ? "default" : "danger"}
+                    confirmLabel="知道了"
+                    cancelLabel=""
+                    onConfirm={() => setExportNotice(null)}
+                    onCancel={() => setExportNotice(null)}
                 />
             )}
 

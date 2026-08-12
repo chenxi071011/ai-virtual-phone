@@ -223,7 +223,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     const handleDownload = useCallback(async (path: string) => {
         setBusyFile(path);
         try {
-            await downloadResourceHubFile(source, path);
+            onNotice?.(await downloadResourceHubFile(source, path));
             // 下载成功默认送出一朵花（今天送过则静默跳过，失败不影响下载）
             if (activeEntry) void handleSendFlower(activeEntry.path, true);
         } catch (err) {
