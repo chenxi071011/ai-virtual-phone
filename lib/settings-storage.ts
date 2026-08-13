@@ -227,6 +227,11 @@ function stripDeprecatedPresetFields(preset: PresetConfig & { fold_tags?: unknow
         frequency_penalty: round2(rest.frequency_penalty),
         presence_penalty: round2(rest.presence_penalty),
         prompts: rest.prompts.map(({ injection_order: _injectionOrder, ...prompt }) => normalizePresetPromptScope(prompt)),
+        // 老数据里可能只有 prompts 没有 prompt_order（早期新建/导入的预设）。
+        // 这里按数组顺序补齐：界面和组装器从此读的是同一份顺序表。
+        prompt_order: rest.prompt_order?.length
+            ? rest.prompt_order
+            : rest.prompts.map(p => ({ identifier: p.identifier, enabled: p.enabled })),
     };
 }
 
@@ -277,7 +282,9 @@ export function createPreset(name: string): PresetConfig {
         openai_max_tokens: 0,
         openai_max_context: 100000,
         story_summary_tag: "summary",
-        prompts: []
+        prompts: [],
+        // 新建预设从第一天起就带上顺序表，避免出现「有条目但没有 order」的中间态
+        prompt_order: [],
     };
 }
 
@@ -352,6 +359,12 @@ export function parsePresetFromJson(text: string, fallbackName: string = "导入
                     };
                 });
             }
+        }
+
+        // 导入的 JSON 没带顺序表时，按 prompts 数组顺序补一份，
+        // 保证界面看到的顺序和组装时用的顺序永远是同一份。
+        if (!preset.prompt_order?.length && preset.prompts.length > 0) {
+            preset.prompt_order = preset.prompts.map(p => ({ identifier: p.identifier, enabled: p.enabled }));
         }
 
         return preset;

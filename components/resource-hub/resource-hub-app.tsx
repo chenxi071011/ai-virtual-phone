@@ -139,6 +139,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     const [editTitle, setEditTitle] = useState("");
     const [editDesc, setEditDesc] = useState("");
     const [editAddFiles, setEditAddFiles] = useState<File[]>([]);
+    const [editAddImages, setEditAddImages] = useState<File[]>([]);
     const [editRemoved, setEditRemoved] = useState<string[]>([]);
     const [savingEdit, setSavingEdit] = useState(false);
     const editTitleRef = useRef<RichEditorHandle | null>(null);
@@ -452,6 +453,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         setEditDesc(entry.description);
         setEditAuthor(entry.author?.trim() || profile.nickname);
         setEditAddFiles([]);
+        setEditAddImages([]);
         setEditRemoved([]);
     }, [closeRichPickers, myRecordFor, profile.nickname, showToast]);
 
@@ -461,8 +463,12 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         if (!title) { showToast("标题不能为空"); return; }
         setSavingEdit(true);
         try {
-            // 不能直接 .map(fileToUploadEntry)：数组下标会被当成第二个 options 参数传进去。
-            const addFiles = await Promise.all(editAddFiles.map(file => fileToUploadEntry(file)));
+            // 与上传一致：「资源文件」里的图片要标成资源本体（PNG 角色卡、表情包），
+            // 不标的话索引会按扩展名把它当配图，详情页里就只能看不能下载。
+            const addFiles = await Promise.all([
+                ...editAddFiles.map(file => fileToUploadEntry(file, { asset: true })),
+                ...editAddImages.map(file => fileToUploadEntry(file)),
+            ]);
             await editResource(source, editRecord, {
                 title,
                 author: editAuthor.trim(),
@@ -494,7 +500,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         } finally {
             setSavingEdit(false);
         }
-    }, [editAddFiles, editAuthor, editDesc, editEntry, editRecord, editRemoved, editTitle, onNotice, profile.avatarDataUrl, showToast, source]);
+    }, [editAddFiles, editAddImages, editAuthor, editDesc, editEntry, editRecord, editRemoved, editTitle, onNotice, profile.avatarDataUrl, showToast, source]);
 
     const handlePickAvatar = useCallback(async (file: File) => {
         try {
@@ -1153,11 +1159,12 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                     {[...editEntry.files, ...editEntry.images].map(file => {
                                         const base = stripAssetImageMark(file.split("/").pop() || file);
                                         const removed = editRemoved.includes(file);
+                                        const isImage = editEntry.images.includes(file);
                                         return (
                                             <button key={file} className="rh-edit-file" data-removed={removed ? "1" : undefined}
                                                 onClick={() => setEditRemoved(current =>
                                                     removed ? current.filter(f => f !== file) : [...current, file])}>
-                                                <span className="rh-edit-file-name">{base}</span>
+                                                <span className="rh-edit-file-name">{isImage ? `${base}（配图）` : base}</span>
                                                 <span className="rh-edit-file-x">{removed ? "撤销" : "✕"}</span>
                                             </button>
                                         );
@@ -1168,10 +1175,15 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                 </div>
                             </div>
                             <label className="rh-file-picker">
-                                <span className="rh-btn">{editAddFiles.length > 0 ? "继续添加文件" : "添加/替换文件"}</span>
+                                <span className="rh-btn">{editAddFiles.length > 0 ? "继续添加资源文件" : "添加/替换资源文件"}</span>
                                 <input type="file" multiple hidden onChange={e => { const picked = Array.from(e.target.files ?? []); setEditAddFiles(current => appendPickedFiles(current, picked)); e.target.value = ""; }} />
                             </label>
                             {renderPickedFiles(editAddFiles, index => setEditAddFiles(current => current.filter((_, i) => i !== index)))}
+                            <label className="rh-file-picker">
+                                <span className="rh-btn">{editAddImages.length > 0 ? "继续添加配图" : "添加配图"}</span>
+                                <input type="file" accept="image/*" multiple hidden onChange={e => { const picked = Array.from(e.target.files ?? []); setEditAddImages(current => appendPickedFiles(current, picked)); e.target.value = ""; }} />
+                            </label>
+                            {renderPickedFiles(editAddImages, index => setEditAddImages(current => current.filter((_, i) => i !== index)))}
                             <div className="rh-form-hint">同名文件会被覆盖；保存后立即生效，索引刷新后所有人可见。</div>
                         </div>
                         <div className="rh-dialog-footer">
@@ -1247,10 +1259,6 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                 <input type="file" accept="image/*" multiple hidden onChange={e => { const picked = Array.from(e.target.files ?? []); setUploadImages(current => appendPickedFiles(current, picked)); e.target.value = ""; }} />
                             </label>
                             {renderPickedFiles(uploadImages, index => setUploadImages(current => current.filter((_, i) => i !== index)))}
-                            <div className="rh-form-hint">
-                                「资源文件」是别人要下载/导入的东西，「配图」只在详情页展示。
-                                PNG 角色卡、表情包这类图片本身就是资源，要放进「资源文件」。
-                            </div>
                             <div className="rh-form-hint">
                                 {uploadCfg.githubToken
                                     ? "将使用你的 GitHub Token 提交（有仓库权限则直接上架，否则生成待审核投稿）。"
