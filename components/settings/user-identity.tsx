@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback, useContext } from "react";
 import { Plus, User, Trash2, FileEdit, AlertCircle, Camera, Link, X, Check } from "lucide-react";
 import { SettingsContext } from "../phone-settings-app";
-import { loadUserIdentities, saveUserIdentities } from "@/lib/settings-storage";
-import { Input } from "@/components/ui/form";
+import { loadUserIdentities, saveUserIdentities, loadVoiceConfigs, loadApiConfigs } from "@/lib/settings-storage";
+import type { ApiConfig, VoiceApiConfig } from "@/lib/settings-types";
+import { Input, Toggle } from "@/components/ui/form";
 import { ConfirmDialog } from "@/components/ui/modal";
 
 export type UserIdentity = {
@@ -16,6 +17,12 @@ export type UserIdentity = {
     age: string;
     occupation: string;
     customSettings: string;
+    /** 可选：这个身份发语音条时用哪套语音接口合成。不填就不合成，行为与以前一致。 */
+    voiceConfigId?: string;
+    /** 开启后，合成前先让模型按身份改写台词（翻译/语气）；关掉则原文直接送去合成。 */
+    voiceRewriteEnabled?: boolean;
+    /** 可选：改写语音文本用的模型（挑个便宜的小模型即可）。不填则用该会话原本的 API 配置。 */
+    voiceRewriteApiConfigId?: string;
 };
 
 const DEFAULT_IDENTITIES: UserIdentity[] = [
@@ -67,6 +74,13 @@ export function UserIdentitySettings() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isNewIdentity, setIsNewIdentity] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    const [voiceConfigs, setVoiceConfigs] = useState<VoiceApiConfig[]>([]);
+    const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
+
+    useEffect(() => {
+        setVoiceConfigs(loadVoiceConfigs());
+        setApiConfigs(loadApiConfigs());
+    }, []);
 
     useEffect(() => {
         const saved = loadUserIdentities();
@@ -335,6 +349,61 @@ export function UserIdentitySettings() {
                                                 className="ui-textarea"
                                             />
                                         </div>
+
+                                        <div className="flex flex-col gap-1">
+                                            <label className="menu-desc ml-1">语音配置（可选）</label>
+                                            <select
+                                                value={identity.voiceConfigId || ""}
+                                                onChange={(e) => updateIdentity(identity.id, { voiceConfigId: e.target.value || undefined })}
+                                                className="ui-select"
+                                            >
+                                                <option value="">不合成（保持现状）</option>
+                                                {voiceConfigs.map(config => (
+                                                    <option key={config.id} value={config.id}>{config.name || config.provider}</option>
+                                                ))}
+                                            </select>
+                                            <span className="menu-desc ml-1 ts-12">
+                                                用这个身份发的语音条，点播放时才会合成。真录的音会原样保留，不覆盖。
+                                            </span>
+                                        </div>
+
+                                        {identity.voiceConfigId ? (
+                                            <>
+                                                <div className="app-card card-featured settings-toggle-card" style={{ cursor: "default" }}>
+                                                    <div className="card-featured-body">
+                                                        <div className="card-featured-label">合成前先改写台词</div>
+                                                        <div className="card-featured-desc">
+                                                            开启后先让模型按你的身份重写这句话（比如身份是日本人就转成日文，并配上语气），再送去合成。
+                                                            关闭则把你打的原文直接送去合成，不额外花钱。
+                                                        </div>
+                                                    </div>
+                                                    <Toggle
+                                                        checked={identity.voiceRewriteEnabled === true}
+                                                        onChange={(next) => updateIdentity(identity.id, { voiceRewriteEnabled: next })}
+                                                        className="settings-toggle-control"
+                                                    />
+                                                </div>
+
+                                                {identity.voiceRewriteEnabled ? (
+                                                    <div className="flex flex-col gap-1">
+                                                        <label className="menu-desc ml-1">改写用的模型（可选）</label>
+                                                        <select
+                                                            value={identity.voiceRewriteApiConfigId || ""}
+                                                            onChange={(e) => updateIdentity(identity.id, { voiceRewriteApiConfigId: e.target.value || undefined })}
+                                                            className="ui-select"
+                                                        >
+                                                            <option value="">跟随该会话的模型</option>
+                                                            {apiConfigs.map(config => (
+                                                                <option key={config.id} value={config.id}>{config.name || config.defaultModel}</option>
+                                                            ))}
+                                                        </select>
+                                                        <span className="menu-desc ml-1 ts-12">
+                                                            这一步只是改写一句话，单独挑个便宜的小模型能省不少钱。
+                                                        </span>
+                                                    </div>
+                                                ) : null}
+                                            </>
+                                        ) : null}
                                     </>
                                 )
                             })()}

@@ -196,6 +196,9 @@ export type ChatMessage = {
         // 显示、prompt 历史、微信转发、备份都用 label，标签不会漏到用户眼前。
         voiceScript?: string;
         voiceEmotion?: string;    // MiniMax voice_setting.emotion，见 tts-service 的合法取值
+        // 用户语音条经改写后实际送去合成的文本（可能已翻成别的语言）。存着是为了让
+        // 重播不必重新调模型；label 仍是用户打的原文，聊天记录里看到的还是自己写的那句。
+        voiceSpokenText?: string;
         memoryContent?: string;   // 记忆写入内容
         memoryReason?: string;    // 记忆写入原因
         memoryImportance?: number;// 记忆写入重要性

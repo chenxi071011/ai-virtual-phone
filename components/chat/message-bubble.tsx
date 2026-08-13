@@ -2256,6 +2256,60 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [msg.id, msg.mediaUrl, msg.mediaData, characterId, needsResynthesis, speechText]);
 
+    const generateOwnVoice = async () => {
+        if (synthesizing) return;
+        const { resolveUserIdentity, loadApiConfigs, loadBindingConfig, resolveBinding } = await import("@/lib/settings-storage");
+        const identity = resolveUserIdentity(characterId, "chat");
+        const { shouldSynthesizeUserVoice, generateUserVoice } = await import("@/lib/user-voice-service");
+        if (!identity || !shouldSynthesizeUserVoice(msg, identity)) return;
+
+        setSynthesizing(true);
+        try {
+            const slot = resolveBinding(loadBindingConfig(), characterId || "", "chat");
+            const fallbackApiConfig = loadApiConfigs().find(config => config.id === slot.apiConfigId) || null;
+            const result = await generateUserVoice({
+                text: speechText,
+                identity,
+                fallbackApiConfig,
+                buildContextMessages: async () => {
+                    const { buildChatContextForVoiceRewrite } = await import("@/lib/user-voice-context");
+                    return buildChatContextForVoiceRewrite(msg.sessionId, characterId || "");
+                },
+            });
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(result.blob);
+            });
+            // 缓存结果：重播不再重复调模型和合成接口
+            const nextMediaData = {
+                ...msg.mediaData,
+                synthesizedFromText: speechText,
+                voiceSpokenText: result.spokenText,
+                ...(result.emotion ? { voiceEmotion: result.emotion } : {}),
+            };
+            updateMessageMediaData(msg.id, nextMediaData);
+            updateMessageMediaUrl(msg.id, dataUrl);
+            onUpdate?.({ ...msg, mediaUrl: dataUrl, mediaData: nextMediaData });
+            const audio = new Audio(dataUrl);
+            audioRef.current = audio;
+            setPlaying(true);
+            const finalize = () => {
+                if (audioRef.current === audio) audioRef.current = null;
+                try { audio.pause(); audio.removeAttribute("src"); audio.load(); } catch { /* ignore */ }
+                setPlaying(false);
+            };
+            audio.onended = finalize;
+            audio.onerror = finalize;
+            void audio.play().catch(finalize);
+        } catch (error) {
+            console.warn("[UserVoice] 生成失败:", error);
+        } finally {
+            setSynthesizing(false);
+        }
+    };
+
     const handlePlay = () => {
         if (synthesizing || needsResynthesis) return;
         if (playing && audioRef.current) {
@@ -2263,6 +2317,12 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
             audioRef.current = null;
             try { active.pause(); active.removeAttribute("src"); active.load(); } catch { /* ignore */ }
             setPlaying(false);
+            return;
+        }
+        // 用户自己的语音条：身份绑了语音配置才现做，且只在这一刻做——
+        // 发的时候就合成等于替用户花钱买他未必想听的东西。
+        if (!msg.mediaUrl && msg.role === "user") {
+            void generateOwnVoice();
             return;
         }
         const src = msg.mediaUrl;

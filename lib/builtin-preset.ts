@@ -6,7 +6,7 @@ import type { PresetConfig } from "./settings-types";
 import { getCheckPhonePromptTags } from "./checkphone-config";
 
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
-export const BUILTIN_PRESET_VERSION = 259; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
+export const BUILTIN_PRESET_VERSION = 260; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -607,7 +607,9 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_position: 0,
                 injection_depth: 0,
                 enabled: true,
-                tags: ["chat", "online"],
+                // 聊天·通用：语音条在文字聊天里发，标签和停顿在语音/视频通话里也要用，
+                // 所以不能挂到 chat+voice 这类子范围上。
+                tags: ["chat"],
             },
             {
                 identifier: "chat_voice_format",
