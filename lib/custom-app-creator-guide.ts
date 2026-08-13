@@ -595,7 +595,7 @@ const CUSTOM_APP_CREATOR_GUIDE_LINES = [
   "* `dataUrl` 也可以换成 `media.put` 返回的 `media-store://` 引用（推荐，见 5.10），此时音频数据完全不经过通信桥。",
   "* 播放需 `voice.tts` 权限。播放被浏览器拦截时会 reject，请 `try/catch` 做文字兜底。",
   "",
-  "`voice.tts` 可选传 `emotion`（Minimax 专属，取值 `happy`/`sad`/`angry`/`fearful`/`disgusted`/`surprised`/`calm`/`neutral`/`fluent`，非法值会被忽略）来控制整句情绪。语音是否支持这个字段、是否支持更进一步的插入语标签（如 `(laughs)` `(sighs)` `(breath)`，这个仅 Minimax `speech-2.8-hd`/`speech-2.8-turbo` 支持，其它模型/供应商遇到会被当英文原样朗读），请先用 `voice.readProfiles` 读出 `selected.provider`/`selected.model` 自行判断，不要无条件假设所有语音配置都支持。",
+  "`voice.tts` 可选传 `emotion`（Minimax 专属，取值 `happy`/`sad`/`angry`/`fearful`/`disgusted`/`surprised`/`calm`/`fluent`/`whisper`，**没有 `neutral`**，想要平静用 `calm`；`fluent`/`whisper` 只有 speech-2.6 系列支持。非法值会被忽略）来控制整句情绪。语音是否支持这个字段、是否支持更进一步的插入语标签（如 `(laughs)` `(sighs)` `(breath)`，这个仅 Minimax `speech-2.8-hd`/`speech-2.8-turbo` 支持，其它模型/供应商遇到会被当英文原样朗读），请先用 `voice.readProfiles` 读出 `selected.provider`/`selected.model` 自行判断，不要无条件假设所有语音配置都支持。",
   "",
   "**返回结构**：",
   "",

@@ -10,7 +10,7 @@ import { generateChatCompletion, flattenCompletionResult } from "@/lib/chat-engi
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { cancelFollowUp } from "@/lib/follow-up-service";
 import { createSTTSession, type STTSession } from "@/lib/stt-service";
-import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob } from "@/lib/tts-service";
+import { resolveVoiceConfig, synthesizeSpeech, playAudioBlob, stripVoiceStyleTags } from "@/lib/tts-service";
 import { suspendKeepAliveForCall, resumeKeepAliveAfterCall } from "@/lib/use-weixin-bridge";
 import { BilingualTextBlock } from "./message-bubble";
 import { TextExpandModal } from "@/components/ui/modal";
@@ -399,8 +399,10 @@ export function VideoCallScreen({ session, character, onEnd, onConnect, initiato
             if (stateRef.current === "ENDED") return;
 
             const { cleanParts, messageId, responseBatchId } = processAIResponse(aiResponseText);
-            const displayText = cleanParts.join("\n");
-            const speechText = stripBilingualForSpeech(displayText);
+            const rawText = cleanParts.join("\n");
+            // 字幕里不能出现 (laughs) 这类声音标签——它们是给 TTS 的，不是给用户看的
+            const displayText = stripVoiceStyleTags(rawText);
+            const speechText = stripBilingualForSpeech(rawText);
 
             if (!displayText) { setCallState("IDLE"); return; }
 

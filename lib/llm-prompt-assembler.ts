@@ -15,6 +15,7 @@ import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
 import { buildCharacterTimeContext, buildGroupTimeContext, type CharacterTimeContext } from "./character-time";
+import { getVoiceStyleCapability, resolveVoiceConfig, MINIMAX_SOUND_TAGS, type VoiceStyleCapability } from "./tts-service";
 import { formatShoppingPaymentRequestHistory } from "./shopping-payment-request";
 import { buildGroupAdminBracketText } from "./group-admin";
 
@@ -283,6 +284,18 @@ function mergeMarkerText(base?: string, next?: string): string | undefined {
 
 function resolveTimeAware(value?: boolean): boolean {
     return resolvePromptTimeAware(value);
+}
+
+function applyVoiceStyleToMacroEngine(engine: MacroEngine, capability: VoiceStyleCapability): void {
+    engine.voiceEmotions = capability.emotions.join(" / ");
+    // 不支持标签时留空，宏会把这一整行 TRIM 掉，AI 就不会看到这套语法
+    engine.voiceSoundTags = capability.soundTags
+        ? [
+            "【行内声音】把这些标签直接写进说的话里，会合成出对应的真实声音：",
+            MINIMAX_SOUND_TAGS.map(t => `(${t})`).join(" "),
+            "示例：真的假的(laughs)你别骗我了",
+        ].join("\n")
+        : "";
 }
 
 function applyTimeContextToMacroEngine(engine: MacroEngine, timeContext: CharacterTimeContext): void {
@@ -623,6 +636,9 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
     const blocks: PromptBlock[] = [];
     const hasPromptOrder = !!(preset?.prompt_order && preset.prompt_order.length > 0);
     const timeAware = resolveTimeAware(input.timeAware);
+    // 语气能力跟着实际绑定的语音接口走。不是 MiniMax 就一概没有；不是 2.8 就只有情绪，
+    // 没有行内声音标签——这决定了要不要给 AI 讲这套语法。
+    const voiceStyleCapability = getVoiceStyleCapability(resolveVoiceConfig(character.id));
     const promptTimeContext = input.timeContext ?? buildCharacterTimeContext(character.timeZone);
     const promptTimestampOptions = input.promptTimestampOptions
         ?? getPromptTimestampOptionsForTimeContext(promptTimeContext);
@@ -663,6 +679,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
 
         const engine = new MacroEngine(character.name, resolvedUserName);
         applyTimeContextToMacroEngine(engine, promptTimeContext);
+        applyVoiceStyleToMacroEngine(engine, voiceStyleCapability);
         engine.lastUserMessage = history.filter(m => m.role === "user").pop()?.content ?? "";
         engine.lastCharMessage = history.filter(m => m.role === "assistant").pop()?.content ?? "";
         engine.lastMessage = history.length > 0 ? history[history.length - 1].content : "";
@@ -804,6 +821,10 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 }
                 continue;
             }
+
+            // 绑定的语音接口不支持语气控制时，整条跳过：教了 AI 写 (laughs)，
+            // 而模型不认识的话，这几个字母会被当成英文原样念出来。
+            if (p.identifier === "chat_voice_style" && !voiceStyleCapability.emotion) continue;
 
             // Expand macros in prompt content
             let content = engine.expand(p.content);

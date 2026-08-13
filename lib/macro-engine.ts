@@ -34,6 +34,9 @@ export class MacroEngine {
     characterTimeZone: string = "";
     characterWeekday: string = "";
     customStickerNames: string = "";
+    // 语音语气：按实际绑定的语音供应商/模型填，不支持时留空让宏 TRIM 掉
+    voiceEmotions: string = "";
+    voiceSoundTags: string = "";
     customStickerExample: string = "";
     musicLocal: string = "";
     musicCloud: string = "";
@@ -162,6 +165,8 @@ export class MacroEngine {
         if (body === "characterTimeZone") return this.characterTimeZone || "\x00TRIM\x00";
         if (body === "characterWeekday") return this.characterWeekday || "\x00TRIM\x00";
         if (body === "customStickers") return this.customStickerNames || "\x00TRIM\x00";
+        if (body === "voiceEmotions") return this.voiceEmotions || "\x00TRIM\x00";
+        if (body === "voiceSoundTags") return this.voiceSoundTags || "\x00TRIM\x00";
         if (body === "stickerExample") return this.customStickerExample || "\x00TRIM\x00";
         if (body === "musicLocal") return this.musicLocal || "无";
         if (body === "musicCloud") return this.musicCloud || "无";

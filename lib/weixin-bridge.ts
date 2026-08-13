@@ -773,7 +773,8 @@ async function partToWeixinOutgoing(part: ParsedMessagePart, charName: string, c
     if (directImage.startsWith("data:image/")) return { kind: "image", imageDataUrl: directImage };
     if (part.mediaType === "audio") {
         const transcript = getVoiceTranscript(part);
-        const speechText = getVoiceSpeechText(transcript);
+        // 转发到微信的文字用 transcript（label，已剥干净）；合成用带标签的原文。
+        const speechText = getVoiceSpeechText(part.mediaData?.voiceScript || transcript);
         const fallbackDuration = typeof part.mediaData?.voiceDuration === "number"
             ? Math.max(1, Math.ceil(part.mediaData.voiceDuration))
             : estimateVoiceDuration(speechText || transcript);
@@ -781,7 +782,9 @@ async function partToWeixinOutgoing(part: ParsedMessagePart, charName: string, c
         const voiceConfig = resolveVoiceConfig(characterId, "chat");
         if (voiceConfig?.enableTTS) {
             try {
-                const audioBlob = await synthesizeSpeech(speechText || transcript, voiceConfig);
+                const audioBlob = await synthesizeSpeech(speechText || transcript, voiceConfig, {
+                    emotion: part.mediaData?.voiceEmotion,
+                });
                 if (audioBlob) {
                     const [audioDataUrl, audioDuration] = await Promise.all([
                         blobToAudioDataUrl(audioBlob),

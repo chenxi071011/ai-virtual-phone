@@ -69,10 +69,63 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TTS_
 
 // ── Minimax TTS ─────────────────────────────────────
 
-// MiniMax voice_setting.emotion 支持的取值（speech-01-turbo/hd、speech-02-turbo/hd 等）。
-const MINIMAX_EMOTIONS = new Set([
-    "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "neutral", "fluent",
-]);
+// MiniMax voice_setting.emotion 的合法取值。以官方文档为准——**没有 neutral**，
+// 传了不会生效（想要"平静"用 calm）。fluent/whisper 只有 speech-2.6 系列支持，
+// 2.8 不支持 whisper，传了会被接口拒绝，所以按模型再过一道。
+export const MINIMAX_EMOTIONS = [
+    "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm", "fluent", "whisper",
+] as const;
+const MINIMAX_EMOTION_SET = new Set<string>(MINIMAX_EMOTIONS);
+const MINIMAX_EMOTIONS_2_6_ONLY = new Set(["fluent", "whisper"]);
+
+/**
+ * MiniMax 的行内声音标签，仅 speech-2.8-hd / speech-2.8-turbo 支持。
+ * 其它模型和别的供应商会把 "(laughs)" 当英文原样念出来，所以发出去之前必须剥掉。
+ */
+export const MINIMAX_SOUND_TAGS = [
+    "laughs", "chuckle", "coughs", "clear-throat", "groans", "breath", "pant", "inhale",
+    "exhale", "gasps", "sniffs", "sighs", "snorts", "burps", "lip-smacking", "humming",
+    "hissing", "emm", "sneezes",
+] as const;
+const SOUND_TAG_PATTERN = new RegExp(`\\((?:${MINIMAX_SOUND_TAGS.join("|")})\\)`, "gi");
+// 停顿标记 <#0.5#>：秒，0.01–99.99，最多两位小数。
+const PAUSE_TAG_PATTERN = /<#\d{1,2}(?:\.\d{1,2})?#>/g;
+
+export type VoiceStyleCapability = {
+    /** 能不能用 voice_setting.emotion */
+    emotion: boolean;
+    /** 能不能在正文里插 (laughs) 这类标签 */
+    soundTags: boolean;
+    /** 能不能用 <#0.5#> 停顿 */
+    pause: boolean;
+    /** 当前模型实际可用的情绪取值 */
+    emotions: string[];
+};
+
+const NO_CAPABILITY: VoiceStyleCapability = { emotion: false, soundTags: false, pause: false, emotions: [] };
+
+/** 按实际绑定的供应商和模型算出能用哪些语气手段——别无条件假设都支持。 */
+export function getVoiceStyleCapability(config: VoiceApiConfig | null | undefined): VoiceStyleCapability {
+    if (!config || config.provider !== "Minimax") return NO_CAPABILITY;
+    const model = (config.model || "speech-01-turbo").toLowerCase();
+    const is26 = model.includes("2.6") || model.includes("-02-");
+    const is28 = model.includes("2.8");
+    return {
+        emotion: true,
+        soundTags: is28,
+        pause: true,
+        emotions: MINIMAX_EMOTIONS.filter(e => !MINIMAX_EMOTIONS_2_6_ONLY.has(e) || is26),
+    };
+}
+
+/** 去掉声音标签与停顿标记。用于不支持的模型，以及任何要显示给用户的地方。 */
+export function stripVoiceStyleTags(text: string): string {
+    return text
+        .replace(SOUND_TAG_PATTERN, "")
+        .replace(PAUSE_TAG_PATTERN, "")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+}
 
 async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?: string): Promise<Blob | null> {
     if (!config.apiKey) throw new Error("Minimax API Key 未配置");
@@ -84,10 +137,13 @@ async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?:
         vol: 1.0,
         pitch: 0,
     };
+    const capability = getVoiceStyleCapability(config);
     const normalizedEmotion = emotion?.trim().toLowerCase();
-    if (normalizedEmotion && MINIMAX_EMOTIONS.has(normalizedEmotion)) {
+    if (normalizedEmotion && MINIMAX_EMOTION_SET.has(normalizedEmotion) && capability.emotions.includes(normalizedEmotion)) {
         voiceSetting.emotion = normalizedEmotion;
     }
+    // 模型不认识这些标签就会把它们当英文念出来，发之前剥干净。
+    const spokenText = capability.soundTags ? text : stripVoiceStyleTags(text);
 
     const response = await fetchWithTimeout(`${baseUrl}/t2a_v2`, {
         method: "POST",
@@ -97,7 +153,7 @@ async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?:
         },
         body: JSON.stringify({
             model: config.model || "speech-01-turbo",
-            text,
+            text: spokenText,
             stream: false,
             ...(config.languageBoost ? { language_boost: config.languageBoost } : {}),
             voice_setting: voiceSetting,
@@ -144,7 +200,8 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
         },
         body: JSON.stringify({
             model: config.model || "tts-1",
-            input: text,
+            // OpenAI 不认 MiniMax 的声音标签，留着会被逐字念成英文。
+            input: stripVoiceStyleTags(text),
             voice: config.defaultVoice || "alloy",
             response_format: "mp3",
         }),

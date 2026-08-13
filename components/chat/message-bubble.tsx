@@ -2216,10 +2216,14 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const text = msg.mediaData?.label || "语音消息";
     const bilingual = splitBilingualText(text);
-    const speechText = bilingual?.original || text;
+    // 显示用 label（已剥掉声音标签）；合成用 voiceScript（保留标签）。
+    // 双语时以原文那半为准，voiceScript 只在没被双语拆分时才用得上。
+    const displayText = bilingual?.original || text;
+    const speechText = (!bilingual && msg.mediaData?.voiceScript) || displayText;
     const synthesizedFromText = msg.mediaData?.synthesizedFromText;
     const needsResynthesis = msg.role !== "user" && synthesizedFromText !== speechText;
-    const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(speechText.length / 4));
+    // 时长按显示文本算——标签不发声，算进去会让波形条虚长一截
+    const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(displayText.length / 4));
 
     // Auto-synthesize on mount if no audio yet (AI messages)
     useEffect(() => {
@@ -2232,7 +2236,7 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
                 const { resolveVoiceConfig, synthesizeSpeech } = await import("@/lib/tts-service");
                 const vc = resolveVoiceConfig(characterId);
                 if (!vc || cancelled) { setSynthesizing(false); return; }
-                const blob = await synthesizeSpeech(speechText, vc);
+                const blob = await synthesizeSpeech(speechText, vc, { emotion: msg.mediaData?.voiceEmotion });
                 if (cancelled || !blob) { setSynthesizing(false); return; }
                 // Convert to base64 data URL and persist
                 const reader = new FileReader();

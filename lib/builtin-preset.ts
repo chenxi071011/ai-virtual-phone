@@ -6,7 +6,7 @@ import type { PresetConfig } from "./settings-types";
 import { getCheckPhonePromptTags } from "./checkphone-config";
 
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
-export const BUILTIN_PRESET_VERSION = 258; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
+export const BUILTIN_PRESET_VERSION = 259; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -58,6 +58,7 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "chat_followup", enabled: true },
             { identifier: "chat_timed_wake", enabled: true },
             { identifier: "chat_period_care", enabled: true },
+            { identifier: "chat_voice_style", enabled: true },
             { identifier: "chat_voice_format", enabled: true },
             { identifier: "chat_video_format", enabled: true },
             { identifier: "moments_post", enabled: true },
@@ -579,6 +580,34 @@ export function createBuiltinPreset(): PresetConfig {
                 injection_depth: 0,
                 enabled: true,
                 tags: ["chat", "offline"],
+            },
+            {
+                // 整条只在「绑定的语音接口确实支持」时才注入——不支持的模型会把
+                // (laughs) 当英文念出来。判断在 llm-prompt-assembler 里，见 voiceStyleCapability。
+                identifier: "chat_voice_style",
+                name: "▸ 语音语气",
+                role: "system",
+                content: [
+                    "### 语音语气",
+                    "你发的语音条和通话里说的话会被合成成真实声音。你可以指定语气，让声音贴合当下的情绪。",
+                    "",
+                    "【整句情绪】写在语音条标记里：[语音条(情绪):内容]",
+                    "示例：[语音条(happy):我今天真的超开心的]",
+                    "可用情绪：{{voiceEmotions}}",
+                    "{{voiceSoundTags}}",
+                    "【停顿】想要一个明显的停顿就写 <#0.8#>，数字是秒数（0.01~99.99），只能夹在两段话中间，不能连着写两个。",
+                    "示例：我想想<#0.8#>算了，还是你来吧",
+                    "",
+                    "【重要】",
+                    "- 这些标记只影响声音，用户看到的文字里不会出现它们，所以别把它们当成能被读到的文字来用。",
+                    "- 别滥用。一条语音里最多一两处，正常说话不需要每句都加——加多了听起来很假。",
+                    "- 情绪要跟你说的话对得上，不要为了用而用。",
+                    "- 打电话时同样适用：直接把声音标签和停顿写进你说出口的话里（通话没有整句情绪，只有标签和停顿）。",
+                ].join("\n"),
+                injection_position: 0,
+                injection_depth: 0,
+                enabled: true,
+                tags: ["chat", "online"],
             },
             {
                 identifier: "chat_voice_format",

@@ -27,7 +27,7 @@ import { resolveVnAssetMap, loadVnScenes, getVnSceneLayout, getVnSpriteLayout } 
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import type { VnFrame, VnOptions, VnBeat } from "@/lib/vn-types";
 import { splitBilingualText } from "@/lib/bilingual-text";
-import { playAudioBlobViaMediaElement, resolveVoiceConfig, synthesizeSpeech, unlockAudioPlayback } from "@/lib/tts-service";
+import { playAudioBlobViaMediaElement, resolveVoiceConfig, synthesizeSpeech, unlockAudioPlayback, stripVoiceStyleTags } from "@/lib/tts-service";
 
 interface VnPlayerProps {
   characterId: string;
@@ -142,10 +142,16 @@ export function VnPlayer({ characterId, chapterIndex, onClose, onChapterEnd, vnT
   const userName = useMemo(() => resolveUserIdentity(characterId, "vn")?.name ?? "我", [characterId]);
   const availableScenes = useMemo(() => loadVnScenes(characterId), [characterId]);
   const sceneAssetNames = useMemo(() => new Set(availableScenes.map((scene) => scene.name)), [availableScenes]);
-  const getTypingSourceText = useCallback((nextFrame: VnFrame | null | undefined) => {
+  /** 带声音标签的原文，只给 TTS 用。 */
+  const getSpeechSourceText = useCallback((nextFrame: VnFrame | null | undefined) => {
     if (!nextFrame?.speaker || !bilingualTranslationEnabled) return nextFrame?.text || "";
     return splitBilingualText(nextFrame.text)?.original || nextFrame.text;
   }, [bilingualTranslationEnabled]);
+
+  /** 打字机显示用：(laughs) 这类标签是给 TTS 的，不能打到屏幕上。 */
+  const getTypingSourceText = useCallback((nextFrame: VnFrame | null | undefined) => {
+    return stripVoiceStyleTags(getSpeechSourceText(nextFrame));
+  }, [getSpeechSourceText]);
 
   const applyFrameAudioToState = useCallback((messageId: string, frameIndex: number, audio: VnFrameAudio) => {
     const patch = (targetFrame: VnFrame) => (
@@ -184,7 +190,7 @@ export function VnPlayer({ characterId, chapterIndex, onClose, onChapterEnd, vnT
     const frameIndex = targetFrame.sourceFrameIndex;
     if (!messageId || frameIndex == null) return;
 
-    const speechText = getTypingSourceText(targetFrame).trim();
+    const speechText = getSpeechSourceText(targetFrame).trim();
     if (!speechText) return;
 
     const cached = targetFrame.voiceAudio;
@@ -885,7 +891,7 @@ export function VnPlayer({ characterId, chapterIndex, onClose, onChapterEnd, vnT
     const key = getFrameVoiceKey(targetFrame);
     // 旁白帧（无 speaker）不提供配音按钮
     if (!targetFrame || !key || !targetFrame.speaker || targetFrame.sourceRole !== "assistant" || !targetFrame.text.trim()) return null;
-    const speechText = getTypingSourceText(targetFrame).trim();
+    const speechText = getSpeechSourceText(targetFrame).trim();
     const hasCurrentAudio = Boolean(
       targetFrame.voiceAudio?.audioDataUrl &&
       targetFrame.voiceAudio.synthesizedFromText === speechText,

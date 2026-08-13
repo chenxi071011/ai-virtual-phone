@@ -12,6 +12,7 @@
 
 import type { ChatMessage } from "./chat-storage";
 import { appNowISO } from "./app-clock";
+import { stripVoiceStyleTags } from "./tts-service";
 import type { StateValue } from "./chat-storage";
 import { parseStateValues, mergeStateValues } from "./state-value-parser";
 import { stripActionShells } from "./action-parser";
@@ -269,13 +270,28 @@ const RICH_PATTERNS: {
         },
     },
     {
-        // [语音条:文字内容] — voice message
-        regex: new RegExp(`\\[语音条${C}([^\\]]+)\\]`),
-        build: (m) => ({
-            content: "",
-            mediaType: "audio" as const,
-            mediaData: { label: m[1].trim() },
-        }),
+        // [语音条:文字内容] / [语音条(happy):文字内容] — voice message
+        //
+        // 情绪和行内声音标签（(laughs) 之类）只喂给 TTS，绝不进 label：
+        // label 是显示、prompt 历史回灌、微信转发、备份导出共用的字段（全库 60+ 处），
+        // 标签留在里面就会从某个角落漏到用户眼前。这里一次性拆开，
+        // 让「干净」成为结构上的默认，而不是靠每个渲染点记得剥。
+        regex: new RegExp(`\\[语音条(?:[（(]\\s*([A-Za-z_-]{2,12})\\s*[)）])?${C}([^\\]]+)\\]`),
+        build: (m) => {
+            const emotion = m[1]?.trim().toLowerCase();
+            const raw = m[2].trim();
+            const clean = stripVoiceStyleTags(raw);
+            return {
+                content: "",
+                mediaType: "audio" as const,
+                mediaData: {
+                    label: clean || raw,
+                    // 只有真带了标签才存，免得给每条语音都塞一份重复文本
+                    ...(clean !== raw ? { voiceScript: raw } : {}),
+                    ...(emotion ? { voiceEmotion: emotion } : {}),
+                },
+            };
+        },
     },
     {
         regex: /\[我向[^\]]+发起了语音通话\]/,

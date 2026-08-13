@@ -192,6 +192,10 @@ export type ChatMessage = {
         callDuration?: string;    // 通话时长（如 05:23）
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本
+        // 带行内声音标签（(laughs) 等）的原文，只喂给 TTS。label 永远是剥干净的版本——
+        // 显示、prompt 历史、微信转发、备份都用 label，标签不会漏到用户眼前。
+        voiceScript?: string;
+        voiceEmotion?: string;    // MiniMax voice_setting.emotion，见 tts-service 的合法取值
         memoryContent?: string;   // 记忆写入内容
         memoryReason?: string;    // 记忆写入原因
         memoryImportance?: number;// 记忆写入重要性
