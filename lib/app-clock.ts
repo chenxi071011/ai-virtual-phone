@@ -29,26 +29,37 @@ export type AppClockConfig = {
 
 const DEFAULT_CONFIG: AppClockConfig = { enabled: false, offsetMs: 0 };
 
-// 每次取时间都读一遍 localStorage 太亏（消息渲染是高频路径），缓存起来，
-// 由 saveAppClockConfig 和跨标签页的 storage 事件负责失效。
-let cached: AppClockConfig | null = null;
+// 按原始字符串记忆化，不缓存「读到的结果」本身。
+//
+// kvGet 只读 kv-db 的内存 Map，而那个 Map 是异步的 hydrateKvDb() 填的；水合完成前
+// 一律返回 null。appNow() 在启动极早期就会被调用，要是把那次的 null 当成「用户没开」
+// 存下来，配置就再也读不回来了——表现为一进 APP 自定义时间自己关了，而且下次拨动
+// 开关时还会拿这份空配置把磁盘上真实的偏移量覆盖掉。
+//
+// 每次都读一次 Map（就是一次 Map.get，很便宜），只有内容真的变了才重新 JSON.parse，
+// 这样水合一完成就自动跟上。
+let cachedRaw: string | null = null;
+let cachedConfig: AppClockConfig = DEFAULT_CONFIG;
+let cachedValid = false;
 
 function readConfig(): AppClockConfig {
     if (typeof window === "undefined") return DEFAULT_CONFIG;
-    if (cached) return cached;
+    const raw = kvGet(CLOCK_KEY);
+    if (cachedValid && raw === cachedRaw) return cachedConfig;
+    cachedRaw = raw;
+    cachedValid = true;
     try {
-        const raw = kvGet(CLOCK_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
-        cached = parsed && typeof parsed === "object"
+        cachedConfig = parsed && typeof parsed === "object"
             ? {
                 enabled: parsed.enabled === true,
                 offsetMs: Number.isFinite(parsed.offsetMs) ? Number(parsed.offsetMs) : 0,
             }
             : DEFAULT_CONFIG;
     } catch {
-        cached = DEFAULT_CONFIG;
+        cachedConfig = DEFAULT_CONFIG;
     }
-    return cached;
+    return cachedConfig;
 }
 
 export function loadAppClockConfig(): AppClockConfig {
@@ -61,8 +72,11 @@ export function saveAppClockConfig(config: AppClockConfig): void {
         enabled: config.enabled === true,
         offsetMs: Number.isFinite(config.offsetMs) ? Number(config.offsetMs) : 0,
     };
-    cached = next;
-    kvSet(CLOCK_KEY, JSON.stringify(next));
+    const serialized = JSON.stringify(next);
+    cachedRaw = serialized;
+    cachedConfig = next;
+    cachedValid = true;
+    kvSet(CLOCK_KEY, serialized);
     window.dispatchEvent(new CustomEvent(APP_CLOCK_UPDATED_EVENT, { detail: next }));
 }
 
@@ -98,7 +112,8 @@ export function offsetFromTargetTime(target: Date): number {
 
 /** 缓存失效——跨标签页改了配置时用。 */
 export function invalidateAppClockCache(): void {
-    cached = null;
+    cachedValid = false;
+    cachedRaw = null;
 }
 
 if (typeof window !== "undefined") {
