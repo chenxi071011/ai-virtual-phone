@@ -33,6 +33,19 @@ import {
     CUSTOM_APP_PLACE_DESKTOP_EVENT,
 } from "./custom-app-storage";
 import { applyCustomAppRegistrationsAsync, formatCustomAppRegistrationSummary } from "./custom-app-registration";
+import {
+    UPSTREAM_REPO,
+    compareForkWithUpstream,
+    fetchForkFileText,
+    fetchUpstreamFileText,
+    loadContribFork,
+    normalizeForkRepo,
+    saveContribFork,
+    submitContribution,
+    type ContribCompareResult,
+} from "./community-contrib";
+import { loadQaGithubConfig } from "./qa-github";
+import { loadUploadConfig } from "./resource-hub-upload";
 import { CUSTOM_APP_CREATOR_GUIDE_MD } from "./custom-app-creator-guide";
 import { fetchCustomAppMarketItems, fetchMyCustomAppMarketItems } from "./custom-app-market-client";
 import { buildMarketItemByAppId, classifyInstalledApp, type MarketOwnershipData } from "./custom-app-ownership";
@@ -1070,27 +1083,101 @@ const saveTheaterDraftTool: QaContentTool = {
 
 // ── 本机内容清单 ──
 
+/** 关键词匹配：对一组字段做包含匹配，返回命中的字段标签；keyword 为空时返回 null（不过滤，列出全部）。 */
+function keywordHits(fields: Array<[label: string, value: string]>, keyword: string): string[] | null {
+    const lower = keyword.toLowerCase();
+    if (!lower) return null;
+    const hits: string[] = [];
+    for (const [label, value] of fields) {
+        if (value && value.toLowerCase().includes(lower)) hits.push(label);
+    }
+    return hits;
+}
+
 const listContentTool: QaContentTool = {
     name: "本机内容清单",
     nativeName: "list_local_content",
-    // 空参数工具：带一个无意义可选字段，避免部分 provider（如 Gemini）拒绝空 properties
-    parameters: { type: "object", properties: { noop: { type: "string", description: "无需参数，忽略" } } },
-    description: "列出当前本机的自定义 APP、游戏/剧场草稿箱、本机测试游戏与剧场，用于确认安装结果或决定读取/修改哪个。",
-    schemaLines: ["  参数：无", "  调用：[执行动作:本机内容清单({})]"],
-    async run() {
+    parameters: {
+        type: "object",
+        properties: {
+            keyword: { type: "string", description: "可选：按关键词过滤（匹配名称、简介、标签、源码等），不填列出全部" },
+            noop: { type: "string", description: "无需参数，忽略" },
+        },
+    },
+    description:
+        "列出当前本机的自定义 APP、游戏/剧场草稿箱、本机测试游戏与剧场，用于确认安装结果或决定读取/修改哪个。传 keyword 可按关键词检索：只列出名称/简介/标签/源码等字段包含该词的条目，并标注命中字段。",
+    schemaLines: [
+        "  参数：",
+        "    · keyword (可选) — 按关键词过滤，只列出命中的条目；不填列出全部",
+        '  调用：[执行动作:本机内容清单({})] 或 [执行动作:本机内容清单({"keyword":"五子棋"})]',
+    ],
+    async run(args) {
+        const keyword = typeof args.keyword === "string" ? args.keyword.trim() : "";
         const draftMark = (linked: boolean, dirty?: boolean) =>
             linked ? `（已发布${dirty ? "，有未发布改动" : ""}）` : "（未发布）";
+        const hitMark = (hits: string[] | null) => (hits ? ` ← 命中：${hits.join("、")}` : "");
         const lines: string[] = [];
+        let total = 0;
+
         const apps = loadInstalledCustomApps();
-        lines.push(`自定义 APP（${apps.length} 个）：${apps.length ? apps.map((a) => `${a.name}${a.marketItemId ? draftMark(true, a.hasUnpublishedChanges) : ""}`).join("、") : "无"}`);
+        const appHits = apps
+            .map((a) => ({
+                item: `${a.name}${a.marketItemId ? draftMark(true, a.hasUnpublishedChanges) : ""}`,
+                hits: keywordHits([["名称", a.name], ["简介", a.description || ""], ["源码", a.entryHtml]], keyword),
+            }))
+            .filter((r) => !r.hits || r.hits.length > 0);
+        total += appHits.length;
+        lines.push(`自定义 APP（${keyword ? `命中 ${appHits.length}/${apps.length} 个` : `${apps.length} 个`}）：${appHits.length ? appHits.map((r) => `${r.item}${hitMark(r.hits)}`).join("、") : "无"}`);
+
         const gameDrafts = loadGameDrafts();
-        lines.push(`游戏草稿箱（${gameDrafts.length} 个）：${gameDrafts.length ? gameDrafts.map((d) => `${d.title}${draftMark(Boolean(d.publishedTemplateId), d.hasUnpublishedChanges)}`).join("、") : "无"}`);
+        const gameDraftHits = gameDrafts
+            .map((d) => ({
+                item: `${d.title}${draftMark(Boolean(d.publishedTemplateId), d.hasUnpublishedChanges)}`,
+                hits: keywordHits([["标题", d.title], ["subtitle", d.draft.subtitle || ""], ["synopsis", d.draft.synopsis || ""], ["标签", d.draft.tagsText || ""], ["gameHtml", d.draft.gameHtml || ""], ["pickerHtml", d.draft.pickerHtml || ""]], keyword),
+            }))
+            .filter((r) => !r.hits || r.hits.length > 0);
+        total += gameDraftHits.length;
+        lines.push(`游戏草稿箱（${keyword ? `命中 ${gameDraftHits.length}/${gameDrafts.length} 个` : `${gameDrafts.length} 个`}）：${gameDraftHits.length ? gameDraftHits.map((r) => `${r.item}${hitMark(r.hits)}`).join("、") : "无"}`);
+
         const games = loadGameState().installedGames.filter((g) => isLocalTestGameId(g.localId));
-        lines.push(`本机测试游戏（${games.length} 个）：${games.length ? games.map((g) => g.templateSnapshot.title).join("、") : "无"}`);
+        const gameHits = games
+            .map((g) => {
+                const t = g.templateSnapshot;
+                return {
+                    item: t.title,
+                    hits: keywordHits([["标题", t.title], ["subtitle", t.subtitle || ""], ["synopsis", t.synopsis || ""], ["标签", (t.tags || []).join("、")], ["gameHtml", t.gameHtml || ""], ["pickerHtml", t.pickerHtml || ""]], keyword),
+                };
+            })
+            .filter((r) => !r.hits || r.hits.length > 0);
+        total += gameHits.length;
+        lines.push(`本机测试游戏（${keyword ? `命中 ${gameHits.length}/${games.length} 个` : `${games.length} 个`}）：${gameHits.length ? gameHits.map((r) => `${r.item}${hitMark(r.hits)}`).join("、") : "无"}`);
+
         const bmDrafts = loadBmDrafts();
-        lines.push(`剧场草稿箱（${bmDrafts.length} 个）：${bmDrafts.length ? bmDrafts.map((d) => `${d.title}${draftMark(Boolean(d.sourceTemplateId), d.hasUnpublishedChanges)}`).join("、") : "无"}`);
+        const bmDraftHits = bmDrafts
+            .map((d) => ({
+                item: `${d.title}${draftMark(Boolean(d.sourceTemplateId), d.hasUnpublishedChanges)}`,
+                hits: keywordHits([["标题", d.title], ["subtitle", text(d.draft.subtitle, 300) || ""], ["synopsis", text(d.draft.synopsis, 1000) || ""], ["storyText", text(d.draft.storyText, 3000) || ""], ["标签", text(d.draft.tagsText, 200) || ""], ["aiInstruction", String(d.draft.aiInstruction ?? "")], ["openingHtml", String(d.draft.openingHtml ?? "")]], keyword),
+            }))
+            .filter((r) => !r.hits || r.hits.length > 0);
+        total += bmDraftHits.length;
+        lines.push(`剧场草稿箱（${keyword ? `命中 ${bmDraftHits.length}/${bmDrafts.length} 个` : `${bmDrafts.length} 个`}）：${bmDraftHits.length ? bmDraftHits.map((r) => `${r.item}${hitMark(r.hits)}`).join("、") : "无"}`);
+
         const theaters = loadBlackMarketState().ownedTheaters.filter((t) => isLocalTestTheaterId(t.localId));
-        lines.push(`本机测试剧场（${theaters.length} 个）：${theaters.length ? theaters.map((t) => t.templateSnapshot.title).join("、") : "无"}`);
+        const theaterHits = theaters
+            .map((t) => {
+                const tmpl = t.templateSnapshot;
+                return {
+                    item: tmpl.title,
+                    hits: keywordHits([["标题", tmpl.title], ["subtitle", tmpl.subtitle || ""], ["synopsis", tmpl.synopsis || ""], ["storyText", tmpl.storyText || ""], ["标签", (tmpl.tags || []).join("、")], ["aiInstruction", tmpl.aiInstruction || ""], ["openingHtml", tmpl.openingHtml || ""]], keyword),
+                };
+            })
+            .filter((r) => !r.hits || r.hits.length > 0);
+        total += theaterHits.length;
+        lines.push(`本机测试剧场（${keyword ? `命中 ${theaterHits.length}/${theaters.length} 个` : `${theaters.length} 个`}）：${theaterHits.length ? theaterHits.map((r) => `${r.item}${hitMark(r.hits)}`).join("、") : "无"}`);
+
+        if (keyword) {
+            lines.unshift(`【关键词「${keyword}」命中 ${total} 条】`);
+        }
         lines.push("用「读取」查看某条内容的完整源码；小改用「编辑」（find/replace），大改/新写用「写入」，写完「发布」。");
         return lines.join("\n");
     },
@@ -1468,6 +1555,180 @@ export function readStagedAppFile(pathArg: unknown, pageArg: unknown, startArg?:
     return paginate(content, pageArg, `暂存文件 ${path}`);
 }
 
+// ── 共同建设：把用户 fork 里的改动贡献回官方仓库 ──
+// 读侧走 GitHub 公共接口（无密钥），写侧走集市中转函数（机器人开 community PR）。
+// 对比结果缓存在内存里，供读差异/提交复用，避免重复打接口。
+
+let _contribCompareCache: ContribCompareResult | null = null;
+
+/** 私有 fork 支持：工坊「连接仓库」连的恰好是这个 fork 时，读取带上她的 token。
+ *  公开 fork 依旧全程匿名（零密钥开箱即用）。 */
+function contribForkToken(forkRepo: string): string | undefined {
+    try {
+        const config = loadQaGithubConfig();
+        if (config?.token && `${config.owner}/${config.repo}`.toLowerCase() === forkRepo.toLowerCase()) {
+            return config.token;
+        }
+    } catch { /* 读不到配置就按匿名走 */ }
+    return undefined;
+}
+
+const contribCompareTool: QaContentTool = {
+    name: "对比官方版本",
+    nativeName: "compare_with_official",
+    parameters: {
+        type: "object",
+        properties: {
+            fork: { type: "string", description: "可选：用户 fork 的仓库（owner/repo 或完整 GitHub 地址）。首次告知后会记住，之后可不填" },
+            branch: { type: "string", description: "可选：fork 上改动所在的分支，缺省用 fork 的默认分支" },
+        },
+    },
+    description:
+        "对比用户自部署 fork 与官方仓库的差异，列出改动过的文件（标注哪些在贡献白名单内）。"
+        + "首次使用需要用户提供自己 fork 的 GitHub 地址。这是「贡献改动给官方」流程的第一步。",
+    schemaLines: [
+        "  参数：",
+        "    · fork (可选) — 用户 fork 的仓库地址（首次提供后记住）",
+        "    · branch (可选) — 改动所在分支，缺省用 fork 默认分支",
+        '  调用：[执行动作:对比官方版本({"fork":"某人/ai-virtual-phone"})] 或 [执行动作:对比官方版本({})]',
+    ],
+    async run(args) {
+        const provided = typeof args.fork === "string" ? normalizeForkRepo(args.fork) : null;
+        if (typeof args.fork === "string" && String(args.fork).trim() && !provided) {
+            return "fork 地址格式不对，应是 owner/repo 或完整 GitHub 链接。";
+        }
+        const forkRepo = provided || loadContribFork();
+        if (!forkRepo) {
+            return "还不知道用户的 fork 地址。请向用户询问其 GitHub fork 仓库地址（形如 owner/ai-virtual-phone），拿到后再次调用本动作并带上 fork 参数。若用户用的是官方站（没有自部署），请说明贡献代码需要自部署版本。fork 是私有仓库的话，需先在工坊「连接仓库」里连接它（token 能读该仓库即可）。";
+        }
+        if (provided) saveContribFork(provided);
+        const branch = typeof args.branch === "string" ? args.branch.trim() : "";
+        const result = await compareForkWithUpstream(forkRepo, branch || undefined, contribForkToken(forkRepo));
+        _contribCompareCache = result;
+        const allowed = result.files.filter(file => file.inAllowlist && file.status !== "removed");
+        const skipped = result.files.filter(file => !file.inAllowlist || file.status === "removed");
+        const lines: string[] = [];
+        lines.push(`fork：${forkRepo}（分支 ${result.forkBranch}）领先官方 ${result.aheadBy} 个提交、落后 ${result.behindBy} 个提交。`);
+        if (result.behindBy > 50) lines.push("⚠️ fork 落后官方较多：整文件提交可能带入对官方新改动的回退，提交前请只挑与用户目标相关的改动，必要时基于官方当前版本重新拼合。");
+        if (result.behindBy > 0) lines.push("提示：GitHub 对比接口有几分钟缓存——如果刚执行过「同步官方更新」且已成功，这里的落后数可能是旧值，稍等几分钟再对比一次即可，不影响正常贡献流程。");
+        lines.push(`可贡献的改动文件（${allowed.length} 个）：`);
+        for (const file of allowed) lines.push(`  · ${file.path}（${file.status}，+${file.additions}/-${file.deletions}）`);
+        if (allowed.length === 0) lines.push("  （没有落在贡献白名单内的改动）");
+        if (skipped.length > 0) lines.push(`白名单外/已删除的改动 ${skipped.length} 个（不可经此通道贡献）：${skipped.slice(0, 8).map(file => file.path).join("、")}${skipped.length > 8 ? " 等" : ""}`);
+        lines.push("下一步：和用户确认要贡献哪个改动，用「读取贡献差异」查看具体内容。");
+        return lines.join("\n");
+    },
+};
+
+const contribDiffTool: QaContentTool = {
+    name: "读取贡献差异",
+    nativeName: "read_contrib_diff",
+    parameters: {
+        type: "object",
+        properties: {
+            path: { type: "string", description: "要查看差异的文件路径（来自「对比官方版本」的结果）" },
+        },
+        required: ["path"],
+    },
+    description: "查看某个改动文件的逐行差异（相对官方与 fork 的共同基准），用于确认用户想贡献的具体是哪部分改动。",
+    schemaLines: [
+        "  参数：",
+        "    · path — 文件路径",
+        '  调用：[执行动作:读取贡献差异({"path":"lib/xxx.ts"})]',
+    ],
+    async run(args) {
+        const path = String(args.path ?? "").trim();
+        if (!path) return "缺少 path。";
+        if (!_contribCompareCache) return "请先执行「对比官方版本」。";
+        const file = _contribCompareCache.files.find(item => item.path === path);
+        if (!file) return `对比结果里没有 ${path}，先重新「对比官方版本」确认文件清单。`;
+        if (!file.patch) {
+            return `${path} 的差异过大，GitHub 未返回逐行对比（+${file.additions}/-${file.deletions}）。可用「读取本机内容」思路处理：把 fork 版本作为整文件贡献，但务必先向用户确认该文件不含无关私改。`;
+        }
+        const MAX = 6000;
+        const patch = file.patch.length > MAX ? `${file.patch.slice(0, MAX)}\n……（差异过长已截断，共 ${file.patch.length} 字符）` : file.patch;
+        return `${path}（${file.status}，+${file.additions}/-${file.deletions}）：\n${patch}`;
+    },
+};
+
+const contribSubmitTool: QaContentTool = {
+    name: "提交共同建设贡献",
+    nativeName: "submit_contribution",
+    parameters: {
+        type: "object",
+        properties: {
+            title: { type: "string", description: "改动标题（说清改了什么，4~80 字）" },
+            summary: { type: "string", description: "改动说明：做了什么、为什么、怎么验证的" },
+            paths: { type: "array", items: { type: "string" }, description: "整文件贡献：直接取 fork 里这些文件的当前内容提交（文件内容必须全部与本次贡献相关）" },
+            files: {
+                type: "array",
+                items: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+                description: "拼合贡献：当 fork 文件混有无关私改时，以官方当前版本为底、只并入相关改动后的完整文件内容",
+            },
+            contributor: { type: "string", description: "贡献者署名（问用户想用什么名字）" },
+            githubUser: { type: "string", description: "可选：用户的 GitHub 用户名（用于 Co-authored-by 正式署名）" },
+            confirm: { type: "boolean", description: "必须先向用户展示提交预览并获得明确同意后，才允许带 confirm:true 提交" },
+        },
+        required: ["title", "summary"],
+    },
+    description:
+        "把选定的改动作为 PR 提交到官方仓库（community 标签，管理员审核后合并）。"
+        + "硬性流程：第一次调用不带 confirm（返回预览），把预览展示给用户、用户明确同意后，再带 confirm:true 提交。"
+        + "paths 和 files 二选一：文件干净用 paths；文件混有用户私改时，先读官方版本与差异，拼出只含相关改动的完整文件走 files。",
+    schemaLines: [
+        "  参数：",
+        "    · title / summary — 标题与说明（必填）",
+        "    · paths 或 files — 整文件 或 拼合后的文件内容",
+        "    · contributor / githubUser — 署名",
+        "    · confirm — 用户明确同意后才能为 true",
+        '  调用：[执行动作:提交共同建设贡献({"title":"…","summary":"…","paths":["lib/x.ts"],"confirm":true})]',
+    ],
+    async run(args) {
+        if (!_contribCompareCache) return "请先执行「对比官方版本」。";
+        const title = String(args.title ?? "").trim();
+        const summary = String(args.summary ?? "").trim();
+        if (title.length < 4 || !summary) return "title（≥4 字）和 summary 都是必填。";
+        const paths = Array.isArray(args.paths) ? args.paths.map(String).filter(Boolean) : [];
+        const provided = Array.isArray(args.files)
+            ? (args.files as Array<{ path?: unknown; content?: unknown }>)
+                .map(file => ({ path: String(file?.path ?? "").trim(), content: String(file?.content ?? "") }))
+                .filter(file => file.path && file.content)
+            : [];
+        if (paths.length === 0 && provided.length === 0) return "paths 和 files 至少提供一个。";
+
+        const files: Array<{ path: string; content: string }> = [...provided];
+        for (const path of paths) {
+            const known = _contribCompareCache.files.find(item => item.path === path && item.inAllowlist && item.status !== "removed");
+            if (!known) return `「${path}」不在可贡献清单里（先「对比官方版本」确认）。`;
+            files.push({ path, content: await fetchForkFileText(_contribCompareCache.forkRepo, _contribCompareCache.forkBranch, path, contribForkToken(_contribCompareCache.forkRepo)) });
+        }
+
+        if (args.confirm !== true) {
+            const lines = [
+                "【提交预览 —— 未提交，需用户确认】",
+                `标题：${title}`,
+                `说明：${summary}`,
+                `署名：${String(args.contributor ?? "").trim() || "匿名"}${args.githubUser ? `（GitHub: ${args.githubUser}）` : ""}`,
+                `将提交 ${files.length} 个文件到官方仓库（${UPSTREAM_REPO}）：`,
+                ...files.map(file => `  · ${file.path}（${file.content.split("\n").length} 行）`),
+                "请把以上内容展示给用户；用户明确同意后，再次调用本动作并带 confirm:true。",
+            ];
+            return lines.join("\n");
+        }
+
+        const endpoint = loadUploadConfig().endpoint;
+        const result = await submitContribution({
+            endpoint,
+            title,
+            summary,
+            contributor: String(args.contributor ?? "").trim(),
+            githubUser: String(args.githubUser ?? "").trim(),
+            files,
+        });
+        return `已提交！PR #${result.prNumber}：${result.prUrl}\n官方审核通过后，这个贡献会出现在资源集市「共同建设」的贡献墙上。`;
+    },
+};
+
 export const QA_CONTENT_TOOLS = [
     contentGuideTool,
     listContentTool,
@@ -1480,4 +1741,7 @@ export const QA_CONTENT_TOOLS = [
     saveGameDraftTool,
     saveTheaterDraftTool,
     exportContentTool,
+    contribCompareTool,
+    contribDiffTool,
+    contribSubmitTool,
 ];

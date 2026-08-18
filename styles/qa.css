@@ -3,6 +3,7 @@
    全部变量 scope 在 .qa-app-shell 内，不污染全局。 */
 
 .qa-app-shell {
+  --qa-header-safe-top: max(12px, var(--page-header-safe-top, 48px));
   /* 浅色（暖米白，Claude Light 风）：干净、无描边、柔和阴影 */
   --qa-bg-canvas: #fafaf7;
   --qa-bg-sidebar: #f3f2ec;
@@ -93,8 +94,8 @@
   top: 0;
   left: 0;
   right: 0;
-  height: calc(var(--page-header-safe-top, 48px) + var(--page-header-content-height, 42px));
-  padding: var(--page-header-safe-top, 48px) 14px 0;
+  height: calc(var(--qa-header-safe-top) + var(--page-header-content-height, 42px));
+  padding: var(--qa-header-safe-top) 14px 0;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -193,7 +194,7 @@
   overscroll-behavior-y: contain;
   /* 顶部留出顶栏高度；底部留足输入栏高度，避免最后一条被压住 */
   padding:
-    calc(var(--page-header-safe-top, 48px) + var(--page-header-content-height, 42px) + 8px)
+    calc(var(--qa-header-safe-top) + var(--page-header-content-height, 42px) + 8px)
     16px
     calc(env(safe-area-inset-bottom, 0px) + 152px);
   position: relative;
@@ -775,7 +776,7 @@
 .qa-image-viewer-close {
   position: absolute;
   /* 避开手机壳状态栏（独立层级，会拦截点击） */
-  top: calc(var(--page-header-safe-top, 48px) + 10px);
+  top: calc(var(--qa-header-safe-top) + 10px);
   right: 14px;
   width: 36px;
   height: 36px;
@@ -1354,7 +1355,7 @@
   display: flex;
   flex-direction: column;
   background: #ffffff;
-  padding-top: var(--page-header-safe-top, 48px);
+  padding-top: var(--qa-header-safe-top);
 }
 .qa-drawer-head {
   flex-shrink: 0;
@@ -1445,6 +1446,109 @@
   box-shadow: none;
 }
 
+/* ── 消息操作菜单（长按 / 右键弹出：复制、编辑）── */
+.qa-msg-wrap {
+  position: relative;
+}
+
+/* 消息操作（复制 / 编辑）：常驻在气泡下方的小图标，替代原来的长按菜单
+   ——长按要跟系统选词、取词、划词搜索抢同一个手势，移动端几乎必然打架。
+   平时压到低透明度，不跟正文抢视线；按下才提亮。 */
+.qa-msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+}
+.qa-msg-actions[data-role="user"] {
+  justify-content: flex-end;
+}
+.qa-msg-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--qa-text-tertiary);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.qa-msg-action:hover {
+  opacity: 1;
+  color: var(--qa-text-secondary);
+}
+.qa-msg-action:active {
+  opacity: 1;
+  color: var(--qa-text-primary);
+  background: color-mix(in srgb, var(--qa-text-primary) 8%, transparent);
+}
+
+/* ── 编辑消息弹窗（展示未渲染原始内容）── */
+.qa-edit-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: qa-fade-in 0.18s ease;
+}
+.qa-edit-dialog {
+  width: min(100%, 520px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--qa-bg-overlay);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+.qa-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.qa-edit-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--qa-text-primary);
+}
+.qa-edit-textarea {
+  width: 100%;
+  min-height: 220px;
+  max-height: 55vh;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: var(--qa-bg-raised);
+  color: var(--qa-text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+  box-sizing: border-box;
+}
+.qa-edit-textarea:focus {
+  border-color: var(--qa-accent, rgba(255, 255, 255, 0.35));
+}
+.qa-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* 工坊配置面板 */
 .qa-settings-field {
   display: flex;
@@ -1498,4 +1602,75 @@
 }
 .qa-drawer-new:active {
   transform: scale(0.96);
+}
+
+/* ── 工坊文件卡（电脑文件 op=send 的交付卡） ── */
+.qa-file-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 4px 4px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--c-card, #fff);
+  border: 1px solid var(--c-card-border, rgba(0, 0, 0, 0.08));
+  position: relative;
+  flex-wrap: wrap;
+}
+.qa-file-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.qa-file-card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(91, 123, 100, 0.12);
+  color: #5b7b64;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.qa-file-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-title, #222);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qa-file-card-actions { display: flex; gap: 4px; flex: none; }
+.qa-file-card-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--c-text, #555);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.qa-file-card-btn:active { opacity: 0.7; }
+.qa-file-card-error { width: 100%; font-size: 11px; color: var(--c-danger, #d33); }
+.qa-file-card-ready {
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px;
+  background: rgba(91, 123, 100, 0.14);
+  color: #3d5c48;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }

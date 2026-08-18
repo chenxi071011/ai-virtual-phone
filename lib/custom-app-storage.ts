@@ -213,7 +213,8 @@ function formatInstallConflict(conflict: NonNullable<ReturnType<typeof getCustom
   if (conflict.type === "name") {
     return `已安装同名 APP「${conflict.app.name}」。想更新它请用「创作 → 本地测试」里的「换包」原地替换（数据保留），或先卸载旧应用、更换应用名称。`;
   }
-  return `主标签「${conflict.tag}」已被 APP「${conflict.app.name}」使用，请更换该 APP 的主标签。`;
+  // 文案是说给"正在安装的玩家"听的：他改不了标签，能做的只有二选一。
+  return `主标签「${conflict.tag}」与已安装的 APP「${conflict.app.name}」冲突：同一主标签的 APP 只能安装一个。想用新的，请先卸载「${conflict.app.name}」再安装；两个都想保留，可联系新 APP 的作者更换主标签。`;
 }
 
 function normalizePermission(value: unknown): CustomAppPermission | null {

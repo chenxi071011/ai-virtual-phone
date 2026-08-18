@@ -1,10 +1,12 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, Gamepad2, Github, Loader2, Menu, Play, Plus, Square, Trash2, Wrench, X } from "lucide-react";
+import { AppWindow, ArrowUp, BrushCleaning, Check, ChevronLeft, ChevronRight, Copy, Drama, Gamepad2, Github, Loader2, Menu, Pencil, Play, Plus, Square, Trash2, Wrench, X } from "lucide-react";
+import { QaFileCard } from "@/components/qa-file-card";
+import { parseQaFileMarker } from "@/lib/qa-computer-tools";
 import { mdiHammerWrench } from "@mdi/js";
 import { CustomAppRunner } from "@/components/app-market/custom-app-runner";
 import { GameHubApp } from "@/components/game/game-hub-app";
@@ -32,6 +34,7 @@ import {
   stopQaGeneration,
   subscribeQaChat,
   switchQaSession,
+  updateQaMessageContent,
   type QaMsg,
   type QaSession,
   type QaToolStatus,
@@ -211,7 +214,9 @@ function QaCommitCard({ msg }: { msg: QaMsg }) {
 // 工具调用行：折叠的单行摘要，点开展开参数与结果（Claude Code 风格）
 function QaToolRow({ tool }: { tool: QaToolStatus }) {
   const [open, setOpen] = useState(false);
-  const hasDetail = Boolean(tool.detail || tool.result);
+  // 「电脑文件 op=send」的结果里带文件卡标记：卡片常显，标记从结果文本中剥离
+  const { text: resultText, file } = parseQaFileMarker(tool.result || "");
+  const hasDetail = Boolean(tool.detail || resultText);
   const summary = tool.running ? `正在${tool.name}…` : tool.success === false ? `${tool.name}失败` : tool.name;
   return (
     <div className={`qa-tool-row ${tool.running ? "is-running" : tool.success === false ? "is-fail" : "is-done"}`}>
@@ -236,14 +241,15 @@ function QaToolRow({ tool }: { tool: QaToolStatus }) {
               <pre className="qa-tool-row-pre">{tool.detail}</pre>
             </>
           )}
-          {tool.result && (
+          {resultText && (
             <>
               <div className="qa-tool-row-label">结果</div>
-              <pre className="qa-tool-row-pre">{tool.result}</pre>
+              <pre className="qa-tool-row-pre">{resultText}</pre>
             </>
           )}
         </div>
       )}
+      {file && <QaFileCard file={file} />}
     </div>
   );
 }
@@ -268,8 +274,42 @@ function QaStreamingText({ text }: { text: string }) {
   );
 }
 
-function QaMessageItem({ msg, isStreaming, onRetry, onViewImage }: { msg: QaMsg; isStreaming: boolean; onRetry: (id: string) => void; onViewImage: (url: string) => void }) {
+function QaMessageItem({
+  msg,
+  isStreaming,
+  onRetry,
+  onViewImage,
+  onCopy,
+  onEdit,
+}: {
+  msg: QaMsg;
+  isStreaming: boolean;
+  onRetry: (id: string) => void;
+  onViewImage: (url: string) => void;
+  onCopy: (content: string) => void;
+  onEdit: (msg: QaMsg) => void;
+}) {
   const thinkingOnly = isStreaming && !msg.content && (!msg.tools || msg.tools.length === 0);
+  // 消息操作（复制原始内容 / 编辑原始内容——前端渲染会吞掉一些特殊标签，
+  // 沟通时看不到原文）常驻在气泡下方，不用长按触发：长按要跟系统的选词、
+  // 取词、划词搜索抢同一个手势，在移动端几乎必然打架。
+  // 生成中不显示（内容还不完整，复制/编辑都没有意义）。
+  const showActions = !isStreaming && !thinkingOnly;
+  const msgWrap = (node: ReactNode) => (
+    <div className="qa-msg-wrap">
+      {node}
+      {showActions && (
+        <div className="qa-msg-actions" data-role={msg.role}>
+          <button type="button" className="qa-msg-action" aria-label="复制原始内容" title="复制" onClick={() => onCopy(msg.content)}>
+            <Copy size={14} strokeWidth={2} />
+          </button>
+          <button type="button" className="qa-msg-action" aria-label="编辑原始内容" title="编辑" onClick={() => onEdit(msg)}>
+            <Pencil size={14} strokeWidth={2} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
   // 时序分段渲染：文字与工具行按实际发生顺序交错（连续工具行合并成一组）；
   // 旧消息没有 segments 时回退「工具在顶、文字在下」布局。
   // hooks 必须在 user 分支 early-return 之前调用（rules-of-hooks）
@@ -290,7 +330,7 @@ function QaMessageItem({ msg, isStreaming, onRetry, onViewImage }: { msg: QaMsg;
   }, [msg.segments]);
 
   if (msg.role === "user") {
-    return (
+    return msgWrap(
       <div className="qa-msg-user-row">
         <div className="qa-msg-user">
           {msg.images && msg.images.length > 0 && (
@@ -304,11 +344,11 @@ function QaMessageItem({ msg, isStreaming, onRetry, onViewImage }: { msg: QaMsg;
           )}
           {msg.content}
         </div>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return msgWrap(
     <div className="qa-msg-assistant">
       {segmentBlocks ? (
         segmentBlocks.map((block, i) =>
@@ -364,7 +404,7 @@ function QaMessageItem({ msg, isStreaming, onRetry, onViewImage }: { msg: QaMsg;
           </button>
         </div>
       )}
-    </div>
+    </div>,
   );
 }
 
@@ -637,7 +677,7 @@ function QaRepoSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             <span className="qa-field-label">Fine-grained PAT（私有仓库或搜索代码需要）</span>
             <input className="qa-input" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="github_pat_…" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
             <span className="qa-field-hint">
-              GitHub → Settings → Menu 按钮 → Developer settings → Personal access tokens → Fine-grained tokens。创建时 Repository access 记得勾选目标仓库；Permissions 只需添加 Contents 一项——只查代码选 Read-only，要让工坊改代码选 Read and write（Metadata 会自动带上，其余权限都不用勾）。
+              GitHub → Settings → Menu 按钮 → Developer settings → Personal access tokens → Fine-grained tokens。创建时 Repository access 记得勾选目标仓库；Permissions 里：Contents——只查代码选 Read-only，要让工坊改代码选 Read and write；要用「创建PR」再加 Pull requests 的 Read and write（Metadata 会自动带上，其余权限都不用勾）。
             </span>
           </label>
           <div className="qa-field">
@@ -694,6 +734,8 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
+  const [editingMsg, setEditingMsg] = useState<QaMsg | null>(null);
+  const [editText, setEditText] = useState("");
   const [visionEnabled, setVisionEnabled] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [apiReady, setApiReady] = useState(true);
@@ -816,6 +858,25 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
     void retryQaMessage(assistantMsgId);
   }, []);
 
+  const handleCopyMessage = useCallback((content: string) => {
+    void navigator.clipboard?.writeText(content).then(
+      () => onNotice?.("已复制原始内容"),
+      () => onNotice?.("复制失败"),
+    );
+  }, [onNotice]);
+
+  const handleEditMessage = useCallback((msg: QaMsg) => {
+    setEditingMsg(msg);
+    setEditText(msg.content);
+  }, []);
+
+  const handleSaveEdit = useCallback(() => {
+    if (!editingMsg || !snapshot.activeSessionId) return;
+    updateQaMessageContent(snapshot.activeSessionId, editingMsg.id, editText);
+    setEditingMsg(null);
+    onNotice?.("已保存消息内容");
+  }, [editingMsg, editText, snapshot.activeSessionId, onNotice]);
+
   const streamingMsgId =
     snapshot.isGenerating && messages.length > 0 && messages[messages.length - 1].role === "assistant"
       ? messages[messages.length - 1].id
@@ -906,7 +967,7 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
         ) : (
           <div className="qa-messages">
             {messages.map((msg) => (
-              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} />
+              <QaMessageItem key={msg.id} msg={msg} isStreaming={msg.id === streamingMsgId} onRetry={handleRetry} onViewImage={setViewerImage} onCopy={handleCopyMessage} onEdit={handleEditMessage} />
             ))}
           </div>
         )}
@@ -1060,6 +1121,35 @@ export function PhoneQaApp({ onClose, onNotice }: PhoneQaAppProps) {
           <button type="button" className="qa-image-viewer-close" aria-label="关闭" onClick={() => setViewerImage(null)}>
             <X size={20} />
           </button>
+        </div>
+      )}
+
+      {editingMsg && (
+        <div className="qa-edit-backdrop" onClick={() => setEditingMsg(null)}>
+          <div className="qa-edit-dialog" role="dialog" aria-label="编辑消息" onClick={(e) => e.stopPropagation()}>
+            <div className="qa-edit-head">
+              <span className="qa-edit-title">编辑消息（未渲染原始内容）</span>
+              <button type="button" className="qa-icon-btn" onClick={() => setEditingMsg(null)} aria-label="关闭">
+                <X size={16} />
+              </button>
+            </div>
+            <textarea
+              className="qa-edit-textarea"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              spellCheck={false}
+              autoFocus
+              placeholder="这里显示的是消息的原始内容，不会被前端渲染，可放心查看特殊标签。"
+            />
+            <div className="qa-edit-actions">
+              <button type="button" className="qa-devnotice-btn" onClick={() => setEditingMsg(null)}>
+                取消
+              </button>
+              <button type="button" className="qa-devnotice-btn is-primary" onClick={handleSaveEdit}>
+                保存
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

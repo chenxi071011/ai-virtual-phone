@@ -1560,7 +1560,9 @@
 
 .game-runtime-floating-back {
   position: absolute;
-  top: max(38px, calc(env(safe-area-inset-top, 0px) + 8px));
+  /* env 分支取 4px：注入给沙盒游戏的 safe-top = 本按钮下沿 + 间隙，这里每多 1px，
+     吃 safe-top 的存量游戏画面就整体下移 1px。38px 下限保持不变。 */
+  top: max(38px, calc(env(safe-area-inset-top, 0px) + 4px));
   left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
   z-index: 8;
   width: 44px;

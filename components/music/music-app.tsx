@@ -19,9 +19,12 @@ import {
     getDailyRecommendSongs, getHotSearchDetail, getPersonalizedPlaylists,
     getRecommendResource, getToplists, getUserRecordWithCounts,
     getPlaylistDetail, getUserDetail, subscribePlaylist,
+    getDjSublist, getDjPrograms, getAlbumSublist, getAlbumTracks,
+    getUserEvents, getRecentSongs, getIntelligenceList,
     type NeteaseHotSearch, type NeteaseSearchResult,
     type NeteasePlaylist, type NeteaseToplist, type MusicApiConfig,
     type NeteasePlaylistDetail, type NeteaseUserDetail, type NeteasePlayRecord,
+    type NeteaseDjRadio, type NeteaseDjProgram, type NeteaseAlbumSub, type NeteaseUserEvent,
 } from "@/lib/music-service";
 import { clearMusicCloudSyncData } from "@/lib/chat-engine";
 import MusicCommentsPage from "./music-comments";
@@ -283,7 +286,7 @@ export default function MusicApp({ onClose }: Props) {
     };
 
     return (
-        <div className="music-app" style={appBgStyle(bgCfg)}>
+        <div className="music-app" style={appBgStyle(bgCfg)} {...(player.currentTrack ? { "data-nowbar": "" } : {})}>
             {customCss && <SessionCustomCSS css={customCss} scope=".music-app" />}
             {musicToast && (
                 <div className="music-toast-overlay">
@@ -366,9 +369,10 @@ export default function MusicApp({ onClose }: Props) {
                     playlists={playlists}
                     loading={playlistsLoading}
                     onToast={showMusicToast}
-                    hasNetease={hasNetease}
                     localTracks={tracks}
                     onPlayLocal={handlePlay}
+                    onGoLocal={() => setTab("local")}
+                    onOpenSettings={() => setShowSettings(true)}
                 />
             )}
 
@@ -718,11 +722,8 @@ function DailySongsPage({ songs, player, formatTime, onPlayNetease, onPlayAll }:
     );
 }
 
-// ── Mine Tab ──
-function MineTab({
-    player, formatTime, onPlayNetease, onPlayAll, activePlaylist, setActivePlaylist, playlists, loading, onToast,
-    hasNetease, localTracks, onPlayLocal,
-}: {
+// ── Mine Tab（网易云「我的」页式排版：全部真数据，拿不到的板块直接隐藏） ──
+function MineTab({ player, formatTime, onPlayNetease, onPlayAll, activePlaylist, setActivePlaylist, playlists, loading, onToast, onGoLocal, onOpenSettings, localTracks, onPlayLocal }: {
     player: MusicControlsValue;
     formatTime: (s: number) => string;
     onPlayNetease: (r: NeteaseSearchResult) => void;
@@ -732,29 +733,59 @@ function MineTab({
     playlists: NeteasePlaylist[];
     loading: boolean;
     onToast: (text: string) => void;
-    hasNetease: boolean;
+    onGoLocal: () => void;
+    onOpenSettings: () => void;
     localTracks: MusicTrack[];
     onPlayLocal: (t: MusicTrack) => void;
 }) {
     const [weekRecords, setWeekRecords] = useState<NeteasePlayRecord[]>(() => readMusicCache("music-user-week-records", []));
     const [userDetail, setUserDetail] = useState<NeteaseUserDetail | null>(() => readMusicCache("music-user-detail", null));
+    const [recentSongs, setRecentSongs] = useState<NeteaseSearchResult[]>(() => readMusicCache("music-user-recent-songs", []));
+    const [djRadios, setDjRadios] = useState<NeteaseDjRadio[]>(() => readMusicCache("music-user-dj-sublist", []));
+    const [subAlbums, setSubAlbums] = useState<NeteaseAlbumSub[]>(() => readMusicCache("music-user-album-sublist", []));
+    const [userEvents, setUserEvents] = useState<NeteaseUserEvent[]>(() => readMusicCache("music-user-events", []));
+    const [mineTab, setMineTab] = useState<"music" | "podcast" | "note">("music");
+    const [mineSub, setMineSub] = useState<"recent" | "created" | "collected" | "album">("recent");
+    const [openRadioId, setOpenRadioId] = useState<number | null>(null);
+    const [radioPrograms, setRadioPrograms] = useState<Record<number, NeteaseDjProgram[]>>({});
+    const [heartBusy, setHeartBusy] = useState(false);
+    // 本地播放记录：不依赖网易云账号，本地文件与在线播放都会记一笔（本 fork）
     const [history, setHistory] = useState<PlayHistoryEntry[]>(() => getPlayHistory());
 
     useEffect(() => {
         let cancelled = false;
         const cfg = loadMusicApiConfig();
-        if (cfg.baseUrl.trim()) {
-            getUserRecordWithCounts(1).then(records => {
-                if (cancelled) return;
-                setWeekRecords(records);
-                writeMusicCache("music-user-week-records", records);
-            });
-            getUserDetail().then(detail => {
-                if (cancelled || !detail) return;
-                setUserDetail(detail);
-                writeMusicCache("music-user-detail", detail);
-            });
-        }
+        if (!cfg.baseUrl.trim()) return;
+        getUserRecordWithCounts(1).then(records => {
+            if (cancelled) return;
+            setWeekRecords(records);
+            writeMusicCache("music-user-week-records", records);
+        });
+        getUserDetail().then(detail => {
+            if (cancelled || !detail) return;
+            setUserDetail(detail);
+            writeMusicCache("music-user-detail", detail);
+        });
+        getRecentSongs().then(songs => {
+            if (cancelled || songs.length === 0) return;
+            setRecentSongs(songs);
+            writeMusicCache("music-user-recent-songs", songs);
+        });
+        getDjSublist().then(radios => {
+            if (cancelled) return;
+            setDjRadios(radios);
+            writeMusicCache("music-user-dj-sublist", radios);
+        });
+        getAlbumSublist().then(albums => {
+            if (cancelled) return;
+            setSubAlbums(albums);
+            writeMusicCache("music-user-album-sublist", albums);
+        });
+        getUserEvents().then(events => {
+            if (cancelled) return;
+            setUserEvents(events);
+            writeMusicCache("music-user-events", events);
+        });
         return () => { cancelled = true; };
     }, []);
 
@@ -780,6 +811,66 @@ function MineTab({
         );
     }
 
+    // ── 派生数据（周报按播放次数估算，标注见卡片脚注） ──
+    const totalPlays = weekRecords.reduce((sum, r) => sum + r.playCount, 0);
+    const estimatedHours = weekRecords.reduce((sum, r) => sum + r.playCount * (r.song.duration / 1000), 0) / 3600;
+    const artistCounts = new Map<string, number>();
+    for (const r of weekRecords) {
+        const first = (r.song.artists || "").split("/")[0];
+        if (first) artistCounts.set(first, (artistCounts.get(first) || 0) + r.playCount);
+    }
+    const topArtist = [...artistCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const topSongs = weekRecords.slice(0, 7);
+    const maxPlay = Math.max(1, ...topSongs.map(r => r.playCount));
+
+    const likePlaylist = playlists.find(pl => pl.specialType === 5) ?? playlists.find(pl => pl.name.includes("喜欢的音乐")) ?? null;
+    const createdPlaylists = playlists.filter(pl => !pl.subscribed && pl !== likePlaylist);
+    const collectedPlaylists = playlists.filter(pl => pl.subscribed);
+    const recentList = recentSongs.length > 0 ? recentSongs : weekRecords.map(r => r.song);
+
+    const startHeartMode = async () => {
+        if (!likePlaylist || heartBusy) return;
+        setHeartBusy(true);
+        try {
+            const likeTracks = await getPlaylistTracks(likePlaylist.id);
+            const seed = likeTracks[0];
+            if (!seed) { onToast("喜欢列表是空的，先收藏几首歌"); return; }
+            const smart = await getIntelligenceList(seed.id, likePlaylist.id);
+            if (smart.length === 0) { onToast("心动模式接口不可用"); return; }
+            onPlayAll([seed, ...smart.filter(track => track.id !== seed.id)]);
+            onToast("心动模式已开启");
+        } finally {
+            setHeartBusy(false);
+        }
+    };
+
+    const openRadio = async (radio: NeteaseDjRadio) => {
+        if (openRadioId === radio.id) { setOpenRadioId(null); return; }
+        setOpenRadioId(radio.id);
+        if (!radioPrograms[radio.id]) {
+            const programs = await getDjPrograms(radio.id);
+            setRadioPrograms(prev => ({ ...prev, [radio.id]: programs }));
+        }
+    };
+
+    const playProgram = (radio: NeteaseDjRadio, program: NeteaseDjProgram) => {
+        onPlayNetease({
+            id: program.mainSongId,
+            name: program.name,
+            artists: radio.dj || radio.name,
+            album: radio.name,
+            duration: program.duration,
+            coverUrl: program.coverUrl || radio.picUrl,
+        });
+    };
+
+    const playAlbum = async (album: NeteaseAlbumSub) => {
+        const tracks = await getAlbumTracks(album.id);
+        if (tracks.length === 0) { onToast("专辑曲目拉取失败"); return; }
+        onPlayAll(tracks);
+        onToast("播放专辑「" + album.name + "」");
+    };
+
     const handleResume = (entry: PlayHistoryEntry) => {
         if (entry.source === "local") {
             const live = localTracks.find(t => t.id === entry.id);
@@ -796,100 +887,253 @@ function MineTab({
         });
     };
 
-    // ── Week report derived from play records (hours are an estimate) ──
-    const totalPlays = weekRecords.reduce((sum, r) => sum + r.playCount, 0);
-    const estimatedHours = weekRecords.reduce((sum, r) => sum + r.playCount * (r.song.duration / 1000), 0) / 3600;
-    const artistCounts = new Map<string, number>();
-    for (const r of weekRecords) {
-        const first = (r.song.artists || "").split("/")[0];
-        if (first) artistCounts.set(first, (artistCounts.get(first) || 0) + r.playCount);
-    }
-    const topArtist = [...artistCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    const topSongs = weekRecords.slice(0, 7);
-    const maxPlay = Math.max(1, ...topSongs.map(r => r.playCount));
-    const recentTracks = weekRecords.map(r => r.song);
-
-    const profileMeta = [
-        userDetail?.level ? `Lv.${userDetail.level}` : "",
-        userDetail?.listenSongs ? `累计听歌 ${userDetail.listenSongs.toLocaleString()} 首` : "",
-        userDetail?.createDays ? `村龄 ${Math.round(userDetail.createDays / 365 * 10) / 10} 年` : "",
-    ].filter(Boolean).join(" · ");
+    const statItems: Array<{ label: string; value: string }> = [];
+    if (typeof userDetail?.follows === "number") statItems.push({ label: "关注", value: String(userDetail.follows) });
+    if (typeof userDetail?.followeds === "number") statItems.push({ label: "粉丝", value: String(userDetail.followeds) });
+    if (userDetail?.level) statItems.push({ label: "", value: "Lv." + userDetail.level });
+    if (userDetail?.listenSongs) statItems.push({ label: "首", value: userDetail.listenSongs.toLocaleString() });
 
     return (
-        <div className="music-discovery">
-            {/* Profile header */}
-            {hasNetease && userDetail && (
-                <div className="music-me-head">
-                    <div className="music-me-ava">
-                        {userDetail.avatarUrl ? <img src={userDetail.avatarUrl} alt="" /> : <span>{userDetail.nickname.slice(0, 1)}</span>}
+        <div className="music-discovery music-mine">
+            {/* 头部：无独立背景，整页共用 App 背景 */}
+            <div className="music-mine-hero">
+                <div className="music-mine-hero-body">
+                    <div className="music-mine-ava">
+                        {userDetail?.avatarUrl ? <img src={userDetail.avatarUrl} alt="" /> : <span>{(userDetail?.nickname || "我").slice(0, 1)}</span>}
                     </div>
-                    <div className="music-me-id">
-                        <b>{userDetail.nickname}</b>
-                        {profileMeta && <span>{profileMeta}</span>}
+                    <div className="music-mine-name">{userDetail?.nickname || "未登录"}</div>
+                    {userDetail?.signature && <div className="music-mine-sig">{userDetail.signature}</div>}
+                    {statItems.length > 0 && (
+                        <div className="music-mine-stats">
+                            {statItems.map(item => (
+                                <span key={item.label}><b>{item.value}</b>{item.label}</span>
+                            ))}
+                        </div>
+                    )}
+                    <div className="music-mine-chips">
+                        <button onClick={() => { setMineTab("music"); setMineSub("recent"); }}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                            最近
+                        </button>
+                        <button onClick={onGoLocal}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v10" /><path d="m8 9 4 4 4-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
+                            本地
+                        </button>
+                        <button onClick={() => { setMineTab("music"); setMineSub("created"); }}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h13" /><path d="M3 12h9" /><path d="M3 18h6" /><circle cx="17.5" cy="17" r="2.5" /><path d="M20 17V9l3-1" /></svg>
+                            歌单
+                        </button>
+                        <button onClick={onOpenSettings}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 21v-6" /><path d="M5 11V3" /><path d="M12 21v-9" /><path d="M12 8V3" /><path d="M19 21v-4" /><path d="M19 13V3" /><path d="M3 15h4" /><path d="M10 8h4" /><path d="M17 17h4" /></svg>
+                            设置
+                        </button>
                     </div>
+                </div>
+            </div>
+
+            {/* 歌单封面横滑 */}
+            {playlists.length > 0 && (
+                <div className="music-mine-covers">
+                    {playlists.slice(0, 10).map(pl => (
+                        <div key={pl.id} className="music-mine-cover-card" onClick={() => setActivePlaylist(pl)}>
+                            {pl.coverUrl && <img src={pl.coverUrl} alt="" />}
+                            <span>{pl.name}</span>
+                        </div>
+                    ))}
                 </div>
             )}
 
-            {/* Week listening report */}
-            {hasNetease && topSongs.length > 0 && (
-                <div className="music-week-card">
-                    <div className="music-week-eyebrow">听歌周报</div>
-                    <div className="music-week-big">
-                        本周听了 <em>{totalPlays}</em> 次{estimatedHours >= 0.1 ? <>，约 <em>{Math.round(estimatedHours * 10) / 10}</em> 小时</> : null}
+            {/* 顶层 tabs：播客/笔记拿不到内容就不出现 */}
+            {(djRadios.length > 0 || userEvents.length > 0) && (
+                <div className="music-mine-tabs">
+                    <button {...(mineTab === "music" ? { "data-active": "" } : {})} onClick={() => setMineTab("music")}>音乐</button>
+                    {djRadios.length > 0 && <button {...(mineTab === "podcast" ? { "data-active": "" } : {})} onClick={() => setMineTab("podcast")}>播客</button>}
+                    {userEvents.length > 0 && <button {...(mineTab === "note" ? { "data-active": "" } : {})} onClick={() => setMineTab("note")}>笔记</button>}
+                </div>
+            )}
+
+            {mineTab === "music" && (
+                <>
+                    <div className="music-mine-subtabs">
+                        <button {...(mineSub === "recent" ? { "data-active": "" } : {})} onClick={() => setMineSub("recent")}>近期</button>
+                        <button {...(mineSub === "created" ? { "data-active": "" } : {})} onClick={() => setMineSub("created")}>创建<sup>{createdPlaylists.length + (likePlaylist ? 1 : 0)}</sup></button>
+                        {collectedPlaylists.length > 0 && <button {...(mineSub === "collected" ? { "data-active": "" } : {})} onClick={() => setMineSub("collected")}>收藏<sup>{collectedPlaylists.length}</sup></button>}
+                        {subAlbums.length > 0 && <button {...(mineSub === "album" ? { "data-active": "" } : {})} onClick={() => setMineSub("album")}>专辑<sup>{subAlbums.length}</sup></button>}
                     </div>
-                    {topArtist && <div className="music-week-sub">最常听：{topArtist}</div>}
-                    <div className="music-week-bars">
-                        {topSongs.map(r => (
-                            <div
-                                key={r.song.id}
-                                className="music-week-bar"
-                                title={`${r.song.name} · ${r.playCount}次`}
-                                onClick={() => onPlayNetease(r.song)}
-                            >
-                                <i style={{ height: `${Math.max(12, Math.round(r.playCount / maxPlay * 100))}%` }} />
-                                <span>{r.song.name.slice(0, 4)}</span>
+
+                    {mineSub === "recent" && (
+                        <>
+                            {topSongs.length > 0 && (
+                                <div className="music-week-card">
+                                    <div className="music-week-eyebrow">听歌周报</div>
+                                    <div className="music-week-big">
+                                        本周听了 <em>{totalPlays}</em> 次{estimatedHours >= 0.1 ? <>，约 <em>{Math.round(estimatedHours * 10) / 10}</em> 小时</> : null}
+                                    </div>
+                                    {topArtist && <div className="music-week-sub">最常听：{topArtist}</div>}
+                                    <div className="music-week-bars">
+                                        {topSongs.map(r => (
+                                            <div key={r.song.id} className="music-week-bar" title={r.song.name + " · " + r.playCount + "次"} onClick={() => onPlayNetease(r.song)}>
+                                                <i style={{ height: Math.max(12, Math.round(r.playCount / maxPlay * 100)) + "%" }} />
+                                                <span>{r.song.name.slice(0, 4)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="music-week-note">时长按播放次数 × 歌曲长度估算</div>
+                                </div>
+                            )}
+                            {/* 本地播放记录——不需要登录/配置网易云 API（本 fork） */}
+                            <MusicSection title="本地歌单" action={history.length + " 首"}>
+                                {history.length > 0 ? (
+                                    <div className="music-list music-list-compact">
+                                        {history.map((entry, idx) => (
+                                            <PlayHistoryRow key={entry.id} entry={entry} index={idx} formatTime={formatTime} onPlay={handleResume} />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="music-empty"><div className="music-empty-text">还没有播放记录</div></div>
+                                )}
+                            </MusicSection>
+
+                            {recentList.length > 0 ? (
+                                <MusicSection title="最近播放" action={recentList.length + " 首"}>
+                                    <div className="music-list music-list-compact">
+                                        {recentList.slice(0, 30).map((song, idx) => (
+                                            <NeteaseSongRow key={song.id + "_" + idx} song={song} index={idx} formatTime={formatTime} onPlay={onPlayNetease} />
+                                        ))}
+                                    </div>
+                                </MusicSection>
+                            ) : (
+                                <div className="music-empty"><div className="music-empty-text">还没有播放记录</div></div>
+                            )}
+                        </>
+                    )}
+
+                    {mineSub === "created" && (
+                        <div className="music-mine-pl-list">
+                            {likePlaylist && (
+                                <div className="music-mine-pl-row music-mine-like-row" onClick={() => setActivePlaylist(likePlaylist)}>
+                                    <div className="music-mine-pl-cover">
+                                        {likePlaylist.coverUrl && <img src={likePlaylist.coverUrl} alt="" />}
+                                        <span className="music-mine-like-heart">♥</span>
+                                    </div>
+                                    <div className="music-mine-pl-info">
+                                        <div className="music-mine-pl-name">{likePlaylist.name}</div>
+                                        <div className="music-mine-pl-meta">
+                                            {likePlaylist.trackCount} 首{typeof likePlaylist.playCount === "number" ? " · " + formatMusicCount(likePlaylist.playCount) + "次播放" : ""}
+                                        </div>
+                                    </div>
+                                    <button
+                                        className="music-heart-btn"
+                                        disabled={heartBusy}
+                                        onClick={e => { e.stopPropagation(); void startHeartMode(); }}
+                                    >
+                                        {heartBusy ? "..." : "♥ 心动模式"}
+                                    </button>
+                                </div>
+                            )}
+                            {createdPlaylists.map(pl => (
+                                <MinePlaylistRow key={pl.id} playlist={pl} onOpen={setActivePlaylist} />
+                            ))}
+                        </div>
+                    )}
+
+                    {mineSub === "collected" && (
+                        <div className="music-mine-pl-list">
+                            {collectedPlaylists.map(pl => (
+                                <MinePlaylistRow key={pl.id} playlist={pl} onOpen={setActivePlaylist} />
+                            ))}
+                        </div>
+                    )}
+
+                    {mineSub === "album" && (
+                        <div className="music-mine-pl-list">
+                            {subAlbums.map(album => (
+                                <div key={album.id} className="music-mine-pl-row" onClick={() => void playAlbum(album)}>
+                                    <div className="music-mine-pl-cover music-mine-album-cover">
+                                        {album.picUrl && <img src={album.picUrl} alt="" />}
+                                    </div>
+                                    <div className="music-mine-pl-info">
+                                        <div className="music-mine-pl-name">{album.name}</div>
+                                        <div className="music-mine-pl-meta">{album.artist}{album.size ? " · " + album.size + " 首" : ""}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </>
+            )}
+
+            {mineTab === "podcast" && (
+                <div className="music-mine-pl-list">
+                    {djRadios.map(radio => (
+                        <div key={radio.id}>
+                            <div className="music-mine-pl-row" onClick={() => void openRadio(radio)}>
+                                <div className="music-mine-pl-cover music-mine-album-cover">
+                                    {radio.picUrl && <img src={radio.picUrl} alt="" />}
+                                </div>
+                                <div className="music-mine-pl-info">
+                                    <div className="music-mine-pl-name">{radio.name}</div>
+                                    <div className="music-mine-pl-meta">
+                                        {radio.dj}{radio.programCount ? " · " + radio.programCount + " 期" : ""}{radio.lastProgramName ? " · 最新：" + radio.lastProgramName : ""}
+                                    </div>
+                                </div>
                             </div>
-                        ))}
-                    </div>
-                    <div className="music-week-note">时长按播放次数 × 歌曲长度估算</div>
+                            {openRadioId === radio.id && (
+                                <div className="music-mine-radio-eps">
+                                    {(radioPrograms[radio.id] || []).map(program => (
+                                        <div key={program.id} className="music-mine-ep-row" onClick={() => playProgram(radio, program)}>
+                                            <span className="music-mine-ep-name">{program.name}</span>
+                                            <span className="music-mine-ep-meta">{formatTime(program.duration / 1000)}</span>
+                                        </div>
+                                    ))}
+                                    {!radioPrograms[radio.id] && <div className="music-mine-ep-row music-mine-ep-loading">加载节目...</div>}
+                                </div>
+                            )}
+                        </div>
+                    ))}
                 </div>
             )}
 
-            {/* 本地播放记录——不需要登录/配置网易云 API，本地文件和网易云在线播放都会记一笔。 */}
-            <MusicSection title="本地歌单" action={`${history.length} 首`}>
-                {history.length > 0 ? (
-                    <div className="music-list music-list-compact">
-                        {history.map((entry, idx) => (
-                            <PlayHistoryRow key={entry.id} entry={entry} index={idx} formatTime={formatTime} onPlay={handleResume} />
-                        ))}
-                    </div>
-                ) : (
-                    <div className="music-empty"><div className="music-empty-text">还没有播放记录</div></div>
-                )}
-            </MusicSection>
-
-            {hasNetease && recentTracks.length > 0 && (
-                <MusicSection title="最近一周在听" action={`${recentTracks.length} 首`}>
-                    <div className="music-list music-list-compact">
-                        {recentTracks.slice(0, 8).map((song, idx) => (
-                            <NeteaseSongRow key={song.id} song={song} index={idx} formatTime={formatTime} onPlay={onPlayNetease} />
-                        ))}
-                    </div>
-                </MusicSection>
+            {mineTab === "note" && (
+                <div className="music-mine-events">
+                    {userEvents.map(ev => (
+                        <div key={ev.id} className="music-mine-event-card">
+                            {ev.text && <div className="music-mine-event-text">{ev.text}</div>}
+                            {ev.pics.length > 0 && (
+                                <div className="music-mine-event-pics">
+                                    {ev.pics.slice(0, 3).map((pic, idx) => <img key={idx} src={pic} alt="" />)}
+                                </div>
+                            )}
+                            {ev.song && (
+                                <div className="music-mine-event-song" onClick={() => onPlayNetease(ev.song!)}>
+                                    ♪ {ev.song.name} — {ev.song.artists}
+                                </div>
+                            )}
+                            {ev.time && <div className="music-mine-event-time">{new Date(ev.time).toLocaleDateString("zh-CN")}</div>}
+                        </div>
+                    ))}
+                </div>
             )}
 
-            {hasNetease && (
-                playlists.length > 0 ? (
-                    <MusicSection title="我的歌单" action={`${playlists.length} 个`}>
-                        <PlaylistGrid playlists={playlists} onOpen={setActivePlaylist} />
-                    </MusicSection>
-                ) : loading ? (
-                    <div className="music-empty"><div className="music-empty-text">加载歌单...</div></div>
-                ) : (
-                    <div className="music-empty"><div className="music-empty-text">没有云端歌单，请先在设置中登录网易云账号</div></div>
-                )
+            {playlists.length === 0 && !loading && (
+                <div className="music-empty"><div className="music-empty-text">没有云端歌单，请先在设置中登录网易云账号</div></div>
             )}
+        </div>
+    );
+}
 
+function MinePlaylistRow({ playlist, onOpen }: { playlist: NeteasePlaylist; onOpen: (pl: NeteasePlaylist) => void }) {
+    return (
+        <div className="music-mine-pl-row" onClick={() => onOpen(playlist)}>
+            <div className="music-mine-pl-cover">
+                {playlist.coverUrl && <img src={playlist.coverUrl} alt="" />}
+            </div>
+            <div className="music-mine-pl-info">
+                <div className="music-mine-pl-name">{playlist.name}</div>
+                <div className="music-mine-pl-meta">
+                    {playlist.trackCount} 首{typeof playlist.playCount === "number" ? " · " + formatMusicCount(playlist.playCount) + "次播放" : ""}
+                </div>
+            </div>
         </div>
     );
 }

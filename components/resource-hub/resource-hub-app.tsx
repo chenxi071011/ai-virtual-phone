@@ -40,6 +40,7 @@ import {
     type ResourceHubUploadConfig,
 } from "@/lib/resource-hub-upload";
 import { avatarBase64, fileToAvatarDataUrl, loadHubProfile, saveHubProfile, type HubProfile } from "@/lib/resource-hub-profile";
+import { fetchMergedContributions, type MergedContribution } from "@/lib/community-contrib";
 import {
     ensureIdentityKey,
     exportKeyBundle,
@@ -47,7 +48,7 @@ import {
     setIdentityKey,
     sha256Hex,
 } from "@/lib/resource-hub-identity";
-import { mergeMyUploads } from "@/lib/resource-hub-upload";
+import { mergeMyUploads, submitOwnershipClaim } from "@/lib/resource-hub-upload";
 import { DefaultPixelAvatar } from "@/components/resource-hub/pixel-avatar";
 import { DestPixelIcon, FileTypePixelIcon, fileExtension } from "@/components/resource-hub/pixel-icons";
 import { loadPresets } from "@/lib/settings-storage";
@@ -104,6 +105,8 @@ function formatEntryDate(iso: string | null): string {
  */
 const NOTICE_DISMISSED_KEY = "ai_phone_resource_hub_notice_v2";
 registerKvMigration(NOTICE_DISMISSED_KEY);
+/** 摊主钥匙强制备份：确认保存过一次后不再打扰 */
+const KEY_BACKUP_DONE_KEY = "ai_phone_resource_hub_key_backup_v1";
 
 export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onNotice?: (msg: string) => void }) {
     const [source, setSource] = useState<ResourceHubSource>(() => loadResourceHubSource());
@@ -117,7 +120,20 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     const [confirmDeleteEntry, setConfirmDeleteEntry] = useState<ShareIndexEntry | null>(null);
     const [deleting, setDeleting] = useState(false);
     // 浏览集市 / 我的货摊
-    const [viewMode, setViewMode] = useState<"market" | "mine">("market");
+    const [viewMode, setViewMode] = useState<"market" | "mine" | "build">("market");
+    // 共同建设：贡献墙（只展示已被官方采纳=已合并的社区 PR）
+    const [buildWall, setBuildWall] = useState<MergedContribution[] | null>(null);
+    const [buildWallState, setBuildWallState] = useState<"idle" | "loading" | "error">("idle");
+    const enterBuildTab = useCallback(() => {
+        setViewMode("build");
+        setActiveFolder(null);
+        setSearchQuery("");
+        if (buildWall || buildWallState === "loading") return;
+        setBuildWallState("loading");
+        fetchMergedContributions()
+            .then(list => { setBuildWall(list); setBuildWallState("idle"); })
+            .catch(() => setBuildWallState("error"));
+    }, [buildWall, buildWallState]);
     // 图片全屏预览（点开可保存）
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     // 送花：各资源花数（我的货摊展示用）+ 非阻塞小提示
@@ -131,6 +147,16 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
     const [identityKey, setIdentityKeyState] = useState("");
     const [identityHash, setIdentityHash] = useState("");
     const [showKeyDialog, setShowKeyDialog] = useState(false);
+    // 发布成功后的强制钥匙备份弹窗（存过文件/复制过才能点「我已保存好」）
+    const [showKeyBackup, setShowKeyBackup] = useState(false);
+    const [keyBackupTouched, setKeyBackupTouched] = useState(false);
+    // 找回作品：丢了钥匙的作者选择资源 + 上传证明材料，开申请等管理员人工审核
+    const [showClaim, setShowClaim] = useState(false);
+    const [claimFolder, setClaimFolder] = useState("");
+    const [claimPath, setClaimPath] = useState("");
+    const [claimFiles, setClaimFiles] = useState<File[]>([]);
+    const [claimNote, setClaimNote] = useState("");
+    const [claimSubmitting, setClaimSubmitting] = useState(false);
     const [keyImportText, setKeyImportText] = useState("");
     // 作者编辑已发布资源
     const [editEntry, setEditEntry] = useState<ShareIndexEntry | null>(null);
@@ -540,6 +566,33 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
         }
     }, [onNotice]);
 
+    const handleSubmitClaim = useCallback(async () => {
+        const entry = index?.entries.find(e => e.path === claimPath);
+        if (!entry) { showToast("请选择要找回的作品"); return; }
+        if (claimFiles.length === 0) { showToast("请上传证明文件"); return; }
+        if (!identityHash) { showToast("摊主钥匙尚未就绪，稍等两秒再试"); return; }
+        setClaimSubmitting(true);
+        try {
+            const files = await Promise.all(claimFiles.map(file => fileToUploadEntry(file)));
+            await submitOwnershipClaim({
+                endpoint: uploadCfg.endpoint,
+                path: entry.path,
+                name: entry.name,
+                ownerHash: identityHash,
+                nickname: profile.nickname || "匿名",
+                note: claimNote.trim(),
+                files,
+            });
+            setShowClaim(false);
+            setClaimPath(""); setClaimFiles([]); setClaimNote("");
+            onNotice?.("找回申请已提交。管理员核实证明后，作品所有权会自动绑定到这台设备的钥匙上");
+        } catch (err) {
+            onNotice?.(`提交失败：${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            setClaimSubmitting(false);
+        }
+    }, [claimFiles, claimNote, claimPath, identityHash, index, onNotice, profile.nickname, showToast, uploadCfg.endpoint]);
+
     const handleUploadSubmit = useCallback(async () => {
         const folder = (uploadFolder === CUSTOM_FOLDER ? uploadFolderCustom : uploadFolder).trim();
         const name = uploadName.trim();
@@ -569,6 +622,11 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
             onNotice?.(result.merged
                 ? `「${name}」已上架（CDN 缓存刷新后可见）`
                 : `「${name}」已提交，等待管理员审核上架`);
+            // 没确认备份过摊主钥匙的，发布完强制提醒一次（直到确认为止）
+            if (kvGet(KEY_BACKUP_DONE_KEY) !== "1") {
+                setKeyBackupTouched(false);
+                setShowKeyBackup(true);
+            }
         } catch (err) {
             onNotice?.(`上传失败：${err instanceof Error ? err.message : String(err)}`);
         } finally {
@@ -698,7 +756,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                 <div className="rh-toolbar">
                     <button className="rh-btn" onClick={handleBack}>← 返回</button>
                     <span className="rh-address">
-                        地址：C:\资源集市{viewMode === "mine" ? "\\我的货摊" : ""}{activeFolder ? `\\${activeFolder}` : ""}{activeEntry ? `\\${activeEntry.name}` : ""}
+                        地址：C:\资源集市{viewMode === "mine" ? "\\我的货摊" : viewMode === "build" ? "\\共同建设" : ""}{activeFolder ? `\\${activeFolder}` : ""}{activeEntry ? `\\${activeEntry.name}` : ""}
                     </span>
                     <button className="rh-btn" onClick={() => setConfirmUpload(true)}>上传</button>
                 </div>
@@ -710,6 +768,8 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                             onClick={() => setViewMode("market")}>浏览集市</button>
                         <button className="rh-tab" data-active={viewMode === "mine" ? "1" : undefined}
                             onClick={() => { setViewMode("mine"); setActiveFolder(null); setSearchQuery(""); }}>我的货摊</button>
+                        <button className="rh-tab" data-active={viewMode === "build" ? "1" : undefined}
+                            onClick={enterBuildTab}>共同建设</button>
                     </div>
                 )}
 
@@ -738,6 +798,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                         <span className="rh-profile-avatar-hint">换头像</span>
                                     </label>
                                     <div className="rh-profile-main">
+                                        <div className="rh-profile-name-row">
                                         {editingNickname ? (
                                             <input
                                                 className="rh-input rh-profile-nickname-input"
@@ -754,6 +815,8 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                                 {profile.nickname || "点这里起个昵称"} <span className="rh-profile-edit-hint">✎</span>
                                             </button>
                                         )}
+                                            <button className="rh-key-link" onClick={() => { setClaimFolder(""); setClaimPath(""); setClaimFiles([]); setClaimNote(""); setShowClaim(true); }}>🧾 找回作品</button>
+                                        </div>
                                         <div className="rh-profile-stats">
                                             <span>已发布 <b>{myStall.published.length}</b></span>
                                             <span>待审核 <b>{myStall.pending.length}</b></span>
@@ -792,6 +855,7 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                         <span className="rh-profile-avatar-hint">换头像</span>
                                     </label>
                                     <div className="rh-profile-main">
+                                        <div className="rh-profile-name-row">
                                         {editingNickname ? (
                                             <input
                                                 className="rh-input rh-profile-nickname-input"
@@ -808,6 +872,8 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                                 {profile.nickname || "点这里起个昵称"} <span className="rh-profile-edit-hint">✎</span>
                                             </button>
                                         )}
+                                            <button className="rh-key-link" onClick={() => { setClaimFolder(""); setClaimPath(""); setClaimFiles([]); setClaimNote(""); setShowClaim(true); }}>🧾 找回作品</button>
+                                        </div>
                                         <div className="rh-profile-stats">
                                             <span>已发布 <b>0</b></span>
                                             <span>待审核 <b>0</b></span>
@@ -845,6 +911,51 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                         ) : (
                             <div className="rh-center-hint">没有匹配「{searchQuery.trim()}」的资源</div>
                         )
+                    )}
+
+                    {/* 共同建设：说明 + 贡献墙（只列已采纳） */}
+                    {viewMode === "build" && !activeEntry && (
+                        <div className="rh-build">
+                            <div className="rh-build-intro">
+                                <div className="rh-build-stickers">🛠️ ✨ 📱 ✨ 🧸</div>
+                                <div className="rh-build-title">一起改进小手机吧～</div>
+                                <p>
+                                    贡献公开仓库功能已接入<b>工坊</b>，<br />
+                                    可以<b className="rh-build-hot">让小坊将你的修改贡献到公开仓库哦～</b><br />
+                                    float 会进行飞速审核，感谢您的付出～
+                                </p>
+                                <div className="rh-build-note">需要自部署版本（有自己的 fork）</div>
+                            </div>
+                            <div className="rh-build-wall-head">
+                                <span className="rh-build-wall-line" />
+                                <span className="rh-build-wall-title">🏅 贡 献 墙 🏅</span>
+                                <span className="rh-build-wall-line" />
+                            </div>
+                            <div className="rh-build-wall-sub">每一条被采纳的改进，都会刻在这里</div>
+                            {buildWallState === "loading" && <div className="rh-center-hint">正在读取贡献墙...</div>}
+                            {buildWallState === "error" && (
+                                <div className="rh-center-hint">贡献墙暂时读取失败（GitHub 接口限流），稍后再来看看</div>
+                            )}
+                            {buildWall && buildWall.length === 0 && (
+                                <div className="rh-center-hint">虚位以待——第一个被采纳的改进会出现在这里</div>
+                            )}
+                            {buildWall && buildWall.length > 0 && (
+                                <div className="rh-build-wall">
+                                    {buildWall.map(item => (
+                                        <div key={item.number} className="rh-build-card">
+                                            <div className="rh-build-card-medal">🎖️</div>
+                                            <div className="rh-build-card-main">
+                                                <div className="rh-build-card-title">{item.title}</div>
+                                                <div className="rh-build-card-meta">
+                                                    <span className="rh-build-card-name">{item.contributor}</span>
+                                                    <span className="rh-build-card-date">{item.mergedAt ? new Date(item.mergedAt).toLocaleDateString("zh-CN") : ""} 采纳</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     )}
 
                     {/* 首页：文件夹（一行两个） */}
@@ -926,7 +1037,6 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                             </div>
 
                             {activeEntry.files.length > 0 ? (
-                                <>
                                     <div className="rh-file-strip">
                                         {activeEntry.files.map(file => {
                                             const base = stripAssetImageMark(file.split("/").pop() || file);
@@ -945,17 +1055,23 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                             );
                                         })}
                                     </div>
-                                    <div className="rh-detail2-actions">
-                                        <button
-                                            className="rh-btn rh-flower-btn"
-                                            disabled={sendingFlower || hasSentFlowerToday(activeEntry.path)}
-                                            title="给作者送一朵花"
-                                            onClick={() => void handleSendFlower(activeEntry.path)}
-                                        >
-                                            {sendingFlower
-                                                ? <><PixelHourglass size={13} /> 送出中</>
-                                                : hasSentFlowerToday(activeEntry.path) ? "已送🌸" : "送花🌸"}
-                                        </button>
+                            ) : (
+                                <div className="rh-center-hint">该资源没有可下载的文件</div>
+                            )}
+                            {/* 操作行不依赖文件：纯文字/纯配图的帖子也要能送花、能被管理员下架 */}
+                            <div className="rh-detail2-actions">
+                                <button
+                                    className="rh-btn rh-flower-btn"
+                                    disabled={sendingFlower || hasSentFlowerToday(activeEntry.path)}
+                                    title="给作者送一朵花"
+                                    onClick={() => void handleSendFlower(activeEntry.path)}
+                                >
+                                    {sendingFlower
+                                        ? <><PixelHourglass size={13} /> 送出中</>
+                                        : hasSentFlowerToday(activeEntry.path) ? "已送🌸" : "送花🌸"}
+                                </button>
+                                {activeEntry.files.length > 0 && (
+                                    <>
                                         <button className="rh-btn rh-action-half" disabled={!selectedFile || busyFile === selectedFile} onClick={() => selectedFile && handleDownload(selectedFile)}>
                                             {busyFile === selectedFile && !importingTo
                                                 ? <><PixelHourglass size={13} /> 下载中</>
@@ -966,15 +1082,13 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                                 ? <><PixelHourglass size={13} /> 导入中</>
                                                 : "导入"}
                                         </button>
-                                        {/* 作者的编辑/删除已移到顶部作者行；这里只留管理员下架入口 */}
-                                        {uploadCfg.githubToken.trim() && !myRecordFor(activeEntry.path) && (
-                                            <button className="rh-btn rh-action-del" onClick={() => setConfirmDeleteEntry(activeEntry)}>下架</button>
-                                        )}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="rh-center-hint">该资源没有可下载的文件</div>
-                            )}
+                                    </>
+                                )}
+                                {/* 作者的编辑/删除已移到顶部作者行；这里只留管理员下架入口 */}
+                                {uploadCfg.githubToken.trim() && !myRecordFor(activeEntry.path) && (
+                                    <button className="rh-btn rh-action-del" onClick={() => setConfirmDeleteEntry(activeEntry)}>下架</button>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1117,6 +1231,134 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                                 导入后本机原来的钥匙会被替换。如果两台设备都发过资源，
                                 请先在另一台导出、这里导入，两边的发布才会合并到一把钥匙下管理。
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 找回作品：选资源 + 传证明，开申请给管理员人工审核 */}
+            {showClaim && (
+                <div className="rh-dialog-overlay" onClick={claimSubmitting ? undefined : () => setShowClaim(false)}>
+                    <div className="rh-dialog" onClick={e => e.stopPropagation()}>
+                        <div className="rh-titlebar">
+                            <span className="rh-titlebar-text">找回作品</span>
+                            <span className="rh-titlebar-controls">
+                                <button className="rh-tb-btn" disabled={claimSubmitting} onClick={() => setShowClaim(false)}>✕</button>
+                            </span>
+                        </div>
+                        <div className="rh-dialog-body rh-form">
+                            <div className="rh-form-hint">
+                                换设备或丢失摊主钥匙后，可以在这里申请找回自己发布的作品。
+                                管理员核实证明材料后，作品所有权会绑定到你现在这台设备的钥匙上。
+                            </div>
+                            <div className="rh-form-field">
+                                <span>要找回的作品</span>
+                                <select className="rh-input" value={claimFolder}
+                                    onChange={e => { setClaimFolder(e.target.value); setClaimPath(""); }}>
+                                    <option value="">先选文件夹…</option>
+                                    {(index?.folders ?? []).map(folder => (
+                                        <option key={folder.name} value={folder.name}>{folder.name}</option>
+                                    ))}
+                                </select>
+                                <select className="rh-input" value={claimPath} disabled={!claimFolder}
+                                    onChange={e => setClaimPath(e.target.value)}>
+                                    <option value="">{claimFolder ? "再选作品…" : "（先选上面的文件夹）"}</option>
+                                    {(index?.entries ?? [])
+                                        .filter(entry => entry.folder === claimFolder && !myRecordFor(entry.path))
+                                        .map(entry => (
+                                            <option key={entry.path} value={entry.path}>{entry.name}</option>
+                                        ))}
+                                </select>
+                            </div>
+                            <div className="rh-form-field">
+                                <span>证明文件（必传，最多 6 个，共 ≤4MB）</span>
+                                <label className="rh-btn rh-file-pick-btn">
+                                    选择证明文件…
+                                    <input type="file" multiple hidden onChange={e => {
+                                        const picked = Array.from(e.target.files ?? []);
+                                        setClaimFiles(current => [...current, ...picked].slice(0, 6));
+                                        e.target.value = "";
+                                    }} />
+                                </label>
+                                {claimFiles.length > 0 && (
+                                    <div className="rh-claim-files">
+                                        {claimFiles.map((file, i) => (
+                                            <button key={`${file.name}-${i}`} className="rh-claim-file" title="点击移除"
+                                                onClick={() => setClaimFiles(current => current.filter((_, idx) => idx !== i))}>
+                                                {file.name} ✕
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="rh-form-hint">
+                                    需要能<b>完整证明作品是你创作的</b>的材料：原始工程文件、创作过程截图、
+                                    带时间的草稿等。证明不足会被拒绝。
+                                </div>
+                            </div>
+                            <div className="rh-form-field">
+                                <span>备注（选填）</span>
+                                <textarea className="rh-input" rows={2} maxLength={500} value={claimNote}
+                                    placeholder="例如：换手机丢了钥匙，原昵称是……"
+                                    onChange={e => setClaimNote(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="rh-dialog-footer">
+                            <button className="rh-btn" disabled={claimSubmitting} onClick={() => setShowClaim(false)}>取消</button>
+                            <button className="rh-btn rh-btn-primary" disabled={claimSubmitting || !claimPath || claimFiles.length === 0}
+                                onClick={() => void handleSubmitClaim()}>
+                                {claimSubmitting ? <><PixelHourglass size={13} /> 提交中</> : "提交申请"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 发布成功后的强制钥匙备份（不可跳过：必须保存或复制后才能关闭） */}
+            {showKeyBackup && (
+                <div className="rh-dialog-overlay">
+                    <div className="rh-dialog" onClick={e => e.stopPropagation()}>
+                        <div className="rh-titlebar"><span className="rh-titlebar-text">请备份你的摊主钥匙</span></div>
+                        <div className="rh-dialog-body rh-form">
+                            <div className="rh-key-danger">⚠️ 钥匙丢失将无法找回作品所有权</div>
+                            <div className="rh-form-hint">
+                                这串码是你对自己所有发布的唯一所有权证明，换设备、清理浏览器数据后全靠它找回。
+                                请立刻保存到文件或备忘录（只需这一次）。不要发给任何人。
+                            </div>
+                            <textarea className="rh-input rh-key-text" readOnly rows={3} value={exportKeyBundle(identityKey)}
+                                onFocus={e => e.currentTarget.select()} />
+                            <div className="rh-key-backup-actions">
+                                <button className="rh-btn" onClick={() => {
+                                    try {
+                                        const blob = new Blob([exportKeyBundle(identityKey)], { type: "text/plain;charset=utf-8" });
+                                        const url = URL.createObjectURL(blob);
+                                        const anchor = document.createElement("a");
+                                        anchor.href = url;
+                                        anchor.download = "小手机摊主钥匙.txt";
+                                        anchor.click();
+                                        setTimeout(() => URL.revokeObjectURL(url), 4000);
+                                        setKeyBackupTouched(true);
+                                        showToast("已开始保存，请确认文件存好了");
+                                    } catch {
+                                        showToast("保存失败，请用「复制钥匙」");
+                                    }
+                                }}>保存为文件</button>
+                                <button className="rh-btn" onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(exportKeyBundle(identityKey));
+                                        setKeyBackupTouched(true);
+                                        showToast("已复制，请立刻粘贴到备忘录保存");
+                                    } catch {
+                                        showToast("复制失败，请长按上面的文字手动复制");
+                                    }
+                                }}>复制钥匙</button>
+                            </div>
+                        </div>
+                        <div className="rh-dialog-footer">
+                            <button className="rh-btn rh-btn-primary" disabled={!keyBackupTouched}
+                                title={keyBackupTouched ? undefined : "先保存或复制钥匙"}
+                                onClick={() => { kvSet(KEY_BACKUP_DONE_KEY, "1"); setShowKeyBackup(false); }}>
+                                我已保存好
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1653,6 +1895,31 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                 }
                 .rh-folder:active { border-color: #000080; background: #e4ecf7; }
                 .rh-folder-icon { font-size: 40px; line-height: 1; }
+                .rh-build { display: flex; flex-direction: column; gap: 12px; padding: 6px 2px; }
+                .rh-build-intro { padding: 14px 8px 6px; text-align: center; }
+                .rh-build-stickers { font-size: 19px; letter-spacing: 7px; margin-bottom: 8px; }
+                .rh-build-title { font-weight: 800; font-size: 16px; color: #000080; margin-bottom: 7px; }
+                .rh-build-intro p { margin: 0; font-size: 12.5px; line-height: 1.9; color: #333; }
+                .rh-build-intro p b { color: #000080; }
+                .rh-build-intro p b.rh-build-hot { color: #cc0000; }
+                .rh-build-note { font-size: 11px; color: #888; margin-top: 7px; }
+                .rh-build-wall-head { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+                .rh-build-wall-line { flex: 1; height: 0; border-top: 1px solid #808080; box-shadow: 0 1px 0 #fff; }
+                .rh-build-wall-title { font-weight: 800; font-size: 13px; color: #000080; white-space: nowrap; }
+                .rh-build-wall-sub { text-align: center; font-size: 11px; color: #666; margin-top: -6px; }
+                .rh-build-wall { display: flex; flex-direction: column; gap: 8px; }
+                .rh-build-card {
+                    display: flex; align-items: center; gap: 10px;
+                    border: 1px solid #b8bfc9;
+                    background: #fff;
+                    padding: 10px 10px;
+                }
+                .rh-build-card-medal { font-size: 22px; line-height: 1; flex: none; }
+                .rh-build-card-main { flex: 1; min-width: 0; }
+                .rh-build-card-title { font-size: 12.5px; font-weight: 700; line-height: 1.5; color: #000; }
+                .rh-build-card-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; margin-top: 4px; }
+                .rh-build-card-name { font-weight: 700; color: #000080; }
+                .rh-build-card-date { color: #555; }
                 .rh-folder-name {
                     font-size: calc(13px * var(--app-text-scale, 1));
                     color: #000;
@@ -1713,6 +1980,11 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                 .rh-body-detail { overflow: hidden; display: flex; }
                 .rh-detail2 {
                     flex: 1;
+                    /* min-width 不能省：外层 .rh-body-detail 是横向 flex，本项默认 min-width:auto
+                       不许缩到内容最小宽以下，而文件条的格子全部 flex-shrink:0，文件一多（4 个起）
+                       最小内容宽就超过容器，把整列撑爆——正文按撑爆后的宽度换行、右侧被裁，
+                       文件条 clientWidth==scrollWidth 变得根本没有可滚区间。 */
+                    min-width: 0;
                     min-height: 0;
                     display: flex;
                     flex-direction: column;
@@ -1852,6 +2124,32 @@ export function ResourceHubApp({ onClose, onNotice }: { onClose: () => void; onN
                     text-decoration: underline;
                     cursor: pointer;
                 }
+                .rh-profile-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+                .rh-profile-name-row .rh-key-link { margin-left: auto; flex: none; }
+                .rh-profile-name-row .rh-profile-nickname { min-width: 0; }
+                .rh-profile-name-row .rh-profile-nickname-input { flex: 1; min-width: 0; }
+                .rh-profile-stats .rh-key-link { margin-left: auto; }
+                .rh-claim-files { display: flex; flex-wrap: wrap; gap: 4px; }
+                .rh-claim-file {
+                    background: #fff;
+                    border: 1px solid #b8bfc9;
+                    padding: 3px 8px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    max-width: 100%;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .rh-file-pick-btn { align-self: flex-start; }
+                .rh-key-danger {
+                    color: #cc0000;
+                    font-weight: 800;
+                    font-size: 14px;
+                    text-align: center;
+                }
+                .rh-key-backup-actions { display: flex; gap: 8px; }
+                .rh-key-backup-actions .rh-btn { flex: 1; }
                 .rh-key-warning {
                     background: #ffffe1;
                     border: 1px solid #808080;

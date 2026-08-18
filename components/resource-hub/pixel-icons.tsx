@@ -272,6 +272,25 @@ const DEST_ICONS: Record<ImportDestination, PixelGrid> = {
         "................",
         "................",
     ],
+    // 主页卡片：头部条 + 头像 + 文字行 + 评论区（自定义状态栏）
+    status_bar: [
+        "................",
+        "..kkkkkkkkkkkk..",
+        "..krrrrrrrrrrk..",
+        "..krrrrrrrrrrk..",
+        "..kwbbwwwwwwwk..",
+        "..kwbbwddddwwk..",
+        "..kwwwwwwwwwwk..",
+        "..kwddddddwwwk..",
+        "..kwddddwwwwwk..",
+        "..kwwwwwwwwwwk..",
+        "..kwggggggggwk..",
+        "..kwgddddddgwk..",
+        "..kwggggggggwk..",
+        "..kkkkkkkkkkkk..",
+        "................",
+        "................",
+    ],
 };
 
 function renderGrid(grid: PixelGrid, size: number, className?: string) {

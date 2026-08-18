@@ -127,12 +127,27 @@ function isChapterHeading(line: string): boolean {
     return CHAPTER_PATTERNS.some(p => p.test(trimmed));
 }
 
+/** 剥离开头/结尾的空行：下载 TXT 常在章节标题前后插入分隔空行，
+ *  它们不是作者段落空行，混入会污染 splitParagraphs 的空行占比检测。 */
+function trimBlankEdges(arr: string[]): string[] {
+    let s = 0;
+    let e = arr.length;
+    while (s < e && arr[s].trim() === "") s += 1;
+    while (e > s && arr[e - 1].trim() === "") e -= 1;
+    return arr.slice(s, e);
+}
+
 /**
  * Parse TXT content into chapters and paragraphs.
  * Splits by chapter headings, then by blank lines for paragraphs.
+ * @param mode 段落划分方式：auto 自动探测 / blank 空行 / indent 段首缩进 / line 每行一段
  */
-export function parseTxtContent(text: string, fileName?: string): ParsedBook {
+export function parseTxtContent(text: string, fileName?: string, mode: TxtParagraphMode = "auto"): ParsedBook {
     const lines = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+
+    // auto 模式：对整本书探测一次段落格式，所有章节共用同一结论，
+    // 避免短章节里夹杂的空白行让个别章节误判成别的格式。
+    const resolvedMode = mode === "auto" ? detectParagraphMode(lines) : mode;
 
     // First pass: find chapter boundaries
     const chapterStarts: { lineIdx: number; title: string }[] = [];
@@ -156,7 +171,7 @@ export function parseTxtContent(text: string, fileName?: string): ParsedBook {
             title: bookTitle,
             chapters: [{
                 title: "全文",
-                paragraphs: splitParagraphs(lines),
+                paragraphs: splitParagraphs(trimBlankEdges(lines), resolvedMode),
             }],
         };
     }
@@ -166,8 +181,8 @@ export function parseTxtContent(text: string, fileName?: string): ParsedBook {
     for (let i = 0; i < chapterStarts.length; i++) {
         const start = chapterStarts[i].lineIdx + 1; // skip heading line
         const end = i + 1 < chapterStarts.length ? chapterStarts[i + 1].lineIdx : lines.length;
-        const chapterLines = lines.slice(start, end);
-        const paragraphs = splitParagraphs(chapterLines);
+        const chapterLines = trimBlankEdges(lines.slice(start, end));
+        const paragraphs = splitParagraphs(chapterLines, resolvedMode);
         if (paragraphs.length > 0) {
             chapters.push({ title: chapterStarts[i].title, paragraphs });
         }
@@ -175,8 +190,8 @@ export function parseTxtContent(text: string, fileName?: string): ParsedBook {
 
     // If there's content before the first chapter, add it as a prologue
     if (chapterStarts[0].lineIdx > 1) {
-        const prologueLines = lines.slice(0, chapterStarts[0].lineIdx);
-        const paragraphs = splitParagraphs(prologueLines);
+        const prologueLines = trimBlankEdges(lines.slice(0, chapterStarts[0].lineIdx));
+        const paragraphs = splitParagraphs(prologueLines, resolvedMode);
         if (paragraphs.length > 0) {
             chapters.unshift({ title: "序", paragraphs });
         }
@@ -185,8 +200,62 @@ export function parseTxtContent(text: string, fileName?: string): ParsedBook {
     return { title: bookTitle, chapters };
 }
 
-/** Split lines into paragraphs by blank lines, merging consecutive non-blank lines. */
-function splitParagraphs(lines: string[]): string[] {
+/** 判断一行是否以缩进开头（全角空格 / 2+ 半角空格 / Tab）→ 视为新段落起点。
+ *  很多中文网文 TXT 段落之间没有空行，仅靠段首缩进区分段落；
+ *  若只按空行分割会把整章合并成一段（批注/讨论时整章一起发给模型）。
+ */
+function isIndentedParagraphStart(line: string): boolean {
+    return /^\u3000/.test(line)   // 全角空格缩进（中文网文最常见）
+        || /^ {2,}/.test(line)    // 2+ 半角空格缩进
+        || /^\t/.test(line);      // Tab 缩进
+}
+
+/** 松散标题行检测：比 isChapterHeading 更宽泛，仅用于识别「章节分隔空行」。
+ *  下载 TXT 常在章节标题前后插入分隔空行，这些不是作者段落空行，
+ *  若混进空行占比会污染 splitParagraphs 的格式探测（章节很多但每章很短的小说
+ *  空行占比轻松超过 2%，被误判成空行分段 → 整章变成一段）。 */
+const LENIENT_TITLE_PATTERNS = [
+    /^第[零一二三四五六七八九十百千\d]+[章节回卷集部篇]/,   // 第X章/节/回/卷/部/篇
+    /^[序楔]/,                                            // 序章 / 楔子
+    /^(?:终章|后记|前言|番外|尾声|外传|引子)/,            // 常见非数字标题
+    /^[Cc]hapter\s+\d+/,
+    /^[Pp]art\s+[IVXLCDM\d]+/,
+    /^[零一二三四五六七八九十百千\d]+[、.．:：]/,           // 一、 / 1、 / 1.
+    /^[（(][零一二三四五六七八九十百千\d]+[)）]/,           // （一）/（1）
+    /^《.+》$/,                                            // 《书名》式短行
+    /^[=#*\-]{3,}$/,                                      // 分隔线
+];
+
+function isTitleLikeLine(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length > 40) return false;
+    return LENIENT_TITLE_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/** 统计「作者段落空行」数量：连续空行块紧邻标题行（前或后）的视为章节分隔空行，不计数 */
+function countAuthorBlankLines(lines: string[]): number {
+    const titleLike = new Set<number>();
+    lines.forEach((line, i) => {
+        if (isTitleLikeLine(line)) titleLike.add(i);
+    });
+
+    const isBlank = (i: number) => i >= 0 && i < lines.length && lines[i].trim() === "";
+    let count = 0;
+    let i = 0;
+    while (i < lines.length) {
+        if (!isBlank(i)) { i += 1; continue; }
+        const runStart = i;
+        while (i < lines.length && isBlank(i)) i += 1;
+        const runEnd = i - 1;
+        const beforeTitle = runStart > 0 && titleLike.has(runStart - 1);
+        const afterTitle = runEnd + 1 < lines.length && titleLike.has(runEnd + 1);
+        if (!beforeTitle && !afterTitle) count += runEnd - runStart + 1;
+    }
+    return count;
+}
+
+/** 按空行分段（标准网文导出格式；段内多行保持在同一段） */
+function splitByBlankLines(lines: string[]): string[] {
     const paragraphs: string[] = [];
     let current: string[] = [];
 
@@ -205,6 +274,71 @@ function splitParagraphs(lines: string[]): string[] {
     }
 
     return paragraphs.filter(p => p.length > 0);
+}
+
+/** 按段首缩进分段（无空行的中文网文 TXT） */
+function splitByIndent(lines: string[]): string[] {
+    const paragraphs: string[] = [];
+    let current: string[] = [];
+
+    const flush = () => {
+        if (current.length > 0) {
+            paragraphs.push(current.join("\n").trim());
+            current = [];
+        }
+    };
+
+    for (const line of lines) {
+        if (line.trim() === "") {
+            flush();
+        } else if (isIndentedParagraphStart(line)) {
+            flush();
+            current.push(line);
+        } else {
+            current.push(line);
+        }
+    }
+    flush();
+
+    return paragraphs.filter(p => p.length > 0);
+}
+
+/** 智能分段：先探测本书格式再选策略——
+ *  1) 空行占比 ≥ 15%：空行分段（标准导出格式，段内多行保留）
+ *  2) 缩进行占比 ≥ 20%：段首缩进分段（晋江/起点手排 TXT，无空行）
+ *  3) 空行占比 ≥ 2%：空行分段（段内多行较长、空行稀疏的情况）
+ *  4) 否则：纯换行格式，一行一段（很多网文连开头缩进都省了，纯靠回车换行分段落）
+ *  空行占比统计时已剔除「章节分隔空行」（紧邻标题行的空行块），
+ *  避免下载 TXT 在章节间插入的空行污染探测。
+ *  mode 参数可强制指定划分方式（auto=自动探测）。 */
+export type TxtParagraphMode = "auto" | "blank" | "indent" | "line";
+
+/** 全局探测一本书的段落格式（对整本书的 lines 调用一次，保证各章节结论一致） */
+export function detectParagraphMode(lines: string[]): TxtParagraphMode {
+    const nonEmpty = lines.filter((l) => l.trim() !== "");
+    if (nonEmpty.length === 0) return "line";
+
+    const blankRatio = countAuthorBlankLines(lines) / Math.max(1, lines.length);
+    const indentedRatio = nonEmpty.filter(isIndentedParagraphStart).length / nonEmpty.length;
+
+    if (blankRatio >= 0.15) return "blank";
+    if (indentedRatio >= 0.2) return "indent";
+    if (blankRatio >= 0.02) return "blank";
+    return "line";
+}
+
+function splitParagraphs(lines: string[], mode: TxtParagraphMode = "auto"): string[] {
+    const nonEmpty = lines.filter(l => l.trim() !== "");
+    if (nonEmpty.length === 0) return [];
+
+    if (mode === "blank") return splitByBlankLines(lines);
+    if (mode === "indent") return splitByIndent(lines);
+    if (mode === "line") return nonEmpty.map(l => l.trim()).filter(p => p.length > 0);
+
+    const detected = detectParagraphMode(lines);
+    if (detected === "blank") return splitByBlankLines(lines);
+    if (detected === "indent") return splitByIndent(lines);
+    return nonEmpty.map(l => l.trim()).filter(p => p.length > 0);
 }
 
 // ── EPUB Parsing ──

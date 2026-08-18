@@ -1384,10 +1384,69 @@ const CHECKPHONE_TAKEOUT_CATEGORIES: CheckPhoneTakeoutCategory[] = [
   "其他",
 ];
 
+const CHECKPHONE_METRIC_UNIT_MULTIPLIERS: Array<[string, number]> = [
+  ["万亿", 1_000_000_000_000],
+  ["兆", 1_000_000_000_000],
+  ["十亿", 1_000_000_000],
+  ["千万", 10_000_000],
+  ["百万", 1_000_000],
+  ["亿", 100_000_000],
+  ["億", 100_000_000],
+  ["万", 10_000],
+  ["萬", 10_000],
+  ["千", 1_000],
+  ["k", 1_000],
+  ["K", 1_000],
+  ["w", 10_000],
+  ["W", 10_000],
+  ["m", 1_000_000],
+  ["M", 1_000_000],
+  ["b", 1_000_000_000],
+  ["B", 1_000_000_000],
+];
+
+const CHECKPHONE_METRIC_UNIT_PATTERN = /(-?\d+(?:\.\d+)?)(万亿|兆|十亿|千万|百万|亿|億|万|萬|千|[kKwWmMbB])?/;
+
+const CHECKPHONE_METRIC_WORD_ALIASES: Array<[RegExp, string]> = [
+  [/thousands?/gi, "k"],
+  [/millions?/gi, "M"],
+  [/billions?/gi, "B"],
+];
+
+/**
+ * 查手机各 APP 通用的数值解析：容忍 LLM 写出的各种计数单位与噪声。
+ * 支持 1234 / 1,234 / 1.2k / 28w / 2.3M / 1.5B / 3.4千 / 5.6万 / 1.2亿 / 2.3 million 等写法，
+ * 也容忍全角数字、前后缀文字（如「约」「+」「次播放」）。无法识别时返回 NaN。
+ */
+function parseCheckPhoneMetricValue(value: unknown, stripPattern?: RegExp): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value !== "string") return Number.NaN;
+  let normalized = value
+    .replace(/[\uff10-\uff19]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/[,，、\s_]/g, "");
+  for (const [pattern, alias] of CHECKPHONE_METRIC_WORD_ALIASES) {
+    normalized = normalized.replace(pattern, alias);
+  }
+  if (stripPattern) normalized = normalized.replace(stripPattern, "");
+  normalized = normalized.trim();
+  if (!normalized) return Number.NaN;
+  const match = normalized.match(CHECKPHONE_METRIC_UNIT_PATTERN);
+  if (!match) return Number.NaN;
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) return Number.NaN;
+  const unit = match[2] || "";
+  if (!unit) return base;
+  const multiplier = CHECKPHONE_METRIC_UNIT_MULTIPLIERS.find(([token]) => token === unit)?.[1] ?? 1;
+  return multiplier === 1 ? base : Math.round(base * multiplier);
+}
+
+function parseCheckPhoneMetricInteger(value: unknown, stripPattern?: RegExp): number {
+  const parsed = parseCheckPhoneMetricValue(value, stripPattern);
+  return Number.isFinite(parsed) ? Math.round(parsed) : Number.NaN;
+}
+
 function parseTakeoutAmount(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[¥￥元,\s]/g, "").trim();
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value, /[¥￥$＄元块钱]/g);
 }
 
 function parseTakeoutTaggedFields(block: string): Record<string, string> {
@@ -1421,21 +1480,7 @@ function parseTakeoutTaggedFields(block: string): Record<string, string> {
 }
 
 function parseBlockInteger(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,，\s]/g, "");
-  const match = normalized.match(/(-?\d+(?:\.\d+)?)([kK千wW万亿]?)/);
-  if (!match) return Number.NaN;
-  const numericValue = Number(match[1]);
-  const unit = match[2] || "";
-  const multiplier =
-    unit === "k" || unit === "K" || unit === "千"
-      ? 1000
-      : unit === "w" || unit === "W" || unit === "万"
-        ? 10000
-        : unit === "亿"
-          ? 100000000
-          : 1;
-  return Math.round(numericValue * multiplier);
+  return parseCheckPhoneMetricInteger(value);
 }
 
 function parseBlockList(value: string | undefined): string[] {
@@ -1569,7 +1614,7 @@ function normalizeTakeoutPayload(payload: unknown): CheckPhoneTakeoutPayload | n
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
       const icon = typeof item.icon === "string" ? item.icon.trim() : "";
       const status = typeof item.status === "string" ? item.status.trim() : "";
-      const amount = typeof item.amount === "number" ? item.amount : Number(item.amount);
+      const amount = parseCheckPhoneMetricValue(item.amount);
       const items = (Array.isArray(item.items) ? item.items : [])
         .map((value) => {
           if (typeof value === "string") {
@@ -1656,7 +1701,7 @@ function diagnoseTakeoutNormalizeFailure(payload: unknown): string {
     if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `orders[${index}].createdAt 非法`;
     if (typeof item.icon !== "string" || !item.icon.trim()) return `orders[${index}].icon 缺失`;
     if (typeof item.status !== "string" || !item.status.trim()) return `orders[${index}].status 缺失`;
-    if (typeof item.amount !== "number" || !Number.isFinite(item.amount)) return `orders[${index}].amount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.amount))) return `orders[${index}].amount 非法`;
     if (!Array.isArray(item.items) || item.items.length === 0) return `orders[${index}].items 为空`;
     for (let itemIndex = 0; itemIndex < item.items.length; itemIndex += 1) {
       const orderItem = item.items[itemIndex];
@@ -1677,17 +1722,13 @@ function diagnoseTakeoutNormalizeFailure(payload: unknown): string {
 }
 
 function parseSteamNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[¥￥元小时,\s]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value, /[¥￥$＄元块钱小时時]/g);
 }
 
 function parseSteamProgressField(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return Number.NaN;
-  return Number(value.replace(/[％%\s]/g, "").replace(/^百分之/, "").trim());
+  return parseCheckPhoneMetricValue(value.replace(/^百分之/, ""), /[％%]/g);
 }
 
 function clampSteamProgressPercent(value: number): number {
@@ -1807,8 +1848,8 @@ function normalizeSteamPayload(payload: unknown): CheckPhoneSteamPayload | null 
       const title = typeof item.title === "string" ? item.title.trim() : "";
       const icon = typeof item.icon === "string" ? item.icon.trim() : "";
       const genre = typeof item.genre === "string" ? item.genre.trim() : "";
-      const totalHours = typeof item.totalHours === "number" ? item.totalHours : Number(item.totalHours);
-      const recentHours = typeof item.recentHours === "number" ? item.recentHours : Number(item.recentHours);
+      const totalHours = parseCheckPhoneMetricValue(item.totalHours);
+      const recentHours = parseCheckPhoneMetricValue(item.recentHours);
       const progressPercent = parseSteamProgressField(item.progressPercent ?? item.progress);
       const lastPlayedAt = typeof item.lastPlayedAt === "string" ? item.lastPlayedAt.trim() : "";
       const status = typeof item.status === "string" ? item.status.trim() : "";
@@ -1837,7 +1878,7 @@ function normalizeSteamPayload(payload: unknown): CheckPhoneSteamPayload | null 
       const title = typeof item.title === "string" ? item.title.trim() : "";
       const icon = typeof item.icon === "string" ? item.icon.trim() : "";
       const genre = typeof item.genre === "string" ? item.genre.trim() : "";
-      const price = typeof item.price === "number" ? item.price : Number(item.price);
+      const price = parseCheckPhoneMetricValue(item.price);
       const reason = typeof item.reason === "string" ? item.reason.trim() : "";
       if (!id || !title || !icon || !genre || !Number.isFinite(price) || !reason) return null;
       return { id, title, icon, genre, price: Math.max(0, price), reason };
@@ -1852,7 +1893,7 @@ function normalizeSteamPayload(payload: unknown): CheckPhoneSteamPayload | null 
       const title = typeof item.title === "string" ? item.title.trim() : "";
       const icon = typeof item.icon === "string" ? item.icon.trim() : "";
       const genre = typeof item.genre === "string" ? item.genre.trim() : "";
-      const totalHours = typeof item.totalHours === "number" ? item.totalHours : Number(item.totalHours);
+      const totalHours = parseCheckPhoneMetricValue(item.totalHours);
       const progressPercent = parseSteamProgressField(item.progressPercent ?? item.progress);
       const lastPlayedAt = typeof item.lastPlayedAt === "string" ? item.lastPlayedAt.trim() : "";
       const status = typeof item.status === "string" ? item.status.trim() : "";
@@ -1909,9 +1950,9 @@ function diagnoseSteamNormalizeFailure(payload: unknown): string {
     if (!id) return `recentlyPlayed[${index}].id 缺失`;
     if (seen.has(id)) return `存在重复 id: ${id}`;
     seen.add(id);
-    if (typeof item.totalHours !== "number" || !Number.isFinite(item.totalHours)) return `recentlyPlayed[${index}].totalHours 非法`;
-    if (typeof item.recentHours !== "number" || !Number.isFinite(item.recentHours)) return `recentlyPlayed[${index}].recentHours 非法`;
-    if (typeof item.progressPercent !== "number" || !Number.isFinite(item.progressPercent)) return `recentlyPlayed[${index}].progressPercent 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.totalHours))) return `recentlyPlayed[${index}].totalHours 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.recentHours))) return `recentlyPlayed[${index}].recentHours 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.progressPercent))) return `recentlyPlayed[${index}].progressPercent 非法`;
   }
   for (let index = 0; index < record.wishlist.length; index += 1) {
     const item = record.wishlist[index] as Record<string, unknown>;
@@ -1920,7 +1961,7 @@ function diagnoseSteamNormalizeFailure(payload: unknown): string {
     if (!id) return `wishlist[${index}].id 缺失`;
     if (seen.has(id)) return `存在重复 id: ${id}`;
     seen.add(id);
-    if (typeof item.price !== "number" || !Number.isFinite(item.price)) return `wishlist[${index}].price 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.price))) return `wishlist[${index}].price 非法`;
   }
   for (let index = 0; index < record.library.length; index += 1) {
     const item = record.library[index] as Record<string, unknown>;
@@ -1929,18 +1970,14 @@ function diagnoseSteamNormalizeFailure(payload: unknown): string {
     if (!id) return `library[${index}].id 缺失`;
     if (seen.has(id)) return `存在重复 id: ${id}`;
     seen.add(id);
-    if (typeof item.totalHours !== "number" || !Number.isFinite(item.totalHours)) return `library[${index}].totalHours 非法`;
-    if (typeof item.progressPercent !== "number" || !Number.isFinite(item.progressPercent)) return `library[${index}].progressPercent 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.totalHours))) return `library[${index}].totalHours 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.progressPercent))) return `library[${index}].progressPercent 非法`;
   }
   return "结构存在字段缺失、时间非法或重复id";
 }
 
 function parseBilibiliNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,\s次播放]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value, /[次播放弹幕观看条个人]/g);
 }
 
 function parseBilibiliBlockPayload(text: string): {
@@ -2031,7 +2068,7 @@ function normalizeBilibiliPayload(payload: unknown): CheckPhoneBilibiliPayload |
       const visualDescription = typeof item.visualDescription === "string" ? item.visualDescription.trim() : "";
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
       const durationLabel = typeof item.durationLabel === "string" ? item.durationLabel.trim() : "";
-      const playCount = typeof item.playCount === "number" ? item.playCount : Number(item.playCount);
+      const playCount = parseCheckPhoneMetricValue(item.playCount);
       const progressLabel = typeof item.progressLabel === "string" ? item.progressLabel.trim() : "";
       const stateNote = typeof item.stateNote === "string" ? item.stateNote.trim() : "";
       const feeling = typeof item.feeling === "string" ? item.feeling.trim() : "";
@@ -2051,7 +2088,7 @@ function normalizeBilibiliPayload(payload: unknown): CheckPhoneBilibiliPayload |
       const visualDescription = typeof item.visualDescription === "string" ? item.visualDescription.trim() : "";
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
       const durationLabel = typeof item.durationLabel === "string" ? item.durationLabel.trim() : "";
-      const playCount = typeof item.playCount === "number" ? item.playCount : Number(item.playCount);
+      const playCount = parseCheckPhoneMetricValue(item.playCount);
       const saveReason = typeof item.saveReason === "string" ? item.saveReason.trim() : "";
       const feeling = typeof item.feeling === "string" ? item.feeling.trim() : "";
       if (!id || !title || !upName || !icon || !visualDescription || !createdAt || !isIsoTimestamp(createdAt) || !durationLabel || !Number.isFinite(playCount) || !saveReason || !feeling) return null;
@@ -2088,7 +2125,7 @@ function diagnoseBilibiliNormalizeFailure(payload: unknown): string {
     if (seen.has(id)) return `存在重复 id: ${id}`;
     seen.add(id);
     if (typeof item.visualDescription !== "string" || !item.visualDescription.trim()) return `watchHistory[${index}].visualDescription 缺失`;
-    if (typeof item.playCount !== "number" || !Number.isFinite(item.playCount)) return `watchHistory[${index}].playCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.playCount))) return `watchHistory[${index}].playCount 非法`;
   }
   for (let index = 0; index < record.favorites.length; index += 1) {
     const item = record.favorites[index] as Record<string, unknown>;
@@ -2098,7 +2135,7 @@ function diagnoseBilibiliNormalizeFailure(payload: unknown): string {
     if (seen.has(id)) return `存在重复 id: ${id}`;
     seen.add(id);
     if (typeof item.visualDescription !== "string" || !item.visualDescription.trim()) return `favorites[${index}].visualDescription 缺失`;
-    if (typeof item.playCount !== "number" || !Number.isFinite(item.playCount)) return `favorites[${index}].playCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.playCount))) return `favorites[${index}].playCount 非法`;
   }
   return "结构存在字段缺失、时间非法或重复id";
 }
@@ -2111,11 +2148,7 @@ type RedditBlockParseResult = {
 };
 
 function parseRedditNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,\s]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value);
 }
 
 function normalizeRedditMultilineText(value: string): string {
@@ -2211,9 +2244,9 @@ function normalizeRedditPayload(payload: unknown): CheckPhoneRedditPayload | nul
     name: typeof profileRecord.name === "string" ? profileRecord.name.trim() : "",
     handle: typeof profileRecord.handle === "string" ? profileRecord.handle.trim() : "",
     bio: typeof profileRecord.bio === "string" ? profileRecord.bio.trim() : "",
-    followers: typeof profileRecord.followers === "number" ? profileRecord.followers : Number(profileRecord.followers),
-    postKarma: typeof profileRecord.postKarma === "number" ? profileRecord.postKarma : Number(profileRecord.postKarma),
-    commentKarma: typeof profileRecord.commentKarma === "number" ? profileRecord.commentKarma : Number(profileRecord.commentKarma),
+    followers: parseCheckPhoneMetricValue(profileRecord.followers),
+    postKarma: parseCheckPhoneMetricValue(profileRecord.postKarma),
+    commentKarma: parseCheckPhoneMetricValue(profileRecord.commentKarma),
     cakeDay: typeof profileRecord.cakeDay === "string" ? profileRecord.cakeDay.trim() : "",
   };
   if (!profile.name || !profile.handle || !profile.bio || !Number.isFinite(profile.followers) || !Number.isFinite(profile.postKarma) || !Number.isFinite(profile.commentKarma) || !profile.cakeDay || !isIsoTimestamp(profile.cakeDay)) return null;
@@ -2227,9 +2260,9 @@ function normalizeRedditPayload(payload: unknown): CheckPhoneRedditPayload | nul
       const title = typeof item.title === "string" ? normalizeRedditMultilineText(item.title) : "";
       const body = typeof item.body === "string" ? normalizeRedditMultilineText(item.body) : "";
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
-      const upvoteCount = typeof item.upvoteCount === "number" ? item.upvoteCount : Number(item.upvoteCount);
-      const commentCount = typeof item.commentCount === "number" ? item.commentCount : Number(item.commentCount);
-      const viewCount = typeof item.viewCount === "number" ? item.viewCount : Number(item.viewCount);
+      const upvoteCount = parseCheckPhoneMetricValue(item.upvoteCount);
+      const commentCount = parseCheckPhoneMetricValue(item.commentCount);
+      const viewCount = parseCheckPhoneMetricValue(item.viewCount);
       const innerThought = typeof item.innerThought === "string" ? normalizeRedditMultilineText(item.innerThought) : "";
       if (!id || !communityName || !title || !body || !createdAt || !isIsoTimestamp(createdAt) || !Number.isFinite(upvoteCount) || !Number.isFinite(commentCount) || !Number.isFinite(viewCount) || !innerThought) return null;
       return {
@@ -2255,8 +2288,8 @@ function normalizeRedditPayload(payload: unknown): CheckPhoneRedditPayload | nul
       const postTitle = typeof item.postTitle === "string" ? normalizeRedditMultilineText(item.postTitle) : "";
       const body = typeof item.body === "string" ? normalizeRedditMultilineText(item.body) : "";
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
-      const upvoteCount = typeof item.upvoteCount === "number" ? item.upvoteCount : Number(item.upvoteCount);
-      const viewCount = typeof item.viewCount === "number" ? item.viewCount : Number(item.viewCount);
+      const upvoteCount = parseCheckPhoneMetricValue(item.upvoteCount);
+      const viewCount = parseCheckPhoneMetricValue(item.viewCount);
       const innerThought = typeof item.innerThought === "string" ? normalizeRedditMultilineText(item.innerThought) : "";
       if (!id || !communityName || !postTitle || !body || !createdAt || !isIsoTimestamp(createdAt) || !Number.isFinite(upvoteCount) || !Number.isFinite(viewCount) || !innerThought) return null;
       return {
@@ -2304,9 +2337,9 @@ function diagnoseRedditNormalizeFailure(payload: unknown): string {
   if (typeof profile.name !== "string" || !profile.name.trim()) return "profile.name 缺失";
   if (typeof profile.handle !== "string" || !profile.handle.trim()) return "profile.handle 缺失";
   if (typeof profile.bio !== "string" || !profile.bio.trim()) return "profile.bio 缺失";
-  if (typeof profile.followers !== "number" || !Number.isFinite(profile.followers)) return "profile.followers 非法";
-  if (typeof profile.postKarma !== "number" || !Number.isFinite(profile.postKarma)) return "profile.postKarma 非法";
-  if (typeof profile.commentKarma !== "number" || !Number.isFinite(profile.commentKarma)) return "profile.commentKarma 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.followers))) return "profile.followers 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.postKarma))) return "profile.postKarma 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.commentKarma))) return "profile.commentKarma 非法";
   if (typeof profile.cakeDay !== "string" || !isIsoTimestamp(profile.cakeDay.trim())) return "profile.cakeDay 非法";
   if (!Array.isArray(record.posts)) return "posts 不是数组";
   if (!Array.isArray(record.comments)) return "comments 不是数组";
@@ -2322,9 +2355,9 @@ function diagnoseRedditNormalizeFailure(payload: unknown): string {
     if (typeof item.title !== "string" || !item.title.trim()) return `posts[${index}].title 缺失`;
     if (typeof item.body !== "string" || !item.body.trim()) return `posts[${index}].body 缺失`;
     if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `posts[${index}].createdAt 非法`;
-    if (typeof item.upvoteCount !== "number" || !Number.isFinite(item.upvoteCount)) return `posts[${index}].upvoteCount 非法`;
-    if (typeof item.commentCount !== "number" || !Number.isFinite(item.commentCount)) return `posts[${index}].commentCount 非法`;
-    if (typeof item.viewCount !== "number" || !Number.isFinite(item.viewCount)) return `posts[${index}].viewCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.upvoteCount))) return `posts[${index}].upvoteCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.commentCount))) return `posts[${index}].commentCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.viewCount))) return `posts[${index}].viewCount 非法`;
     if (typeof item.innerThought !== "string" || !item.innerThought.trim()) return `posts[${index}].innerThought 缺失`;
   }
   for (let index = 0; index < record.comments.length; index += 1) {
@@ -2338,8 +2371,8 @@ function diagnoseRedditNormalizeFailure(payload: unknown): string {
     if (typeof item.postTitle !== "string" || !item.postTitle.trim()) return `comments[${index}].postTitle 缺失`;
     if (typeof item.body !== "string" || !item.body.trim()) return `comments[${index}].body 缺失`;
     if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `comments[${index}].createdAt 非法`;
-    if (typeof item.upvoteCount !== "number" || !Number.isFinite(item.upvoteCount)) return `comments[${index}].upvoteCount 非法`;
-    if (typeof item.viewCount !== "number" || !Number.isFinite(item.viewCount)) return `comments[${index}].viewCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.upvoteCount))) return `comments[${index}].upvoteCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.viewCount))) return `comments[${index}].viewCount 非法`;
     if (typeof item.innerThought !== "string" || !item.innerThought.trim()) return `comments[${index}].innerThought 缺失`;
   }
   return "结构存在字段缺失、时间非法或重复id";
@@ -2353,11 +2386,7 @@ type XBlockParseResult = {
 };
 
 function parseXNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,\s]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value);
 }
 
 const X_EXAMPLE_HANDLES = new Set([
@@ -2534,13 +2563,13 @@ function normalizeXPayload(payload: unknown, characterName = ""): CheckPhoneXPay
       typeof profileRecord.joinedAt === "string" && profileRecord.joinedAt.trim()
         ? profileRecord.joinedAt.trim()
         : undefined,
-    followingCount: typeof profileRecord.followingCount === "number" ? profileRecord.followingCount : Number(profileRecord.followingCount),
-    followerCount: typeof profileRecord.followerCount === "number" ? profileRecord.followerCount : Number(profileRecord.followerCount),
+    followingCount: parseCheckPhoneMetricValue(profileRecord.followingCount),
+    followerCount: parseCheckPhoneMetricValue(profileRecord.followerCount),
   };
   if (!profile.name || !profile.handle || !profile.bio || !Number.isFinite(profile.followingCount) || !Number.isFinite(profile.followerCount)) return null;
 
   const normalizeMetric = (value: unknown) => {
-    const num = typeof value === "number" ? value : Number(value);
+    const num = parseCheckPhoneMetricValue(value);
     return Number.isFinite(num) ? Math.max(0, Math.round(num)) : Number.NaN;
   };
 
@@ -2650,8 +2679,8 @@ function diagnoseXNormalizeFailure(payload: unknown): string {
   if (typeof profile.name !== "string" || !profile.name.trim()) return "profile.name 缺失";
   if (typeof profile.handle !== "string" || !profile.handle.trim()) return "profile.handle 缺失";
   if (typeof profile.bio !== "string" || !profile.bio.trim()) return "profile.bio 缺失";
-  if (typeof profile.followingCount !== "number" || !Number.isFinite(profile.followingCount)) return "profile.followingCount 非法";
-  if (typeof profile.followerCount !== "number" || !Number.isFinite(profile.followerCount)) return "profile.followerCount 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.followingCount))) return "profile.followingCount 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.followerCount))) return "profile.followerCount 非法";
   if (!Array.isArray(record.posts)) return "posts 不是数组";
   if (!Array.isArray(record.replies)) return "replies 不是数组";
   if ("media" in record && !Array.isArray(record.media)) return "media 不是数组";
@@ -2671,10 +2700,10 @@ function diagnoseXNormalizeFailure(payload: unknown): string {
       if (seen.has(id)) return `存在重复 id: ${id}`;
       seen.add(id);
       if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `${sectionName}[${index}].createdAt 非法`;
-      if (typeof item.replyCount !== "number" || !Number.isFinite(item.replyCount)) return `${sectionName}[${index}].replyCount 非法`;
-      if (typeof item.repostCount !== "number" || !Number.isFinite(item.repostCount)) return `${sectionName}[${index}].repostCount 非法`;
-      if (typeof item.likeCount !== "number" || !Number.isFinite(item.likeCount)) return `${sectionName}[${index}].likeCount 非法`;
-      if (typeof item.viewCount !== "number" || !Number.isFinite(item.viewCount)) return `${sectionName}[${index}].viewCount 非法`;
+      if (!Number.isFinite(parseCheckPhoneMetricValue(item.replyCount))) return `${sectionName}[${index}].replyCount 非法`;
+      if (!Number.isFinite(parseCheckPhoneMetricValue(item.repostCount))) return `${sectionName}[${index}].repostCount 非法`;
+      if (!Number.isFinite(parseCheckPhoneMetricValue(item.likeCount))) return `${sectionName}[${index}].likeCount 非法`;
+      if (!Number.isFinite(parseCheckPhoneMetricValue(item.viewCount))) return `${sectionName}[${index}].viewCount 非法`;
       if (sectionName === "likes") {
         if (typeof item.authorHandle !== "string" || !item.authorHandle.trim()) return `likes[${index}].authorHandle 缺失`;
       }
@@ -2691,11 +2720,7 @@ type YoutubeBlockParseResult = {
 };
 
 function parseYoutubeNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,\s次播放订阅者]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value, /[次播放订阅者观看位]/g);
 }
 
 function parseYoutubeSectionEntries(sectionBody: string) {
@@ -2811,7 +2836,7 @@ function normalizeYoutubePayload(payload: unknown): CheckPhoneYoutubePayload | n
     const icon = typeof item.icon === "string" && item.icon.trim() ? item.icon.trim() : undefined;
     const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
     const durationLabel = typeof item.durationLabel === "string" ? item.durationLabel.trim() : "";
-    const playCount = typeof item.playCount === "number" ? item.playCount : Number(item.playCount);
+    const playCount = parseCheckPhoneMetricValue(item.playCount);
     const progressLabel = typeof item.progressLabel === "string" ? item.progressLabel.trim() : "";
     const stateNote = typeof item.stateNote === "string"
       ? item.stateNote.trim()
@@ -2881,7 +2906,7 @@ function diagnoseYoutubeNormalizeFailure(payload: unknown): string {
     if (typeof item.channelName !== "string" || !item.channelName.trim()) return `${label}.channelName 缺失`;
     if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `${label}.createdAt 非法`;
     if (typeof item.durationLabel !== "string" || !item.durationLabel.trim()) return `${label}.durationLabel 缺失`;
-    if (typeof item.playCount !== "number" || !Number.isFinite(item.playCount)) return `${label}.playCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.playCount))) return `${label}.playCount 非法`;
     if (typeof item.stateNote !== "string" || !item.stateNote.trim()) return `${label}.stateNote 缺失`;
     if (typeof item.feeling !== "string" || !item.feeling.trim()) return `${label}.feeling 缺失`;
     return null;
@@ -2927,11 +2952,7 @@ type InstagramBlockParseResult = {
 };
 
 function parseInstagramNumericField(value: string | undefined): number {
-  if (!value) return Number.NaN;
-  const normalized = value.replace(/[,\s]/g, "").trim();
-  const wanMatch = normalized.match(/^(-?\d+(?:\.\d+)?)万$/);
-  if (wanMatch) return Math.round(Number(wanMatch[1]) * 10000);
-  return Number(normalized);
+  return parseCheckPhoneMetricValue(value);
 }
 
 function parseInstagramComments(
@@ -3073,8 +3094,8 @@ function normalizeInstagramPayload(payload: unknown): CheckPhoneInstagramPayload
     name: typeof profileRecord.name === "string" ? profileRecord.name.trim() : "",
     username: typeof profileRecord.username === "string" ? profileRecord.username.trim() : "",
     bio: typeof profileRecord.bio === "string" ? profileRecord.bio.trim() : "",
-    followingCount: typeof profileRecord.followingCount === "number" ? profileRecord.followingCount : Number(profileRecord.followingCount),
-    followerCount: typeof profileRecord.followerCount === "number" ? profileRecord.followerCount : Number(profileRecord.followerCount),
+    followingCount: parseCheckPhoneMetricValue(profileRecord.followingCount),
+    followerCount: parseCheckPhoneMetricValue(profileRecord.followerCount),
   };
   if (!profile.name || !profile.username || !profile.bio || !Number.isFinite(profile.followingCount) || !Number.isFinite(profile.followerCount)) return null;
 
@@ -3088,9 +3109,9 @@ function normalizeInstagramPayload(payload: unknown): CheckPhoneInstagramPayload
       const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
       const location = typeof item.location === "string" ? item.location.trim() : "";
       const caption = typeof item.caption === "string" ? item.caption.trim() : "";
-      const likeCount = typeof item.likeCount === "number" ? item.likeCount : Number(item.likeCount);
-      const commentCount = typeof item.commentCount === "number" ? item.commentCount : Number(item.commentCount);
-      const shareCount = typeof item.shareCount === "number" ? item.shareCount : Number(item.shareCount);
+      const likeCount = parseCheckPhoneMetricValue(item.likeCount);
+      const commentCount = parseCheckPhoneMetricValue(item.commentCount);
+      const shareCount = parseCheckPhoneMetricValue(item.shareCount);
       const comments = (Array.isArray(item.comments) ? item.comments : [])
         .map((commentEntry) => {
           if (!commentEntry || typeof commentEntry !== "object") return null;
@@ -3099,7 +3120,7 @@ function normalizeInstagramPayload(payload: unknown): CheckPhoneInstagramPayload
           const authorName = typeof comment.authorName === "string" ? comment.authorName.trim() : "";
           const text = typeof comment.text === "string" ? comment.text.trim() : "";
           const commentCreatedAt = typeof comment.createdAt === "string" ? comment.createdAt.trim() : "";
-          const commentLikeCount = typeof comment.likeCount === "number" ? comment.likeCount : Number(comment.likeCount);
+          const commentLikeCount = parseCheckPhoneMetricValue(comment.likeCount);
           if (!commentId || !authorName || !text || !commentCreatedAt || !isIsoTimestamp(commentCreatedAt)) return null;
           return {
             id: commentId,
@@ -3179,8 +3200,8 @@ function diagnoseInstagramNormalizeFailure(payload: unknown): string {
   if (typeof profile.name !== "string" || !profile.name.trim()) return "profile.name 缺失";
   if (typeof profile.username !== "string" || !profile.username.trim()) return "profile.username 缺失";
   if (typeof profile.bio !== "string" || !profile.bio.trim()) return "profile.bio 缺失";
-  if (typeof profile.followingCount !== "number" || !Number.isFinite(profile.followingCount)) return "profile.followingCount 非法";
-  if (typeof profile.followerCount !== "number" || !Number.isFinite(profile.followerCount)) return "profile.followerCount 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.followingCount))) return "profile.followingCount 非法";
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profile.followerCount))) return "profile.followerCount 非法";
   if (!Array.isArray(record.posts)) return "posts 不是数组";
   const seen = new Set<string>();
   for (let index = 0; index < record.posts.length; index += 1) {
@@ -3193,7 +3214,7 @@ function diagnoseInstagramNormalizeFailure(payload: unknown): string {
     if (typeof item.coverIcon !== "string" || !item.coverIcon.trim()) return `posts[${index}].coverIcon 缺失`;
     if (typeof item.createdAt !== "string" || !isIsoTimestamp(item.createdAt.trim())) return `posts[${index}].createdAt 非法`;
     if (typeof item.caption !== "string" || !item.caption.trim()) return `posts[${index}].caption 缺失`;
-    if (typeof item.likeCount !== "number" || !Number.isFinite(item.likeCount)) return `posts[${index}].likeCount 非法`;
+    if (!Number.isFinite(parseCheckPhoneMetricValue(item.likeCount))) return `posts[${index}].likeCount 非法`;
     if (!Array.isArray(item.comments)) return `posts[${index}].comments 不是数组`;
   }
   return "结构存在字段缺失、时间非法或重复id";
@@ -3487,17 +3508,7 @@ function parseDouyinTaggedFields(block: string): Record<string, string> {
 }
 
 function parseDouyinNumericField(value: unknown): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
-  if (typeof value !== "string") return Number.NaN;
-  const compact = value.replace(/[,，\s]/g, "").trim();
-  const match = compact.match(/^(-?\d+(?:\.\d+)?)([kKwW千萬万])?/);
-  if (!match) return Number.NaN;
-  const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return Number.NaN;
-  const unit = match[2];
-  if (unit === "k" || unit === "K" || unit === "千") return Math.round(amount * 1000);
-  if (unit === "w" || unit === "W" || unit === "万" || unit === "萬") return Math.round(amount * 10000);
-  return amount;
+  return parseCheckPhoneMetricValue(value);
 }
 
 function normalizeOptionalDouyinCount(value: unknown): number | undefined {
@@ -3815,11 +3826,7 @@ function normalizeTelegramPayload(payload: unknown): CheckPhoneTelegramPayload |
       const handle = typeof item.handle === "string" && item.handle.trim() ? item.handle.trim() : undefined;
       const about = typeof item.about === "string" && item.about.trim() ? item.about.trim() : undefined;
       const avatarLabel = typeof item.avatarLabel === "string" && item.avatarLabel.trim() ? item.avatarLabel.trim() : undefined;
-      const unreadCount = typeof item.unreadCount === "number"
-        ? item.unreadCount
-        : item.unreadCount == null
-          ? 0
-          : Number(item.unreadCount);
+      const unreadCount = item.unreadCount == null ? 0 : parseCheckPhoneMetricValue(item.unreadCount);
       const messages = (Array.isArray(item.messages) ? item.messages : [])
         .map((message) => normalizeMessage(message))
         .filter(Boolean) as CheckPhoneTelegramPayload["threads"][number]["messages"];
@@ -3903,7 +3910,7 @@ function parseTelegramBlockPayload(text: string): PhoneBlockParseResult {
       online: parseBlockBoolean(fields["在线"]),
       isBot: parseBlockBoolean(fields["机器人"]),
       lastStatus: parseTelegramLastStatus(fields["已读状态"]),
-      unreadCount: Number(fields["未读"] || 0),
+      unreadCount: parseCheckPhoneMetricInteger(fields["未读"] ?? 0),
       pinned: parseBlockBoolean(fields["置顶"]),
       muted: parseBlockBoolean(fields["静音"]),
       messages: messageNumbers.map((number) => ({
@@ -6103,13 +6110,13 @@ export function normalizeShoppingPayload(payload: unknown): CheckPhoneShoppingPa
   }
 
   const pendingCountRaw = statsRaw
-    ? (typeof statsRaw.pendingCount === "number" ? statsRaw.pendingCount : Number(statsRaw.pendingCount))
+    ? (parseCheckPhoneMetricValue(statsRaw.pendingCount))
     : NaN;
   const cartCountRaw = statsRaw
-    ? (typeof statsRaw.cartCount === "number" ? statsRaw.cartCount : Number(statsRaw.cartCount))
+    ? (parseCheckPhoneMetricValue(statsRaw.cartCount))
     : NaN;
   const savedCountRaw = statsRaw
-    ? (typeof statsRaw.savedCount === "number" ? statsRaw.savedCount : Number(statsRaw.savedCount))
+    ? (parseCheckPhoneMetricValue(statsRaw.savedCount))
     : NaN;
   const pendingCount = Number.isFinite(pendingCountRaw)
     ? Math.max(0, Math.round(pendingCountRaw))
@@ -6617,7 +6624,7 @@ function normalizeDoubanPayload(payload: unknown): CheckPhoneDoubanPayload | nul
       item.tone === "linen" || item.tone === "mist" || item.tone === "graphite" || item.tone === "blush"
         ? item.tone
         : "linen";
-    const memberCount = typeof item.memberCount === "number" ? item.memberCount : Number(item.memberCount);
+    const memberCount = parseCheckPhoneMetricValue(item.memberCount);
     const latestUpdate = typeof item.latestUpdate === "string" ? item.latestUpdate.trim() : "";
     const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt.trim() : "";
     if (!id || !name || !coverIcon || !Number.isFinite(memberCount) || !latestUpdate || !updatedAt || !isIsoTimestamp(updatedAt)) {
@@ -6643,9 +6650,9 @@ function normalizeDoubanPayload(payload: unknown): CheckPhoneDoubanPayload | nul
     const authorName = typeof item.authorName === "string" ? item.authorName.trim() : "";
     const body = typeof item.body === "string" ? item.body.trim() : "";
     const createdAt = typeof item.createdAt === "string" ? item.createdAt.trim() : "";
-    const likeCount = typeof item.likeCount === "number" ? item.likeCount : Number(item.likeCount);
-    const saveCount = typeof item.saveCount === "number" ? item.saveCount : Number(item.saveCount);
-    const repostCount = typeof item.repostCount === "number" ? item.repostCount : Number(item.repostCount);
+    const likeCount = parseCheckPhoneMetricValue(item.likeCount);
+    const saveCount = parseCheckPhoneMetricValue(item.saveCount);
+    const repostCount = parseCheckPhoneMetricValue(item.repostCount);
     const comments = (Array.isArray(item.comments) ? item.comments : [])
       .map((comment) => normalizeComment(comment))
         .filter(Boolean) as NonNullable<CheckPhoneDoubanPayload["repliedTopics"]>[number]["comments"];
@@ -6691,9 +6698,9 @@ function normalizeDoubanPayload(payload: unknown): CheckPhoneDoubanPayload | nul
     const subjectName = typeof item.subjectName === "string" && item.subjectName.trim() ? item.subjectName.trim() : undefined;
     const subjectMeta = typeof item.subjectMeta === "string" && item.subjectMeta.trim() ? item.subjectMeta.trim() : undefined;
     const coverIcon = typeof item.coverIcon === "string" && item.coverIcon.trim() ? item.coverIcon.trim() : undefined;
-    const rating = typeof item.rating === "number" ? item.rating : Number(item.rating);
-    const reactionCount = typeof item.reactionCount === "number" ? item.reactionCount : Number(item.reactionCount);
-    const commentCount = typeof item.commentCount === "number" ? item.commentCount : Number(item.commentCount);
+    const rating = parseCheckPhoneMetricValue(item.rating);
+    const reactionCount = parseCheckPhoneMetricValue(item.reactionCount);
+    const commentCount = parseCheckPhoneMetricValue(item.commentCount);
     if (!id || !title || !body || !createdAt || !isIsoTimestamp(createdAt)) return null;
     return {
       id,
@@ -6775,10 +6782,10 @@ function normalizeDoubanPayload(payload: unknown): CheckPhoneDoubanPayload | nul
   const profileName = profileRecord && typeof profileRecord.name === "string" ? profileRecord.name.trim() : "";
   const profileBio = profileRecord && typeof profileRecord.bio === "string" ? profileRecord.bio.trim() : "";
   const joinedAt = profileRecord && typeof profileRecord.joinedAt === "string" && profileRecord.joinedAt.trim() ? profileRecord.joinedAt.trim() : undefined;
-  const followingCount = profileRecord && typeof profileRecord.followingCount === "number" ? profileRecord.followingCount : Number(profileRecord?.followingCount);
-  const followerCount = profileRecord && typeof profileRecord.followerCount === "number" ? profileRecord.followerCount : Number(profileRecord?.followerCount);
-  const wantWatchCount = profileRecord && typeof profileRecord.wantWatchCount === "number" ? profileRecord.wantWatchCount : Number(profileRecord?.wantWatchCount);
-  const wantReadCount = profileRecord && typeof profileRecord.wantReadCount === "number" ? profileRecord.wantReadCount : Number(profileRecord?.wantReadCount);
+  const followingCount = parseCheckPhoneMetricValue(profileRecord?.followingCount);
+  const followerCount = parseCheckPhoneMetricValue(profileRecord?.followerCount);
+  const wantWatchCount = parseCheckPhoneMetricValue(profileRecord?.wantWatchCount);
+  const wantReadCount = parseCheckPhoneMetricValue(profileRecord?.wantReadCount);
 
   const profile = {
     name: profileName || "豆友",
@@ -6914,10 +6921,10 @@ function diagnoseDoubanNormalizeFailure(payload: unknown): string {
       if (typeof entry.createdAt !== "string" || !entry.createdAt.trim() || !isIsoTimestamp(entry.createdAt)) {
         return `activities[${index}].createdAt 非法`;
       }
-      if (!Number.isFinite(typeof entry.reactionCount === "number" ? entry.reactionCount : Number(entry.reactionCount))) {
+      if (!Number.isFinite(parseCheckPhoneMetricValue(entry.reactionCount))) {
         return `activities[${index}].reactionCount 非法`;
       }
-      if (!Number.isFinite(typeof entry.commentCount === "number" ? entry.commentCount : Number(entry.commentCount))) {
+      if (!Number.isFinite(parseCheckPhoneMetricValue(entry.commentCount))) {
         return `activities[${index}].commentCount 非法`;
       }
     }
@@ -6931,7 +6938,7 @@ function diagnoseDoubanNormalizeFailure(payload: unknown): string {
     if (typeof entry.name !== "string" || !entry.name.trim()) return `myGroups[${index}].name 缺失`;
     if (typeof entry.coverIcon !== "string" || !entry.coverIcon.trim()) return `myGroups[${index}].coverIcon 缺失`;
     if (!validTone(entry.tone)) return `myGroups[${index}].tone 非法`;
-    if (!Number.isFinite(typeof entry.memberCount === "number" ? entry.memberCount : Number(entry.memberCount))) {
+    if (!Number.isFinite(parseCheckPhoneMetricValue(entry.memberCount))) {
       return `myGroups[${index}].memberCount 非法`;
     }
     if (typeof entry.latestUpdate !== "string" || !entry.latestUpdate.trim()) return `myGroups[${index}].latestUpdate 缺失`;
@@ -6953,13 +6960,13 @@ function diagnoseDoubanNormalizeFailure(payload: unknown): string {
       if (typeof entry.createdAt !== "string" || !entry.createdAt.trim() || !isIsoTimestamp(entry.createdAt)) {
         return `${label}[${index}].createdAt 非法`;
       }
-      if (!Number.isFinite(typeof entry.likeCount === "number" ? entry.likeCount : Number(entry.likeCount))) {
+      if (!Number.isFinite(parseCheckPhoneMetricValue(entry.likeCount))) {
         return `${label}[${index}].likeCount 非法`;
       }
-      if (!Number.isFinite(typeof entry.saveCount === "number" ? entry.saveCount : Number(entry.saveCount))) {
+      if (!Number.isFinite(parseCheckPhoneMetricValue(entry.saveCount))) {
         return `${label}[${index}].saveCount 非法`;
       }
-      if (!Number.isFinite(typeof entry.repostCount === "number" ? entry.repostCount : Number(entry.repostCount))) {
+      if (!Number.isFinite(parseCheckPhoneMetricValue(entry.repostCount))) {
         return `${label}[${index}].repostCount 非法`;
       }
       if (!Array.isArray(entry.comments)) return `${label}[${index}].comments 缺失`;
@@ -7169,16 +7176,7 @@ function normalizeXiaohongshuEngagementCounts(
 }
 
 function parseXiaohongshuMetric(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return Number(value);
-  const compact = value.replace(/[,，\s]/g, "").trim();
-  const match = compact.match(/-?\d+(?:\.\d+)?/);
-  if (!match) return Number.NaN;
-  const base = Number(match[0]);
-  if (!Number.isFinite(base)) return Number.NaN;
-  if (/[万wW]/.test(compact)) return Math.round(base * 10000);
-  if (/[千kK]/.test(compact)) return Math.round(base * 1000);
-  return Math.round(base);
+  return parseCheckPhoneMetricInteger(value);
 }
 
 function repairXiaohongshuProfileCounts(counts: {
@@ -7242,9 +7240,9 @@ function normalizeXiaohongshuPayload(payload: unknown, characterName = ""): Chec
       tone === "ivory" || tone === "mist" || tone === "blush" || tone === "graphite"
         ? tone
         : "ivory";
-    const likeCount = typeof note.likeCount === "number" ? note.likeCount : Number(note.likeCount);
-    const commentCount = typeof note.commentCount === "number" ? note.commentCount : Number(note.commentCount);
-    const saveCount = typeof note.saveCount === "number" ? note.saveCount : Number(note.saveCount);
+    const likeCount = parseCheckPhoneMetricValue(note.likeCount);
+    const commentCount = parseCheckPhoneMetricValue(note.commentCount);
+    const saveCount = parseCheckPhoneMetricValue(note.saveCount);
     const tags = (Array.isArray(note.tags) ? note.tags : [])
       .map((entry) => String(entry).trim())
       .filter(Boolean)
@@ -7354,13 +7352,13 @@ function normalizeXiaohongshuPayload(payload: unknown, characterName = ""): Chec
       ? record.messageStats as Record<string, unknown>
       : null;
   const likesAndSavesCount = overviewRaw
-    ? (typeof overviewRaw.likesAndSavesCount === "number" ? overviewRaw.likesAndSavesCount : Number(overviewRaw.likesAndSavesCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.likesAndSavesCount))
     : NaN;
   const newFollowersCount = overviewRaw
-    ? (typeof overviewRaw.newFollowersCount === "number" ? overviewRaw.newFollowersCount : Number(overviewRaw.newFollowersCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.newFollowersCount))
     : NaN;
   const commentsAndMentionsCount = overviewRaw
-    ? (typeof overviewRaw.commentsAndMentionsCount === "number" ? overviewRaw.commentsAndMentionsCount : Number(overviewRaw.commentsAndMentionsCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.commentsAndMentionsCount))
     : NaN;
 
   const dedupeById = <Item extends { id: string }>(items: Item[]): Item[] => {
@@ -7545,9 +7543,9 @@ function normalizeWeiboPayload(payload: unknown, characterName?: string): CheckP
       item.tone === "ivory" || item.tone === "mist" || item.tone === "graphite" || item.tone === "blush"
         ? item.tone
         : "ivory";
-    const repostCount = typeof item.repostCount === "number" ? item.repostCount : Number(item.repostCount);
-    const commentCount = typeof item.commentCount === "number" ? item.commentCount : Number(item.commentCount);
-    const likeCount = typeof item.likeCount === "number" ? item.likeCount : Number(item.likeCount);
+    const repostCount = parseCheckPhoneMetricValue(item.repostCount);
+    const commentCount = parseCheckPhoneMetricValue(item.commentCount);
+    const likeCount = parseCheckPhoneMetricValue(item.likeCount);
     const comments = (Array.isArray(item.comments) ? item.comments : [])
       .map((comment) => normalizeComment(comment))
       .filter(Boolean) as CheckPhoneWeiboPayload["homePosts"][number]["comments"];
@@ -7636,9 +7634,9 @@ function normalizeWeiboPayload(payload: unknown, characterName?: string): CheckP
   const name = typeof profileRaw.name === "string" ? profileRaw.name.trim() : "";
   const handle = typeof profileRaw.handle === "string" ? profileRaw.handle.trim() : "";
   const bio = typeof profileRaw.bio === "string" ? profileRaw.bio.trim() : "";
-  const followingCount = typeof profileRaw.followingCount === "number" ? profileRaw.followingCount : Number(profileRaw.followingCount);
-  const followerCount = typeof profileRaw.followerCount === "number" ? profileRaw.followerCount : Number(profileRaw.followerCount);
-  const likedTotal = typeof profileRaw.likedTotal === "number" ? profileRaw.likedTotal : Number(profileRaw.likedTotal);
+  const followingCount = parseCheckPhoneMetricValue(profileRaw.followingCount);
+  const followerCount = parseCheckPhoneMetricValue(profileRaw.followerCount);
+  const likedTotal = parseCheckPhoneMetricValue(profileRaw.likedTotal);
   if (!name || !handle || !bio || !Number.isFinite(followingCount) || !Number.isFinite(followerCount) || !Number.isFinite(likedTotal)) return null;
   weiboProfileName = name;
 
@@ -7659,13 +7657,13 @@ function normalizeWeiboPayload(payload: unknown, characterName?: string): CheckP
     ? record.messageOverview as Record<string, unknown>
     : null;
   const mentionsCount = overviewRaw
-    ? (typeof overviewRaw.mentionsCount === "number" ? overviewRaw.mentionsCount : Number(overviewRaw.mentionsCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.mentionsCount))
     : NaN;
   const commentsCount = overviewRaw
-    ? (typeof overviewRaw.commentsCount === "number" ? overviewRaw.commentsCount : Number(overviewRaw.commentsCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.commentsCount))
     : NaN;
   const likesCount = overviewRaw
-    ? (typeof overviewRaw.likesCount === "number" ? overviewRaw.likesCount : Number(overviewRaw.likesCount))
+    ? (parseCheckPhoneMetricValue(overviewRaw.likesCount))
     : NaN;
 
   const dedupeIds = (items: Array<{ id: string }>) => {
@@ -8014,13 +8012,13 @@ function diagnoseWeiboNormalizeFailure(payload: unknown): string {
   if (typeof profileRaw.name !== "string" || !profileRaw.name.trim()) return "profile.name 缺失";
   if (typeof profileRaw.handle !== "string" || !profileRaw.handle.trim()) return "profile.handle 缺失";
   if (typeof profileRaw.bio !== "string" || !profileRaw.bio.trim()) return "profile.bio 缺失";
-  if (!Number.isFinite(typeof profileRaw.followingCount === "number" ? profileRaw.followingCount : Number(profileRaw.followingCount))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profileRaw.followingCount))) {
     return "profile.followingCount 非法";
   }
-  if (!Number.isFinite(typeof profileRaw.followerCount === "number" ? profileRaw.followerCount : Number(profileRaw.followerCount))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profileRaw.followerCount))) {
     return "profile.followerCount 非法";
   }
-  if (!Number.isFinite(typeof profileRaw.likedTotal === "number" ? profileRaw.likedTotal : Number(profileRaw.likedTotal))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(profileRaw.likedTotal))) {
     return "profile.likedTotal 非法";
   }
 
@@ -8031,13 +8029,13 @@ function diagnoseWeiboNormalizeFailure(payload: unknown): string {
 
   const overviewRaw = record.messageOverview && typeof record.messageOverview === "object" ? (record.messageOverview as Record<string, unknown>) : null;
   if (!overviewRaw) return "缺少 messageOverview";
-  if (!Number.isFinite(typeof overviewRaw.mentionsCount === "number" ? overviewRaw.mentionsCount : Number(overviewRaw.mentionsCount))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(overviewRaw.mentionsCount))) {
     return "messageOverview.mentionsCount 非法";
   }
-  if (!Number.isFinite(typeof overviewRaw.commentsCount === "number" ? overviewRaw.commentsCount : Number(overviewRaw.commentsCount))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(overviewRaw.commentsCount))) {
     return "messageOverview.commentsCount 非法";
   }
-  if (!Number.isFinite(typeof overviewRaw.likesCount === "number" ? overviewRaw.likesCount : Number(overviewRaw.likesCount))) {
+  if (!Number.isFinite(parseCheckPhoneMetricValue(overviewRaw.likesCount))) {
     return "messageOverview.likesCount 非法";
   }
 

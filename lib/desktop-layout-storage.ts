@@ -7,6 +7,7 @@ import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 export const ICON_LAYOUT_STORAGE_KEY = "ai_phone_icon_layout_v2";
 export const ICON_LAYOUT_STORAGE_KEY_V1 = "ai_phone_icon_layout_v1";
 export const DOCK_LAYOUT_STORAGE_KEY = "ai_phone_dock_layout_v1";
+export const DESKTOP_FOLDERS_STORAGE_KEY = "ai_phone_desktop_folders_v1";
 
 /** Max icons the dock can hold. Dragging a page icon in is rejected once full. */
 export const DOCK_MAX = 4;
@@ -14,6 +15,7 @@ export const DOCK_MAX = 4;
 registerKvMigration(ICON_LAYOUT_STORAGE_KEY);
 registerKvMigration(ICON_LAYOUT_STORAGE_KEY_V1);
 registerKvMigration(DOCK_LAYOUT_STORAGE_KEY);
+registerKvMigration(DESKTOP_FOLDERS_STORAGE_KEY);
 
 export type DesktopPageKey = `page${number}`;
 
@@ -227,6 +229,55 @@ export function appendMissingCustomAppIcons(
     }
   }
   return next;
+}
+
+// ── Desktop folders ───────────────────────────────────
+// 文件夹内容表：folder:xxx → { name, icons }。tile 本身作为普通图标
+// 存在分页布局里；这张表只管"里面装了什么、叫什么"。
+
+export type DesktopFolder = { name: string; icons: DesktopIconId[] };
+export type DesktopFolderMap = Record<string, DesktopFolder>;
+
+/** 校验并去重文件夹表：只保留已知/已安装的成员图标（文件夹不可嵌套） */
+export function normalizeDesktopFolders(raw: unknown): DesktopFolderMap {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const knownIcons = new Set<string>(Object.keys(ICONS));
+  const customIconIds = getInstalledCustomIconIds();
+  const seen = new Set<string>();
+  const result: DesktopFolderMap = {};
+  for (const [folderId, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!folderId.startsWith("folder:") || !value || typeof value !== "object") continue;
+    const { name, icons } = value as { name?: unknown; icons?: unknown };
+    if (!Array.isArray(icons)) continue;
+    const members: DesktopIconId[] = [];
+    for (const item of icons) {
+      if (typeof item !== "string" || item.startsWith("folder:")) continue;
+      const migratedId = migrateLegacyDesktopIconId(item, customIconIds);
+      if (!migratedId || (!knownIcons.has(migratedId) && !customIconIds.has(migratedId))) continue;
+      if (seen.has(migratedId) || members.includes(migratedId)) continue;
+      seen.add(migratedId);
+      members.push(migratedId);
+    }
+    result[folderId] = {
+      name: typeof name === "string" && name.trim() ? name.trim().slice(0, 24) : "文件夹",
+      icons: members,
+    };
+  }
+  return result;
+}
+
+export function loadDesktopFolders(): DesktopFolderMap {
+  const raw = kvGet(DESKTOP_FOLDERS_STORAGE_KEY);
+  if (raw == null) return {};
+  try {
+    return normalizeDesktopFolders(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+export function writeDesktopFolders(folders: DesktopFolderMap): void {
+  kvSet(DESKTOP_FOLDERS_STORAGE_KEY, JSON.stringify(folders));
 }
 
 // ── Dock layout ───────────────────────────────────────

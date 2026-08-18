@@ -29,6 +29,21 @@ export type MemoryConfig = {
     summarizationPrompt: string;            // user-editable prompt template for memory summarization
     coreMemoryPrompt: string;               // user-editable prompt template for core-memory extraction
     vnSummaryPrompt: string;                // user-editable prompt for VN chapter summarization
+    shortTermAllowedSources?: {
+        chat?: boolean;
+        group_chat?: boolean;
+        moments?: boolean;
+        checkphone?: boolean;
+        diary?: boolean;
+        xiaohongshu?: boolean;
+        interview_magazine?: boolean;
+        cocreate?: boolean;
+        game?: boolean;
+        story?: boolean;
+        vn?: boolean;
+        adventure?: boolean;
+        custom_app?: boolean;
+    };
 };
 
 export type MemorySearchResult = {
@@ -101,4 +116,19 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT,
     coreMemoryPrompt: DEFAULT_CORE_MEMORY_PROMPT,
     vnSummaryPrompt: "",
+    shortTermAllowedSources: {
+        chat: true,
+        group_chat: true,
+        moments: true,
+        checkphone: true,
+        diary: true,
+        xiaohongshu: true,
+        interview_magazine: true,
+        cocreate: true,
+        game: true,
+        story: true,
+        vn: true,
+        adventure: true,
+        custom_app: true,
+    },
 };

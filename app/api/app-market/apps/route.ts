@@ -38,6 +38,19 @@ function stripPackageLinkForViewer(app: CustomAppMarketItem | null, viewerId?: s
   return { ...app, packageUrl: "", packagePath: "", packageHash: undefined };
 }
 
+/**
+ * 公共列表的 CDN 缓存头：响应对所有人相同（直链已统一剥掉），让 Netlify 边缘
+ * 挡掉重复回源。这条列表带 base64 图标、单次可达数 MB，是 Supabase 出站的大头。
+ * 浏览器端不缓存（max-age=0），保证拿到的永远是边缘的最新副本。
+ */
+const CDN_LIST_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=0, must-revalidate",
+  "Netlify-CDN-Cache-Control": "public, s-maxage=120, stale-while-revalidate=600",
+  // 必须显式让缓存键包含查询参数：Netlify 对函数响应默认忽略 query，
+  // 不加这行，公共列表的缓存会顶掉 mine=1/appId/admin 等所有其他查询的响应
+  "Netlify-Vary": "query",
+} as const;
+
 function cleanText(value: unknown, maxLength: number): string {
   return String(value ?? "").replace(/\u0000/g, "").trim().slice(0, maxLength);
 }
@@ -426,10 +439,12 @@ export async function GET(request: Request) {
       }
       return NextResponse.json({ ok: false, apps: [], error }, { status: result.status });
     }
+    // 公共列表对所有人统一剥直链（作者自己的直链走 mine=1 拿，那条不缓存）——
+    // 响应不再因人而异，才能整体进 CDN 缓存
     return NextResponse.json({
       ok: true,
-      apps: result.data.map(raw => stripPackageLinkForViewer(normalizeMarketItem(raw), account?.id)).filter(Boolean),
-    });
+      apps: result.data.map(raw => stripPackageLinkForViewer(normalizeMarketItem(raw), null)).filter(Boolean),
+    }, { headers: CDN_LIST_CACHE_HEADERS });
   } catch (err) {
     return NextResponse.json({ ok: false, error: formatSupabaseRestError(err), apps: [] }, { status: getSupabaseServerConfig() ? 500 : 503 });
   }

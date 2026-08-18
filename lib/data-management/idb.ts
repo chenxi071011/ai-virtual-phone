@@ -11,7 +11,15 @@ import type {
   StoreIndexBackup,
   StoreRecordBackup,
 } from "./types";
-import { deserializeValue, estimateValueBytes, serializeValue, type MediaCollector, type MediaResolver } from "./serializers";
+import {
+  deserializeStorageString,
+  deserializeValue,
+  estimateValueBytes,
+  serializeStorageString,
+  serializeValue,
+  type MediaCollector,
+  type MediaResolver,
+} from "./serializers";
 import { kvEntries, kvGet, kvRemove, kvSetAsync } from "../kv-db";
 
 type SourceStats = {
@@ -182,9 +190,18 @@ function getStoreNames(db: IDBDatabase, source: IndexedDbSource): string[] {
   return source.stores?.filter((store) => all.includes(store)) ?? all;
 }
 
-async function exportIndexedDbSource(source: IndexedDbSource, collector?: MediaCollector): Promise<IndexedDbSourceBackup> {
+async function exportIndexedDbSource(
+  source: IndexedDbSource,
+  collector?: MediaCollector,
+  excludeMedia = false,
+): Promise<IndexedDbSourceBackup> {
   const db = await openDb(source.dbName);
-  if (!db) return { type: "indexeddb", dbName: source.dbName, stores: [] };
+  if (!db) {
+    // 打不开 ≠ 没数据：无版本 open 对不存在的库会新建空库并成功返回，
+    // 走到这里说明是真报错（被浏览器清除中/损坏/被占用）。必须带出错误，
+    // 否则会打出一个"看起来成功、实际缺整库"的备份（用户实报踩坑）。
+    return { type: "indexeddb", dbName: source.dbName, stores: [], error: `无法打开数据库 ${source.dbName}（可能已被浏览器清除或损坏）` };
+  }
 
   try {
     const storeNames = getStoreNames(db, source);
@@ -221,10 +238,15 @@ async function exportIndexedDbSource(source: IndexedDbSource, collector?: MediaC
         request.onerror = () => reject(request.error);
       });
 
-      for (const record of rawRecords) {
+      // 逐条序列化，并立刻松开原始记录的引用。游标必须先排空（IDB 事务里不能 await），
+      // 但排空之后没理由让原始值和序列化结果两份同时活着——大库导出时这份多余的拷贝
+      // 就是压垮移动端的最后一根稻草。原地置空，顺序不变，边走边还内存。
+      for (let index = 0; index < rawRecords.length; index += 1) {
+        const record = rawRecords[index];
+        rawRecords[index] = undefined as unknown as StoreRecordBackup;
         records.push({
           key: await serializeValue(record.key),
-          value: await serializeValue(record.value, collector),
+          value: await serializeValue(record.value, collector, { excludeMedia }),
         });
       }
 
@@ -249,10 +271,19 @@ async function readKvRecords(source: KvSource): Promise<{ key: string; value: st
   if (db && Array.from(db.objectStoreNames).includes("entries")) {
     try {
       const transaction = db.transaction("entries", "readonly");
-      const records = await runRequest<Array<{ key: string; value: string }>>(transaction.objectStore("entries").getAll());
-      for (const record of records) {
-        if (matchesKey(record.key, source)) byKey.set(record.key, record);
-      }
+      const request = transaction.objectStore("entries").openCursor();
+      await new Promise<void>((resolve, reject) => {
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return resolve();
+          const record = cursor.value as { key: string; value: string };
+          if (matchesKey(record.key, source)) byKey.set(record.key, record);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
     } catch {
       // Fall back to cache-only below.
     } finally {
@@ -266,26 +297,31 @@ async function readKvRecords(source: KvSource): Promise<{ key: string; value: st
   return Array.from(byKey.values()).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-async function exportKvSource(source: KvSource): Promise<KvSourceBackup> {
-  return { type: "kv", records: await readKvRecords(source) };
+async function exportKvSource(source: KvSource, collector?: MediaCollector): Promise<KvSourceBackup> {
+  const records = await readKvRecords(source);
+  if (!collector) return { type: "kv", records };
+  for (let index = 0; index < records.length; index += 1) {
+    records[index] = { ...records[index], value: await serializeStorageString(records[index].value, collector) };
+  }
+  return { type: "kv", records };
 }
 
-function exportLocalStorageSource(source: LocalStorageSource): LocalStorageSourceBackup {
+async function exportLocalStorageSource(source: LocalStorageSource, collector?: MediaCollector): Promise<LocalStorageSourceBackup> {
   if (typeof window === "undefined") return { type: "localStorage", records: [] };
   const records: { key: string; value: string }[] = [];
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index);
     if (!key || !matchesKey(key, source)) continue;
     const value = window.localStorage.getItem(key);
-    if (value !== null) records.push({ key, value });
+    if (value !== null) records.push({ key, value: await serializeStorageString(value, collector) });
   }
   return { type: "localStorage", records };
 }
 
-export async function exportSource(source: DataSource, collector?: MediaCollector): Promise<SourceBackup> {
-  if (source.type === "indexeddb") return exportIndexedDbSource(source, collector);
-  if (source.type === "kv") return exportKvSource(source);
-  return exportLocalStorageSource(source);
+export async function exportSource(source: DataSource, collector?: MediaCollector, excludeMedia = false): Promise<SourceBackup> {
+  if (source.type === "indexeddb") return exportIndexedDbSource(source, collector, excludeMedia);
+  if (source.type === "kv") return exportKvSource(source, collector);
+  return exportLocalStorageSource(source, collector);
 }
 
 export async function inspectSource(source: DataSource): Promise<SourceStats> {
@@ -445,7 +481,8 @@ export async function importSource(payload: SourceBackup, overwrite = false, res
         result.skipped += 1;
         continue;
       }
-      window.localStorage.setItem(record.key, record.value);
+      const value = await deserializeStorageString(record.value, resolver);
+      window.localStorage.setItem(record.key, value);
       if (exists) result.overwritten += 1;
       else result.added += 1;
     }
@@ -455,20 +492,21 @@ export async function importSource(payload: SourceBackup, overwrite = false, res
   if (payload.type === "kv") {
     try {
       for (const record of payload.records) {
+        const incoming = await deserializeStorageString(record.value, resolver);
         const existing = kvGet(record.key);
         const exists = existing !== null;
         if (!exists) {
-          await kvSetAsync(record.key, record.value);
+          await kvSetAsync(record.key, incoming);
           result.added += 1;
           continue;
         }
         if (overwrite) {
-          await kvSetAsync(record.key, record.value);
+          await kvSetAsync(record.key, incoming);
           result.overwritten += 1;
           continue;
         }
-        const merged = tryMergeJsonArrayByKey(existing, record.value)
-          ?? tryReplaceEmptyJsonValue(existing, record.value);
+        const merged = tryMergeJsonArrayByKey(existing, incoming)
+          ?? tryReplaceEmptyJsonValue(existing, incoming);
         if (!merged) {
           result.skipped += 1;
           continue;

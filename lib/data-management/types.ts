@@ -24,6 +24,9 @@ export type KvSource = {
   keys?: string[];
   prefixes?: string[];
   includeAll?: boolean;
+  /** Keys/prefixes to exclude when includeAll is set (used by the KV catch-all). */
+  excludeKeys?: string[];
+  excludePrefixes?: string[];
   label?: string;
 };
 
@@ -78,6 +81,8 @@ export type IndexedDbSourceBackup = {
   type: "indexeddb";
   dbName: string;
   stores: StoreBackup[];
+  /** 导出时打不开数据库（被浏览器清除/损坏/被占用）——有值即表示这份数据不完整 */
+  error?: string;
 };
 
 export type KvSourceBackup = {

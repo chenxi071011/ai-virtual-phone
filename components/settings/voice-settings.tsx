@@ -17,6 +17,10 @@ const MINIMAX_BASE_URL_OPTIONS = [
 ];
 const DEFAULT_MINIMAX_BASE_URL = MINIMAX_BASE_URL_OPTIONS[0].baseUrl;
 const GLOBAL_MINIMAX_BASE_URL = MINIMAX_BASE_URL_OPTIONS[1].baseUrl;
+const MINIMAX_SPEED_MIN = 0.5;
+const MINIMAX_SPEED_MAX = 2.0;
+const MINIMAX_SPEED_STEP = 0.1;
+const DEFAULT_SPEECH_SPEED = 1.0;
 const VOICE_PROVIDER_OPTIONS = [
     { value: "OpenAI", label: "OpenAI TTS" },
     { value: "MinimaxCN", label: "Minimax 语音国内版" },
@@ -32,6 +36,7 @@ const DEFAULT_VOICE_CONFIGS: VoiceApiConfig[] = [
         baseUrl: DEFAULT_MINIMAX_BASE_URL,
         model: "speech-2.8-turbo",
         defaultVoice: "male-qn-qingse",
+        speechSpeed: DEFAULT_SPEECH_SPEED,
         enableSTT: true,
         enableTTS: true,
     }
@@ -190,7 +195,10 @@ function normalizeVoiceConfigs(configs: VoiceApiConfig[]): VoiceApiConfig[] {
             const baseUrl = MINIMAX_BASE_URL_OPTIONS.some(option => option.baseUrl === config.baseUrl)
                 ? config.baseUrl
                 : DEFAULT_MINIMAX_BASE_URL;
-            return { ...config, baseUrl };
+            const speechSpeed = typeof config.speechSpeed === "number" && Number.isFinite(config.speechSpeed)
+                ? Math.min(MINIMAX_SPEED_MAX, Math.max(MINIMAX_SPEED_MIN, config.speechSpeed))
+                : DEFAULT_SPEECH_SPEED;
+            return { ...config, baseUrl, speechSpeed };
         });
 }
 
@@ -259,6 +267,7 @@ export function VoiceSettings() {
             region: "",
             model: "speech-2.8-turbo",
             defaultVoice: "male-qn-qingse",
+            speechSpeed: DEFAULT_SPEECH_SPEED,
             enableSTT: true,
             enableTTS: true,
         };
@@ -303,6 +312,7 @@ export function VoiceSettings() {
             baseUrl: providerOption === "MinimaxGlobal" ? GLOBAL_MINIMAX_BASE_URL : DEFAULT_MINIMAX_BASE_URL,
             model: wasMinimax ? (current?.model || "speech-2.8-turbo") : "speech-2.8-turbo",
             defaultVoice: wasMinimax ? (current?.defaultVoice || "male-qn-qingse") : "male-qn-qingse",
+            speechSpeed: wasMinimax ? (current?.speechSpeed ?? DEFAULT_SPEECH_SPEED) : DEFAULT_SPEECH_SPEED,
         });
         if (!wasMinimax) {
             setManualModelIds(prev => ({ ...prev, [id]: false }));
@@ -713,6 +723,27 @@ export function VoiceSettings() {
 
                                         {config.provider === "Minimax" && (
                                             <>
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <label className="menu-desc">语速</label>
+                                                        <span className="menu-label font-medium">{(config.speechSpeed ?? DEFAULT_SPEECH_SPEED).toFixed(1)}×</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min={MINIMAX_SPEED_MIN}
+                                                        max={MINIMAX_SPEED_MAX}
+                                                        step={MINIMAX_SPEED_STEP}
+                                                        value={config.speechSpeed ?? DEFAULT_SPEECH_SPEED}
+                                                        onChange={(e) => updateConfig(config.id, { speechSpeed: Number(e.target.value) })}
+                                                        className="w-full accent-black"
+                                                        aria-label="Minimax 语速"
+                                                    />
+                                                    <div className="relative mt-1 h-5 px-1 text-xs text-gray-500" aria-hidden="true">
+                                                        <span className="absolute left-1 whitespace-nowrap">{MINIMAX_SPEED_MIN.toFixed(1)}×</span>
+                                                        <span className="absolute whitespace-nowrap" style={{ left: "33.333%", transform: "translateX(-50%)" }}>1.0× 默认</span>
+                                                        <span className="absolute right-1 whitespace-nowrap">{MINIMAX_SPEED_MAX.toFixed(1)}×</span>
+                                                    </div>
+                                                </div>
                                                 <div className="flex flex-col gap-1">
                                                     <label className="menu-desc ml-1">朗读语言</label>
                                                     <select

@@ -645,7 +645,7 @@
   left: 0;
   right: 0;
   z-index: 10;
-  padding: 10px 16px;
+  padding: 8px 16px max(8px, env(safe-area-inset-bottom, 0px));
   background: color-mix(in srgb, var(--c-input, var(--c-page-body-bg)) 55%, transparent);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -726,7 +726,7 @@
   display: flex;
   justify-content: center;
   gap: 32px;
-  padding: 10px 0 24px;
+  padding: 6px 0 0;
 }
 
 .chat-input-bar .chat-input-actions .ui-bare-btn {
@@ -1617,16 +1617,37 @@
   overflow-wrap: anywhere;
 }
 
+/* 生图失败提示的忽略按钮：点掉即清状态落库，不再提示 */
+.feed-post-photo-error-dismiss {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.65;
+  font-size: inherit;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.feed-post-photo-error-dismiss:active {
+  opacity: 1;
+}
+
+/* 文字描述占位块要铺满整行：三层默认都是收缩到内容宽（stack 的 flex-start、
+   row 的 inline-flex、描述块自己的 inline-block），描述短时灰底只包住那几个字，
+   一列帖子看下来宽窄参差。这里让 stack 与 row 都撑满，描述块在 JSX 里配 w-full。 */
 .feed-post-photo-retry-stack {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 6px;
   max-width: 100%;
 }
 
 .feed-post-photo-retry-row {
-  display: inline-flex;
+  display: flex;
   align-items: flex-end;
   gap: 8px;
   max-width: 100%;
@@ -2038,6 +2059,19 @@
 
 /* ── Music Share Card (uses --c-music-* tokens) ── */
 
+/* 聊天里的音乐/文件卡片沿用聊天自己的配色。tokens.css 的全局月光暗色板是给
+   全屏播放器的，2026-08-09 提取全局变量后意外漏进聊天卡片（白字浅底看不清）；
+   这里按提取前的兜底值把聊天卡片锁回原样，音乐 App 不受影响。 */
+.chat-music-share-card,
+.chat-media-file-wrap,
+.chat-media-file-card {
+  /* 值 = 2026-07-09 首发版 tokens.css 的"龙井绿"浅色板（8/9 播放器改月光暗色板前的原样） */
+  --c-music-surface: rgba(255, 255, 255, 0.3);
+  --c-music-surface-solid: rgba(255, 255, 255, 0.55);
+  --c-music-text: #2b3d31;
+  --c-music-accent: #5b7b64;
+}
+
 .chat-music-share-card {
   width: 220px;
   border-radius: 16px;
@@ -2104,10 +2138,10 @@
 
 .chat-media-file-card {
   width: 220px;
-  border-radius: 0;
+  border-radius: 16px;
   overflow: hidden;
   background: var(--c-music-surface, rgba(255,255,255,0.06));
-  border: none;
+  border: 1px solid var(--c-music-surface-solid, rgba(255,255,255,0.12));
   backdrop-filter: blur(16px);
 }
 
@@ -2490,12 +2524,14 @@
   transform: scale(0.96);
 }
 
-.chat-thought-card .chat-html-inline {
+.chat-thought-card .chat-html-inline,
+.chat-status-bare .chat-html-inline {
   border-radius: 10px;
   box-shadow: none;
 }
 
-.chat-thought-card .chat-html-inline-frame {
+.chat-thought-card .chat-html-inline-frame,
+.chat-status-bare .chat-html-inline-frame {
   min-height: 100px;
   max-height: min(52vh, 420px);
 }
@@ -2520,6 +2556,27 @@
   aspect-ratio: 1 / 1.618;
   border: none;
   background: transparent;
+}
+
+/* ── Status bar area (bare: no sticky-note frame) ──
+   [状态栏] 的内容自己就是卡片（AI 直出的 HTML / 正则渲染的排版 / 自定义渲染代码），
+   这里只负责对齐到气泡左缘，不加任何背景、边框与标题。 */
+.chat-status-bare {
+  margin-left: 52px;
+  margin-top: -8px;
+  max-width: calc(100% - 64px);
+  animation: thoughtCardIn 0.3s ease-out;
+}
+
+/* 纯文字状态栏（没被正则/HTML 接管时）沿用折叠区原来的小字号，颜色跟随主题 */
+.chat-status-bare .chat-markdown {
+  font-size: calc(11.7px*var(--app-text-scale,1));
+  line-height: 1.7;
+}
+
+/* 状态栏和内心便利贴同时出现时，便利贴的负上边距会压到状态栏上，这里收回来 */
+.chat-status-bare + .chat-thought-card {
+  margin-top: 8px;
 }
 
 /* ── Inner monologue card (sticky-note style) ── */
@@ -4058,7 +4115,8 @@
   position: absolute;
   left: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 45;
+  /* 高于顶栏(46)/底栏(35)，避免拖到顶部时被顶栏遮挡、无法继续拖动 */
+  z-index: 48;
   width: 56px;
   height: 56px;
   border-radius: 28px;
@@ -4083,7 +4141,8 @@
   position: absolute;
   left: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 45;
+  /* 高于顶栏(46)/底栏(35)，拖到顶部时不被顶栏遮挡 */
+  z-index: 48;
   width: min(280px, calc(100% - 24px));
   border-radius: 14px;
   border: 1px solid #e2d5be;
@@ -4624,6 +4683,17 @@
   font-size: calc(9.9px*var(--app-text-scale,1));
   color: var(--reading-warm-ink-tertiary, #999);
 }
+.reading-settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.reading-settings-toggle-label {
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
+  line-height: 1.5;
+}
 .reading-settings-prompt {
   display: flex;
   flex-direction: column;
@@ -4686,6 +4756,119 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+
+/* 阅读设置：选项卡片 */
+.reading-option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.reading-option-grid--two {
+  grid-template-columns: 1fr;
+}
+.reading-option-grid--three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.reading-option-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.reading-option-card.is-active {
+  border-color: var(--reading-warm-brown, #8a5a2b);
+  background: rgba(237, 227, 207, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(138, 90, 43, 0.25);
+}
+.reading-option-card-label {
+  font-size: calc(11.7px*var(--app-text-scale,1));
+  font-weight: 600;
+  color: var(--reading-warm-ink, #111);
+}
+.reading-option-card-desc {
+  font-size: calc(9.9px*var(--app-text-scale,1));
+  line-height: 1.45;
+  color: var(--reading-warm-ink-tertiary, #999);
+}
+
+/* 阅读设置：批注重试次数步进器 */
+.reading-retry-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.reading-retry-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--reading-warm-brown, #8a5a2b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.reading-retry-btn:active:not(:disabled) {
+  background: rgba(237, 227, 207, 0.6);
+}
+.reading-retry-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.reading-retry-value {
+  min-width: 64px;
+  text-align: center;
+  font-size: calc(15.3px*var(--app-text-scale,1));
+  font-weight: 700;
+  color: var(--reading-warm-ink, #111);
+}
+.reading-retry-value em {
+  font-style: normal;
+  font-size: calc(9.9px*var(--app-text-scale,1));
+  font-weight: 400;
+  color: var(--reading-warm-ink-tertiary, #999);
+  margin-left: 2px;
+}
+
+/* 阅读设置：重置悬浮球位置 */
+.reading-reset-float-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--reading-warm-brown, #8a5a2b);
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.reading-reset-float-btn:active {
+  background: rgba(237, 227, 207, 0.6);
+}
+
+/* 滚动阅读模式 */
+.reading-scroll-content {
+  min-height: 100%;
+  padding: 6px 0 12px;
+  touch-action: pan-y;
+}
+.reading-scroll-block {
+  margin-bottom: 14px;
 }
 
 .chat-bilingual-prompt-dialog {

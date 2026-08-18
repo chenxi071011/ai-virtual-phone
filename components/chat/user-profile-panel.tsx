@@ -38,6 +38,7 @@ import {
     Palette,
     Puzzle,
     Keyboard,
+    Vibrate,
     Radio,
     RotateCcw,
     Send,
@@ -149,6 +150,7 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     const [notifHint, setNotifHint] = useState<string | null>(null);
     const [notifChecking, setNotifChecking] = useState(false);
     const [enterToSendEnabled, setEnterToSendEnabled] = useState(false);
+    const [callVibrationEnabled, setCallVibrationEnabled] = useState(true);
     const [userStats, setUserStats] = useState({ chats: 0, moments: 0, visitors: 1234 });
     const [walletSummary, setWalletSummary] = useState(() => {
         const wallet = loadWalletState();
@@ -162,6 +164,7 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
         setIdentity(resolveUserIdentity());
         const settings = loadChatAppSettings();
         setEnterToSendEnabled(settings.enterToSendEnabled === true);
+        setCallVibrationEnabled(settings.callVibrationEnabled !== false);
         void isNotificationGranted().then((granted) => {
             setNotifEnabled(settings.browserNotificationsEnabled === true && granted);
             if (settings.browserNotificationsEnabled === true && !granted) {
@@ -230,6 +233,11 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     const handleEnterToSendToggle = (enabled: boolean) => {
         setEnterToSendEnabled(enabled);
         saveChatAppSettings({ ...loadChatAppSettings(), enterToSendEnabled: enabled });
+    };
+
+    const handleCallVibrationToggle = (enabled: boolean) => {
+        setCallVibrationEnabled(enabled);
+        saveChatAppSettings({ ...loadChatAppSettings(), callVibrationEnabled: enabled });
     };
 
     if (showFollowUpEditor) {
@@ -402,6 +410,15 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                                 <span className="ts-11 text-[var(--c-text)] opacity-70">开启后 Enter 发送，Shift+Enter 换行</span>
                             </div>
                             <Toggle checked={enterToSendEnabled} onChange={handleEnterToSendToggle} />
+                        </div>
+
+                        <div className="flex items-center gap-3 py-3 w-full border-b border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]">
+                            <Vibrate size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
+                            <div className="flex flex-col flex-1 text-left gap-0.5">
+                                <span className="ts-14 font-semibold text-[var(--c-text-title)]">语音/视频来电振动</span>
+                                <span className="ts-11 text-[var(--c-text)] opacity-70">角色来电等待接听时手机振动（iOS 网页不支持振动）</span>
+                            </div>
+                            <Toggle checked={callVibrationEnabled} onChange={handleCallVibrationToggle} />
                         </div>
 
                         <div className="flex items-center gap-3 py-3 w-full">

@@ -64,12 +64,48 @@ export async function sendFlower(endpoint: string, path: string): Promise<boolea
     }
 }
 
-/** 读取全部资源的花数（走 CDN，SHA 定位保证新鲜）。文件不存在时返回空表。 */
-export async function fetchFlowerCounts(source: ResourceHubSource): Promise<FlowerCounts> {
+// 见过的最高花数（本机）：服务端计数只增不减，取 max 可以抹平 CDN 缓存的"时光倒流"
+//（GitHub API 限流时 CDN 退回按分支名拉，jsDelivr 对分支的缓存可滞后数小时，
+//  表现为花数忽然变少几朵，稍后又涨回来——纯显示问题，仓库账本是单调递增的）。
+const FLOWERS_SEEN_KEY = "ai_phone_resource_hub_flowers_seen_v1";
+registerKvMigration(FLOWERS_SEEN_KEY);
+
+function loadSeenCounts(): FlowerCounts {
     try {
-        const text = await fetchResourceHubText(source, FLOWERS_FILE);
-        const parsed = JSON.parse(text) as FlowerCounts;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-    } catch { /* 没有人送过花或网络失败，一律按空表 */ }
-    return {};
+        const parsed = JSON.parse(kvGet(FLOWERS_SEEN_KEY) || "{}") as FlowerCounts;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+}
+
+function mergeMonotonic(fetched: FlowerCounts): FlowerCounts {
+    const seen = loadSeenCounts();
+    const merged: FlowerCounts = { ...seen };
+    for (const [path, count] of Object.entries(fetched)) {
+        merged[path] = Math.max(Number(count) || 0, Number(seen[path]) || 0);
+    }
+    kvSet(FLOWERS_SEEN_KEY, JSON.stringify(merged));
+    return merged;
+}
+
+/** 读取全部资源的花数。优先走 raw 源（缓存仅数分钟，比 jsDelivr 的分支缓存新鲜得多），
+ *  失败退回镜像链；再叠加"本机见过的最高值"保证显示单调。文件不存在时返回空表。 */
+export async function fetchFlowerCounts(source: ResourceHubSource): Promise<FlowerCounts> {
+    let fetched: FlowerCounts | null = null;
+    try {
+        const res = await fetch(
+            `https://raw.githubusercontent.com/${source.owner}/${source.repo}/${encodeURIComponent(source.branch)}/${FLOWERS_FILE}`,
+            { cache: "no-cache" },
+        );
+        if (res.ok) {
+            const parsed = JSON.parse(await res.text()) as FlowerCounts;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) fetched = parsed;
+        }
+    } catch { /* raw 不可达（部分地区被墙），走镜像链 */ }
+    if (!fetched) {
+        try {
+            const parsed = JSON.parse(await fetchResourceHubText(source, FLOWERS_FILE)) as FlowerCounts;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) fetched = parsed;
+        } catch { /* 没有人送过花或网络失败 */ }
+    }
+    return mergeMonotonic(fetched || {});
 }

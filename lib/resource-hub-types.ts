@@ -100,7 +100,8 @@ export type ImportDestination =
     | "theater"
     | "plugin"
     | "theme"
-    | "preset_entry";
+    | "preset_entry"
+    | "status_bar";
 
 export const IMPORT_DESTINATIONS: Array<{ key: ImportDestination; label: string; hint: string }> = [
     { key: "preset", label: "预设", hint: "预设管理页导出的 JSON" },
@@ -116,4 +117,5 @@ export const IMPORT_DESTINATIONS: Array<{ key: ImportDestination; label: string;
     { key: "plugin", label: "插件", hint: "聊天插件 JS 源码文件" },
     { key: "theme", label: "主题包", hint: "外观页导出的主题包 zip" },
     { key: "preset_entry", label: "预设条目", hint: "单条预设条目，插入或覆盖到已有预设" },
+    { key: "status_bar", label: "状态栏", hint: "聊天信息页导出的自定义状态栏 JSON，导入后进方案库" },
 ];

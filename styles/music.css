@@ -186,8 +186,9 @@
 
 .music-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 12px 16px 120px;
+    padding: 12px 16px 0;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -1406,8 +1407,9 @@
 .music-playlists,
 .music-playlist-detail {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 12px 16px 100px;
+    padding: 12px 16px 0;
 }
 
 .music-playlist-detail-header {
@@ -1511,12 +1513,13 @@
 
 .music-discovery {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 12px 16px 120px;
+    overflow-x: hidden;
+    padding: 12px 16px 0;
     display: flex;
     flex-direction: column;
     gap: 18px;
-    -webkit-overflow-scrolling: touch;
 }
 
 .music-discovery::-webkit-scrollbar {
@@ -1615,7 +1618,7 @@
 
 .music-chart-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
 }
 
@@ -2493,17 +2496,38 @@
     filter: drop-shadow(0 0 6px rgba(255, 84, 104, 0.5));
 }
 
-/* Content clears the bottom bar + capsule player */
-.music-list {
-    padding-bottom: 210px;
+/* Content clears the bottom bar + capsule player.
+   iOS WebKit 不把滚动容器自身的 padding-bottom 计入可滚动区域（记忆库
+   memory-detail-scroll 修过同款问题），改用容器末尾 ::after 占位块 */
+.music-discovery::after,
+.music-list::after {
+    content: "";
+    flex: 0 0 96px;
 }
 
-.music-discovery {
-    padding-bottom: 210px;
+.music-playlist-detail::after {
+    content: "";
+    display: block;
+    height: 96px;
 }
 
-.music-playlists,
-.music-playlist-detail {
+/* 正在播放胶囊条在场时（root 挂 data-nowbar），让位加到底栏+胶囊条全量 */
+.music-app[data-nowbar] .music-discovery::after,
+.music-app[data-nowbar] .music-list::after {
+    flex-basis: 175px;
+}
+
+.music-app[data-nowbar] .music-playlist-detail::after {
+    height: 175px;
+}
+
+/* 嵌套复用的列表（歌单详情内层、我的页分区内）不占位 */
+.music-playlist-detail .music-list::after,
+.music-list-compact::after {
+    content: none;
+}
+
+.music-playlists {
     padding-bottom: 210px;
 }
 
@@ -4203,11 +4227,14 @@
     right: 20px;
 }
 
-/* Content clearance for the docked stack (tabbar 74 + bar 56 + breathing room) */
-.music-list,
-.music-discovery,
-.music-playlists,
-.music-playlist-detail {
+/* Content clearance for the docked stack (tabbar 74 + bar 56 + breathing room)
+   滚动容器（list/discovery/playlist-detail）的让位由 ::after 占位块承担，
+   这里再叠 padding 会双份留白 */
+.music-playlists {
+    padding-bottom: 96px;
+}
+
+.music-app[data-nowbar] .music-playlists {
     padding-bottom: 175px;
 }
 
@@ -4579,4 +4606,383 @@
         radial-gradient(circle at 85% 85%, var(--c-music-bg-lime) 0%, transparent 65%),
         radial-gradient(circle at 10% 90%, var(--c-music-bg-mint-dim) 0%, transparent 60%),
         radial-gradient(circle at 50% 50%, var(--c-music-bg-center) 0%, transparent 70%);
+}
+
+/* ── Mine Tab（网易云式「我的」页） ── */
+
+.music-mine-hero {
+    flex-shrink: 0;
+}
+
+.music-mine-hero-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 0 0;
+    text-align: center;
+}
+
+.music-mine-ava {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: linear-gradient(140deg, #4a5a8a, #7a5a9a);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: calc(24px*var(--app-text-scale,1));
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25), 0 0 0 6px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.music-mine-ava img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.music-mine-name {
+    margin-top: 10px;
+    font-size: calc(16.2px*var(--app-text-scale,1));
+    font-weight: 700;
+    color: var(--c-music-text);
+}
+
+.music-mine-sig {
+    margin-top: 4px;
+    font-size: calc(10.8px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 62%, transparent);
+    max-width: 86%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.music-mine-stats {
+    margin-top: 10px;
+    display: flex;
+    gap: 18px;
+    font-size: calc(9.9px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+}
+
+.music-mine-stats b {
+    color: var(--c-music-text);
+    font-size: calc(11.7px*var(--app-text-scale,1));
+    margin-right: 3px;
+}
+
+.music-mine-chips {
+    margin-top: 16px;
+    display: flex;
+    gap: 9px;
+    align-self: stretch;
+}
+
+.music-mine-chips button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: none;
+    border-radius: 12px;
+    padding: 11px 0;
+    font-size: calc(11.7px*var(--app-text-scale,1));
+    color: var(--c-music-text);
+    background: var(--c-music-surface-solid);
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+}
+
+.music-mine-chips button svg {
+    opacity: 0.75;
+}
+
+.music-mine-chips button:active {
+    background: var(--c-music-glass-dim);
+}
+
+.music-mine-covers {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    flex-shrink: 0;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+}
+
+.music-mine-covers::-webkit-scrollbar {
+    display: none;
+}
+
+.music-mine-cover-card {
+    position: relative;
+    flex: 0 0 104px;
+    height: 104px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--c-music-surface-solid);
+    cursor: pointer;
+}
+
+.music-mine-cover-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.music-mine-cover-card span {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 14px 8px 6px;
+    font-size: calc(9.9px*var(--app-text-scale,1));
+    color: #fff;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.music-mine-tabs {
+    display: flex;
+    justify-content: space-around;
+    flex-shrink: 0;
+    padding: 6px 24px 0;
+}
+
+.music-mine-tabs button {
+    border: none;
+    background: none;
+    padding: 4px 0 8px;
+    font-size: calc(15.3px*var(--app-text-scale,1));
+    font-weight: 700;
+    color: color-mix(in srgb, var(--c-music-text) 45%, transparent);
+    cursor: pointer;
+    position: relative;
+}
+
+.music-mine-tabs button[data-active] {
+    color: var(--c-music-text);
+}
+
+.music-mine-tabs button[data-active]::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 24px;
+    height: 3.5px;
+    border-radius: 2px;
+    background: #e74c50;
+}
+
+.music-mine-subtabs {
+    display: flex;
+    gap: 14px;
+    flex-shrink: 0;
+    padding: 0 4px;
+}
+
+.music-mine-subtabs button {
+    border: none;
+    background: none;
+    padding: 2px 0;
+    font-size: calc(11.7px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+    cursor: pointer;
+}
+
+.music-mine-subtabs button[data-active] {
+    color: var(--c-music-text);
+    font-weight: 700;
+}
+
+.music-mine-subtabs sup {
+    font-size: calc(8.1px*var(--app-text-scale,1));
+    margin-left: 1px;
+    opacity: 0.7;
+}
+
+.music-mine-pl-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.music-mine-pl-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 6px 6px;
+    border-radius: 12px;
+    cursor: pointer;
+}
+
+.music-mine-pl-row:active {
+    background: var(--c-music-surface-solid);
+}
+
+.music-mine-pl-cover {
+    position: relative;
+    width: 50px;
+    height: 50px;
+    border-radius: 10px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: var(--c-music-surface-solid);
+}
+
+.music-mine-pl-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.music-mine-like-heart {
+    position: absolute;
+    right: 3px;
+    bottom: 2px;
+    font-size: 13px;
+    color: #ff4d6a;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.music-mine-pl-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.music-mine-pl-name {
+    font-size: calc(12.6px*var(--app-text-scale,1));
+    color: var(--c-music-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.music-mine-pl-meta {
+    margin-top: 2px;
+    font-size: calc(9.9px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.music-heart-btn {
+    border: none;
+    border-radius: 999px;
+    padding: 7px 12px;
+    flex-shrink: 0;
+    font-size: calc(10.8px*var(--app-text-scale,1));
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(135deg, #ff5f7a, #ff2d55);
+    cursor: pointer;
+}
+
+.music-heart-btn:disabled {
+    opacity: 0.6;
+}
+
+.music-mine-radio-eps {
+    margin: 0 6px 6px 67px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.music-mine-ep-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.music-mine-ep-row:active {
+    background: var(--c-music-surface-solid);
+}
+
+.music-mine-ep-name {
+    font-size: calc(10.8px*var(--app-text-scale,1));
+    color: var(--c-music-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.music-mine-ep-meta {
+    font-size: calc(9px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+    flex-shrink: 0;
+}
+
+.music-mine-ep-loading {
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+    justify-content: center;
+}
+
+.music-mine-events {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.music-mine-event-card {
+    border-radius: 14px;
+    border: 1px solid var(--c-music-surface-solid);
+    padding: 12px 14px;
+    background: var(--c-music-surface, rgba(255, 255, 255, 0.04));
+}
+
+.music-mine-event-text {
+    font-size: calc(11.7px*var(--app-text-scale,1));
+    color: var(--c-music-text);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.music-mine-event-pics {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+}
+
+.music-mine-event-pics img {
+    width: 31%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.music-mine-event-song {
+    margin-top: 8px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: var(--c-music-surface-solid);
+    font-size: calc(10.8px*var(--app-text-scale,1));
+    color: var(--c-music-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.music-mine-event-time {
+    margin-top: 7px;
+    font-size: calc(9px*var(--app-text-scale,1));
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
 }

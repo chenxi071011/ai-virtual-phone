@@ -269,7 +269,7 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode, serifIframeFallba
         // iframe 内部永远不滚（iOS 对 iframe 内部文档滚动的手势支持不可靠，生成页里的
         // fixed/100vh 元素会让整页划不动）；contained 模式改由外层同文档 div 滚动。
         // height:auto 把生成页常见的 height:100vh 压回内容高，保证测量与手势链正确。
-        const bridge = `<style>html,body{overflow:hidden!important;height:auto!important;min-height:0!important}</style><script>(function(){function measure(){var b=document.body;if(!b)return 0;if(window.innerWidth<50)return 0;var br=b.getBoundingClientRect();var h=Math.max(br.height,b.scrollHeight||0);for(var i=0;i<b.children.length;i++){var c=b.children[i];var r=c.getBoundingClientRect();if(r.width||r.height)h=Math.max(h,r.bottom-br.top,c.scrollHeight||0)}return Math.ceil(h)}function send(){var h=measure();if(!h)return;window.parent.postMessage({type:"_rhr",h:h},"*")}function schedule(){requestAnimationFrame(function(){send();requestAnimationFrame(send)})}window.addEventListener("load",schedule);window.addEventListener("resize",schedule);document.addEventListener("click",function(e){var t=e.target&&e.target.closest&&e.target.closest("[data-action]");if(t){var a=t.getAttribute("data-action");if(a){e.preventDefault();e.stopPropagation();window.parent.postMessage({type:"_rhr_opt",text:a},"*")}}schedule()},true);document.addEventListener("toggle",schedule,true);document.addEventListener("transitionend",schedule,true);document.addEventListener("animationend",schedule,true);if(window.MutationObserver)new MutationObserver(schedule).observe(document.documentElement,{attributes:true,childList:true,subtree:true,characterData:true});if(window.ResizeObserver){var ro=new ResizeObserver(schedule);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}setTimeout(send,80);setTimeout(send,500);setTimeout(send,1600)})();<\/script>`;
+        const bridge = `<style>html,body{overflow:hidden!important;height:auto!important;min-height:0!important}</style><script>(function(){function measure(){var b=document.body;if(!b)return 0;if(window.innerWidth<50)return 0;var br=b.getBoundingClientRect();var h=Math.max(br.height,b.scrollHeight||0);for(var i=0;i<b.children.length;i++){var c=b.children[i];var r=c.getBoundingClientRect();if(r.width||r.height)h=Math.max(h,r.bottom-br.top,c.scrollHeight||0)}return Math.ceil(h)}var animCount=0,animUntil=0;function isAnim(){return animCount>0&&Date.now()<animUntil}function animStart(){animCount++;animUntil=Date.now()+2000;schedule()}function animStop(){if(animCount>0)animCount--;schedule()}function send(){var h=measure();if(!h)return;window.parent.postMessage({type:"_rhr",h:h,anim:isAnim()},"*")}function schedule(){requestAnimationFrame(function(){send();requestAnimationFrame(send)})}window.addEventListener("load",schedule);window.addEventListener("resize",schedule);document.addEventListener("click",function(e){var t=e.target&&e.target.closest&&e.target.closest("[data-action]");if(t){var a=t.getAttribute("data-action");if(a){e.preventDefault();e.stopPropagation();window.parent.postMessage({type:"_rhr_opt",text:a},"*")}}window.parent.postMessage({type:"_rhr_act"},"*");schedule()},true);document.addEventListener("toggle",function(){window.parent.postMessage({type:"_rhr_act"},"*");schedule()},true);document.addEventListener("transitionrun",animStart,true);document.addEventListener("transitionend",animStop,true);document.addEventListener("transitioncancel",animStop,true);document.addEventListener("animationstart",animStart,true);document.addEventListener("animationend",animStop,true);document.addEventListener("animationcancel",animStop,true);if(window.MutationObserver)new MutationObserver(schedule).observe(document.documentElement,{attributes:true,childList:true,subtree:true,characterData:true});if(window.ResizeObserver){var ro=new ResizeObserver(schedule);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}setTimeout(send,80);setTimeout(send,500);setTimeout(send,1600)})();<\/script>`;
         // 默认字体兜底：iframe 是独立文档，继承不到剧情页的宋体（--story-font），
         // UA 默认是无衬线（iOS 苹方）。把宋体默认值注入到文档最前面——生成页
         // 自己声明的 font-family 在后面，仍会覆盖这里，只兜底不强制。
@@ -296,6 +296,13 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode, serifIframeFallba
         const handler = (e: MessageEvent) => {
             if (!e.data || typeof e.data !== "object") return;
             if (iframeRef.current && e.source !== iframeRef.current.contentWindow) return;
+            // 用户在生成页里点了一下：手风琴展开、折叠这类高度暴涨是人主动触发的，
+            // 不可能是 vh 自激（那个跟交互无关）。清掉锁与采样窗口，让随后的增高照常生效。
+            if (e.data.type === "_rhr_act") {
+                feedbackLockRef.current = null;
+                recentHeightsRef.current = [];
+                return;
+            }
             if (e.data.type === "_rhr" && typeof e.data.h === "number") {
                 const next = Math.max(e.data.h, 50);
                 const lock = feedbackLockRef.current;
@@ -306,6 +313,15 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode, serifIframeFallba
                     } else {
                         return; // 锁定期间忽略继续增高的测量
                     }
+                }
+                // CSS 过渡/动画进行中：内容每帧变高，形状和 vh 自激一模一样（连续小步递增），
+                // 但它会随缓动曲线收敛。拿这些帧去做 runaway 判定必然误伤——一个 0.55s 的
+                // max-height 过渡刚跑 6 帧（约 100ms）就会被判失控并锁死高度。
+                // 直接跟随测量值，并清空窗口，免得过渡前后的样本被拼成一次假阳性。
+                if (e.data.anim === true) {
+                    recentHeightsRef.current = [];
+                    setHeight(next);
+                    return;
                 }
                 const recent = recentHeightsRef.current;
                 // 桥每次变化会连发多条相同高度的消息，去重后再进窗口
@@ -323,8 +339,11 @@ function HtmlPageSegment({ html, onOptionSelect, htmlPageMode, serifIframeFallba
                         return step > 0 && step < 400;
                     });
                 if (isRunaway) {
-                    // vh 内容想占满视口，锁一个接近整屏的稳定高度而不是初始小值
+                    // vh 内容想占满视口，锁一个接近整屏的稳定高度而不是初始小值。
+                    // .story-stage 只有剧情模式有；栖所等场景退到外层滚动容器，
+                    // 再退到整屏——拿整屏当视口会锁出一个比容器还高的值。
                     const viewport = iframeRef.current?.closest(".story-stage")?.clientHeight
+                        || iframeRef.current?.parentElement?.clientHeight
                         || (typeof window !== "undefined" ? window.innerHeight : 600);
                     const locked = Math.max(recent[0].h, Math.round(viewport * 0.68));
                     feedbackLockRef.current = locked;

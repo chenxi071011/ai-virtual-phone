@@ -2294,7 +2294,13 @@ export function MascotFloat() {
                         placeholder={`跟${mascotDisplayName}聊聊...`}
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+                        onKeyDown={(event) => {
+                          // 悬浮面板是单行输入框（装不下换行），回车始终发送；只挡输入法候选确认
+                          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                          event.preventDefault();
+                          void handleSend();
+                        }}
+                        enterKeyHint="send"
                         disabled={isThinking}
                       />
                       {isThinking
@@ -2396,7 +2402,12 @@ export function MascotFloat() {
                           placeholder={context.mode === "editing" ? `告诉${mascotDisplayName}你想改什么...` : `跟${mascotDisplayName}聊聊...`}
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                            event.preventDefault();
+                            void handleSend();
+                          }}
+                          enterKeyHint="send"
                           disabled={isThinking}
                         />
                         {isThinking

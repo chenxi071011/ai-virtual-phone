@@ -38,6 +38,7 @@ import {
   mdiHome,
   mdiHeartPulse,
   mdiHammerWrench,
+  mdiGlassCocktail,
   mdiStorefrontOutline,
 } from "@mdi/js";
 
@@ -65,6 +66,7 @@ const MDI_PATHS: Record<IconId, string> = {
   mapmode: mdiMapMarker,
   worldbuilder: mdiEarth,
   qa: mdiHammerWrench,
+  mixology: mdiGlassCocktail,
   vnplay: mdiPlayCircle,
   vnchapters: mdiBookmark,
   moments: mdiCamera,

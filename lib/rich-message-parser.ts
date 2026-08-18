@@ -643,8 +643,13 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         htmlBlockPlaceholders.push({ placeholder, original: match });
         return placeholder;
     });
-    // Protect <style>...</style> and following HTML until next double-newline + non-HTML
-    protected_ = protected_.replace(/<style[\s\S]*?<\/style>[\s\S]*?(?=\n\n[^<\x00]|$)/gi, (match) => {
+    // Protect <style>...</style> and following HTML until next double-newline + non-HTML,
+    // 或者撞上 [/状态栏]、[/内心] 的闭合标签。
+    // 闭合标签这一支不能省：AI 按契约在 [状态栏] 里直出 HTML 时，HTML 和闭合标签之间
+    // 通常只有单换行、没有空行可停，保护段就会一路吞到 $——把 [/状态栏] 连同它后面的
+    // 聊天正文一起卷进占位符。闭合标签在下面 extractBracketBlock 跑之前就没了，状态栏
+    // 提取不到，整块连标签带 HTML 全泄进气泡。（"要空一行才正常"就是撞的这里。）
+    protected_ = protected_.replace(/<style[\s\S]*?<\/style>[\s\S]*?(?=\n\n[^<\x00]|\s*\[\/(?:状态栏|内心)\]|$)/gi, (match) => {
         const placeholder = `\x00HTML_BLOCK_${htmlBlockPlaceholders.length}\x00`;
         htmlBlockPlaceholders.push({ placeholder, original: match });
         return placeholder;

@@ -310,7 +310,7 @@ await AiPhoneGame.setTitleBar({
 - 不支持隐藏返回按钮。
 - \`background\` 和 \`borderColor\` 是兼容旧标题栏写法的字段；新结构主要读取 \`buttonBackground\`、\`buttonColor\`、\`buttonBorderColor\`、\`buttonRadius\`、\`buttonShadow\` 和 \`iconOpacity\`。
 - 如果想要沉浸感，可以把 \`buttonBackground\`、\`buttonBorderColor\` 设为 \`transparent\`，或把 \`buttonColor\` 调成更贴合游戏背景的颜色。
-- 不要依赖宿主为游戏内容自动留出顶部布局高度；请在游戏主容器里使用 \`var(--ai-phone-game-safe-top, 88px)\` 预留顶部安全区。
+- 不要依赖宿主为游戏内容自动留出顶部布局高度；请在游戏主容器里使用 \`var(--ai-phone-game-safe-top, 88px)\` 预留顶部安全区。宿主会把实测数值注入这些变量并在显示模式变化时更新（派发 \`aiphone:safe-area-change\` 事件）；变量只用来给内容让位，背景层始终铺满全屏。不想整体让位的话，自己的顶栏可与宿主返回钮**同排**：定位在 \`var(--ai-phone-game-bar-top, 38px)\`、高度参考 \`var(--ai-phone-game-bar-height, 44px)\`、左侧留出 \`var(--ai-phone-game-bar-clear-left, 66px)\` 避开返回钮即可。
 - 不要依赖隐藏返回入口来做剧情锁定；退出路径必须始终存在。
 
 ### 关闭游戏

@@ -1410,7 +1410,10 @@
 .custom-app-runner-capsule {
   position: absolute;
   z-index: 5;
-  top: calc(var(--page-header-safe-top, 48px) + 8px);
+  /* 4px 而非 8px：注入给沙盒 APP 的 safe-top = 本胶囊下沿 + 间隙，这里每多 1px，
+     吃 safe-top 的存量 APP 顶部就整体下移 1px。--page-header-safe-top 本身已经
+     把胶囊推到系统状态栏/灵动岛之下，不需要再留一整段。 */
+  top: calc(var(--page-header-safe-top, 48px) + 4px);
   right: 12px;
   height: 30px;
   padding: 0 2px;

@@ -1058,6 +1058,31 @@
 
 @media (max-width: 500px) and (hover: none) and (pointer: coarse) {
 
+  /* 用户在设置里显式开启「显示系统状态栏」且运行时不在全屏时，控制器才会挂
+     data-pwa-display-mode 标记（见 pwa-manifest-injector）：此时所有 App 共用系统
+     安全区，不再重复预留 48px 虚拟状态栏。未开启开关的用户（含 iOS 装机用户，
+     iOS 永远报 standalone）不受影响，保持沉浸外观。 */
+  html[data-pwa-display-mode="standalone"] .phone-shell,
+  html[data-pwa-display-mode="minimal-ui"] .phone-shell,
+  html[data-pwa-display-mode="browser"] .phone-shell {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --phone-titlebar-safe-top: env(safe-area-inset-top, 0px);
+    --page-header-safe-top: env(safe-area-inset-top, 0px);
+    --home-grid-top-offset: calc(env(safe-area-inset-top, 0px) + 16px);
+  }
+
+  html[data-pwa-display-mode="standalone"] .phone-shell > .phone-status-bar,
+  html[data-pwa-display-mode="minimal-ui"] .phone-shell > .phone-status-bar,
+  html[data-pwa-display-mode="browser"] .phone-shell > .phone-status-bar {
+    display: none;
+  }
+
+  html[data-pwa-display-mode="standalone"] .phone-shell-wrap,
+  html[data-pwa-display-mode="minimal-ui"] .phone-shell-wrap,
+  html[data-pwa-display-mode="browser"] .phone-shell-wrap {
+    margin-top: 0;
+  }
+
   :root {
     --phone-screen-width: 100vw;
     --phone-screen-height: var(--vh-full);
@@ -1265,4 +1290,267 @@ html.cap-native .dock {
 
 .phone-shell[data-borders="on"] .icon-glyph-box {
   border: var(--desktop-outline-width, 1.5px) solid var(--desktop-outline-color, var(--user-border-color, #000)) !important;
+}
+
+/* ── 桌面文件夹 ──────────────────────────────────────── */
+/* tile 底板复用 .icon-glyph-box：扁平/毛玻璃、底色、阴影全部跟随
+   个性化装扮里的图标材质设定，文件夹永远和图标一个质感。 */
+
+/* 迷你格铺在玻璃打光层(z1)之上、描边(z3)之下；2×2 最多 4 个，够大够认 */
+.folder-mini-grid {
+  position: absolute;
+  inset: 15%;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 10%;
+  pointer-events: none;
+}
+
+.folder-mini {
+  position: relative;
+  border-radius: 26%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 46%, transparent);
+}
+
+/* 毛玻璃态：迷你格用与大图标同源的打光配方（斜向高光 + 底色透出 + 内描边）。
+   不用真 backdrop-filter——嵌在已有 backdrop-filter 的玻璃盒里采样不可靠，
+   而且每个文件夹 4 个迷你格的实时模糊太贵；身后本来就是 tile 模糊好的壁纸，
+   叠上高光就是"霜上加霜"的效果。 */
+.phone-shell[data-icon-effect="glass"] .folder-mini {
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.32),
+      color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 8%, transparent) 45%,
+      rgba(255, 255, 255, 0.10)),
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 38%, transparent),
+      color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 38%, transparent)),
+    rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 0.5px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -0.5px 0.5px rgba(255, 255, 255, 0.10);
+}
+
+.phone-shell[data-icon-effect="flat"] .folder-mini {
+  background: color-mix(in srgb, var(--c-desktop-icon, #2f343b) 12%, transparent);
+}
+
+.folder-mini-glyph {
+  width: 62%;
+  height: 62%;
+  color: var(--c-desktop-icon, #2f343b);
+}
+
+/* 拖拽悬停：即将合并成组的目标高亮（松手入组） */
+.icon-item.merge-target .icon-glyph-box {
+  transform: scale(1.16);
+  box-shadow:
+    0 0 0 2.5px color-mix(in srgb, var(--c-desktop-icon, #ffffff) 65%, transparent),
+    0 6px 22px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease;
+}
+.edit-mode .icon-item.merge-target {
+  animation: none; /* 高亮时停一下抖动，目标更醒目 */
+}
+
+/* ── 文件夹展开面板 ── */
+.folder-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 700; /* 盖过 dock(300)/page-controls(400)，低于 drag-ghost(9999) */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  background: rgba(15, 18, 26, 0.28);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  animation: folder-overlay-in 0.2s ease;
+}
+
+@keyframes folder-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.folder-name-input {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  text-align: center;
+  width: 70%;
+  color: var(--c-home-label, #ffffff);
+  font-size: calc(17px * var(--app-text-scale, 1));
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+  outline: none;
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+.folder-name-input:focus {
+  background: color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 26%, transparent);
+  text-shadow: none;
+}
+
+.folder-panel {
+  /* 四边等距的账（以图标"盒"边缘计，标签算在留白里，和 iOS 一致）：
+     侧距 = (212 - 2×58) / 3 = 32；上距 = padding-top 32；
+     下距 = 行内标签区 26 + padding-bottom 6 = 32。改尺寸要一起改。 */
+  width: min(212px, 78%);
+  border-radius: 30px;
+  padding: 0;
+  /* 扁平材质：图标底色罩在面板底色(--c-home-card，即扁平组件的卡面)上，
+     两个颜色都跟装扮面板走；默认图标底色近乎透明时就是一张干净的组件卡 */
+  background:
+    linear-gradient(0deg, var(--c-desktop-icon-box, transparent), var(--c-desktop-icon-box, transparent)),
+    var(--c-home-card, #ffffff);
+  animation: folder-panel-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 扁平面板是实底卡片，成员标题用组件卡的文字色（桌面标题色可能是白字） */
+.phone-shell[data-icon-effect="flat"] .folder-app .icon-label {
+  color: var(--c-home-text, #2f343b);
+}
+
+@keyframes folder-panel-in {
+  from { opacity: 0; transform: scale(0.72); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* 毛玻璃材质：配方与 icon-glyph-box 的 glass 效果同源（渐变打光 + 透出底色 + 高光描边） */
+.phone-shell[data-icon-effect="glass"] .folder-panel {
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.17),
+      color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 6%, transparent),
+      rgba(255, 255, 255, 0.07)),
+    color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 30%, transparent);
+  backdrop-filter: blur(26px) saturate(140%);
+  -webkit-backdrop-filter: blur(26px) saturate(140%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.28),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05),
+    0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.phone-shell[data-icon-effect="glass"] .folder-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.48),
+      rgba(255, 255, 255, 0.14) 40%,
+      rgba(255, 255, 255, 0.12) 62%,
+      rgba(255, 255, 255, 0.18));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.folder-pages {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.folder-pages::-webkit-scrollbar {
+  display: none;
+}
+
+.folder-page {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  display: grid;
+  /* 列宽定死为图标宽，space-evenly 让左边距=列间距=右边距，四向留白统一 */
+  grid-template-columns: repeat(2, 58px);
+  grid-template-rows: repeat(2, minmax(84px, auto));
+  justify-content: space-evenly;
+  row-gap: 4px;
+  padding: 32px 0 6px;
+  align-items: start;
+}
+
+.folder-app {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: pan-x;
+}
+.folder-app:active .icon-glyph-box {
+  transform: scale(0.92);
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* 面板里的图标盒尺寸固定，不吃桌面 --slot-size 收缩。
+   另外补一层"座位"底色：桌面上玻璃盒靠 backdrop 模糊壁纸显形、扁平盒
+   底色 token 默认近乎全透明，进了面板身后是均匀的面板底，两种材质都
+   会隐形成"光杆图标"。座位用文字色低透明度调出，深浅主题都有对比。 */
+.folder-app .icon-glyph-box {
+  width: 58px;
+  height: 58px;
+  background:
+    linear-gradient(0deg, var(--c-desktop-icon-box, transparent), var(--c-desktop-icon-box, transparent)),
+    color-mix(in srgb, var(--c-home-text, #2f343b) 10%, transparent);
+}
+.phone-shell[data-icon-effect="glass"] .folder-app .icon-glyph-box {
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.17),
+      color-mix(in srgb, var(--c-desktop-icon-bg, #c7b8ff) 6%, transparent),
+      rgba(255, 255, 255, 0.07)),
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 38%, transparent),
+      color-mix(in srgb, var(--c-desktop-icon-box, #ffffff) 38%, transparent)),
+    rgba(255, 255, 255, 0.28);
+}
+.folder-app .icon-label {
+  color: var(--c-home-label, #2f343b);
+}
+
+/* 圆点浮在下边距里，不撑高面板——有没有第二页四向留白都一致 */
+.folder-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.folder-dots .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c-home-label, #ffffff) 32%, transparent);
+}
+.folder-dots .dot.active {
+  background: color-mix(in srgb, var(--c-home-label, #ffffff) 85%, transparent);
 }

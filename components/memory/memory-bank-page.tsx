@@ -2,7 +2,7 @@
 
 import { Component, useState, useEffect, useCallback, type CSSProperties, type ReactNode } from "react";
 import { appNowISO, appNowMs } from "@/lib/app-clock";
-import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, type LucideIcon } from "lucide-react";
+import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, ChevronRight, Filter, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
 import { Toggle } from "@/components/ui/form";
@@ -46,7 +46,6 @@ const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
     longTermTokenBudget: 1000,
 };
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
-
 // 详情页时间线最多解析渲染的条数：全量历史可能有几万条，
 // 一次性解析+渲染会把 iOS Safari 的单页内存顶爆（灰屏杀页）
 const MEMORY_TIMELINE_ENTRY_CAP = 2000;
@@ -73,6 +72,25 @@ const SUMMARIZE_RANGE_OPTIONS: Array<{ value: SummarizeRange; label: string; des
     { value: 14, label: "最近 14 天" },
     { value: 30, label: "最近 30 天" },
     { value: "all", label: "全部历史" },
+];
+
+type MemorySourceKey = keyof NonNullable<MemoryConfig["shortTermAllowedSources"]>;
+
+/** 记忆来源开关：同时作用于短期上下文与长期总结 */
+const MEMORY_SOURCE_OPTIONS: Array<{ key: MemorySourceKey; label: string }> = [
+    { key: "chat", label: "私聊上下文" },
+    { key: "group_chat", label: "群聊上下文" },
+    { key: "moments", label: "朋友圈" },
+    { key: "checkphone", label: "查手机" },
+    { key: "diary", label: "手记便签" },
+    { key: "xiaohongshu", label: "小红书" },
+    { key: "interview_magazine", label: "在场访谈" },
+    { key: "cocreate", label: "共创" },
+    { key: "game", label: "内置小游戏" },
+    { key: "story", label: "剧情小剧场" },
+    { key: "vn", label: "漫卷" },
+    { key: "adventure", label: "地图冒险" },
+    { key: "custom_app", label: "自定义应用" },
 ];
 
 type MemoryEditorState = {
@@ -187,6 +205,10 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
     const [memoryEditor, setMemoryEditor] = useState<MemoryEditorState | null>(null);
     const [savingMemory, setSavingMemory] = useState(false);
     const [summarizeRangeOpen, setSummarizeRangeOpen] = useState(false);
+    const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+
+    const disabledSourceCount = MEMORY_SOURCE_OPTIONS
+        .filter(source => (config.shortTermAllowedSources ?? {})[source.key] === false).length;
 
     // Resolve selected character object from ID
     const selectedChar = selectedCharId
@@ -817,7 +839,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                 <MemorySettingsIcon icon={Zap} color={BINDING_ACCENTS.memory} />
                                 <div className="menu-label-group">
                                     <span className="menu-label">长期记忆手动总结</span>
-                                    <span className="menu-desc">将短期记忆整理为长期记忆</span>
+                                    <span className="menu-desc">将新产生的事件整理为长期记忆</span>
                                 </div>
                                 <div className="menu-right">
                                     <button
@@ -880,6 +902,61 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                     </>
                 )}
 
+                {/* Memory source filter — one entry row, full picker lives in a bottom sheet */}
+                <p className="menu-group-desc mx-2">记忆来源</p>
+                <div className="menu-group">
+                    <button type="button" className="menu-item" onClick={() => setSourcePickerOpen(true)}>
+                        <MemorySettingsIcon icon={Filter} color={BINDING_ACCENTS.memory} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">记忆来源</span>
+                            <span className="menu-desc">选择哪些内容参与记忆</span>
+                        </div>
+                        <div className="menu-right">
+                            <span className="menu-desc mr-1">{disabledSourceCount === 0 ? "全部开启" : `已关闭 ${disabledSourceCount} 项`}</span>
+                            <ChevronRight size={16} />
+                        </div>
+                    </button>
+                </div>
+
+                {sourcePickerOpen ? (
+                    <div className="modal-overlay modal-overlay-bottom" data-ui="modal" onClick={() => setSourcePickerOpen(false)}>
+                        <div className="modal-sheet memory-source-sheet" data-ui="modal-sheet" onClick={event => event.stopPropagation()}>
+                            <div className="modal-header" data-ui="modal-header">
+                                <span style={{ width: 28 }} />
+                                <h3 className="modal-title">记忆来源</h3>
+                                <button className="modal-header-btn modal-header-btn-muted" onClick={() => setSourcePickerOpen(false)}><X size={18} /></button>
+                            </div>
+                            <div className="modal-body modal-body-tight" data-ui="modal-body">
+                                <div className="memory-source-chips" style={{ "--chip-accent": BINDING_ACCENTS.memory } as CSSProperties}>
+                                    {MEMORY_SOURCE_OPTIONS.map(source => {
+                                        const allowed = config.shortTermAllowedSources ?? {};
+                                        const isChecked = allowed[source.key] !== false;
+                                        return (
+                                            <button
+                                                key={source.key}
+                                                type="button"
+                                                className="memory-source-chip"
+                                                data-off={isChecked ? undefined : ""}
+                                                aria-pressed={isChecked}
+                                                onClick={() => {
+                                                    const next = {
+                                                        ...config,
+                                                        shortTermAllowedSources: { ...allowed, [source.key]: !isChecked },
+                                                    };
+                                                    setConfig(next);
+                                                    saveMemoryConfig(next);
+                                                }}
+                                            >
+                                                {source.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+
                 {/* Feature toggles */}
                 <p className="menu-group-desc mx-2">自动化</p>
                 <div className="menu-group">
@@ -887,7 +964,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         <MemorySettingsIcon icon={Clock} color={BINDING_ACCENTS.memory} />
                         <div className="menu-label-group">
                             <span className="menu-label">长期记忆自动总结</span>
-                            <span className="menu-desc">每隔一定条数自动整理短期记忆为长期记忆</span>
+                            <span className="menu-desc">每隔一定条数自动将新事件整理为长期记忆</span>
                         </div>
                         <div className="menu-right">
                             <Toggle checked={config.autoSummarizeEnabled ?? true} onChange={(v) => {

@@ -37,6 +37,9 @@ export type OnlineRoomEvents = {
 type OnlineConfig = { supabaseUrl: string; anonKey: string };
 
 const HOST_LEAVE_GRACE_MS = 30_000;
+// 玩家瞬断宽限：iOS Safari 锁屏/切后台会挂起 WebSocket，presence 短暂消失后又回来。
+// 宽限期内不把"离开"上报给应用——否则应用会把重连的原局玩家当新人处理（狼人杀踢人事故）。
+const PEER_LEAVE_GRACE_MS = 20_000;
 const STATE_REBROADCAST_DEBOUNCE_MS = 600;
 const SEND_WINDOW_MS = 1000;
 const SEND_WINDOW_MAX = 25;
@@ -105,6 +108,11 @@ export class OnlineRoomConnection {
   private stateRebroadcastTimer: number | null = null;
   private sendTimestamps: number[] = [];
   private closed = false;
+  // 瞬断宽限：presence 里暂时消失的玩家 → 定时器；宽限内回来就取消，不惊动应用
+  private pendingLeaveTimers = new Map<string, number>();
+  private rawPresentIds = new Set<string>();
+  private selfPresencePayload: { userId: string; name: string; isHost: boolean; joinedAt: number } | null = null;
+  private visibilityHandler: (() => void) | null = null;
 
   private constructor(input: {
     info: OnlineRoomInfo;
@@ -173,12 +181,13 @@ export class OnlineRoomConnection {
         if (status === "SUBSCRIBED") {
           window.clearTimeout(timeout);
           try {
-            await channel.track({
+            connection.selfPresencePayload = {
               userId: account.id,
               name: account.displayName || account.username,
               isHost: info.isHost,
               joinedAt: Date.now(),
-            });
+            };
+            await channel.track(connection.selfPresencePayload);
             resolve();
           } catch (trackErr) {
             reject(trackErr instanceof Error ? trackErr : new Error(String(trackErr)));
@@ -222,29 +231,66 @@ export class OnlineRoomConnection {
   private wireChannel(): void {
     this.channel.on("presence", { event: "sync" }, () => {
       const state = this.channel.presenceState<{ userId: string; name: string; isHost: boolean; joinedAt: number }>();
-      this.playersMap.clear();
+      this.rawPresentIds = new Set<string>();
+      let changed = false;
+      let rejoined = false;
       for (const presences of Object.values(state)) {
         for (const presence of presences) {
           if (!presence.userId) continue;
+          this.rawPresentIds.add(presence.userId);
+          // 瞬断的玩家回来了：取消离开宽限，不惊动应用（但要给 TA 补发状态）
+          const pending = this.pendingLeaveTimers.get(presence.userId);
+          if (pending !== undefined) {
+            window.clearTimeout(pending);
+            this.pendingLeaveTimers.delete(presence.userId);
+            rejoined = true;
+          }
+          if (!this.playersMap.has(presence.userId)) changed = true;
           this.playersMap.set(presence.userId, {
             userId: presence.userId,
             name: presence.name || "玩家",
             isHost: presence.userId === this.info.hostUserId,
-            joinedAt: Number(presence.joinedAt) || Date.now(),
+            joinedAt: Number(presence.joinedAt) || this.playersMap.get(presence.userId)?.joinedAt || Date.now(),
           });
         }
+      }
+      // presence 里消失的玩家：进入宽限期（iOS 挂起重连的常态），到点仍未回来才真正移除
+      for (const userId of this.playersMap.keys()) {
+        if (this.rawPresentIds.has(userId) || this.pendingLeaveTimers.has(userId)) continue;
+        const timer = window.setTimeout(() => {
+          this.pendingLeaveTimers.delete(userId);
+          if (this.closed || this.rawPresentIds.has(userId)) return;
+          this.playersMap.delete(userId);
+          this.watchHostPresence();
+          this.events.onPlayers?.(this.players());
+        }, PEER_LEAVE_GRACE_MS);
+        this.pendingLeaveTimers.set(userId, timer);
       }
       if (!this.firstSyncDone) {
         this.firstSyncDone = true;
         this.firstSyncResolve?.();
       }
       this.watchHostPresence();
-      this.events.onPlayers?.(this.players());
-      // 房主：有人进来后补发一次权威状态（去抖，避免连环重发）
-      if (this.info.isHost && Object.keys(this.currentState).length > 0) {
+      if (changed) this.events.onPlayers?.(this.players());
+      // 房主：有人进来（或瞬断重连）后补发一次权威状态（去抖，避免连环重发）——
+      // 重连玩家靠这份快照找回挂起期间错过的状态
+      if (this.info.isHost && (changed || rejoined) && Object.keys(this.currentState).length > 0) {
         this.scheduleStateRebroadcast();
       }
     });
+
+    // iOS 锁屏/切后台会挂起 WebSocket；页面恢复可见时立即重连 + 重报 presence，
+    // 把"掉线窗口"压到最短（不然要等下一个心跳周期才发现连接死了）
+    if (typeof document !== "undefined") {
+      this.visibilityHandler = () => {
+        if (document.visibilityState !== "visible" || this.closed) return;
+        try {
+          this.client.connect();
+          if (this.selfPresencePayload) void this.channel.track(this.selfPresencePayload).catch(() => {});
+        } catch { /* 尽力而为 */ }
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+    }
 
     this.channel.on("broadcast", { event: "msg" }, ({ payload }) => {
       const record = payload as { from?: { userId?: string; name?: string }; payload?: unknown; sentAt?: number };
@@ -388,6 +434,12 @@ export class OnlineRoomConnection {
     this.closed = true;
     if (this.hostLeaveTimer !== null) window.clearTimeout(this.hostLeaveTimer);
     if (this.stateRebroadcastTimer !== null) window.clearTimeout(this.stateRebroadcastTimer);
+    for (const timer of this.pendingLeaveTimers.values()) window.clearTimeout(timer);
+    this.pendingLeaveTimers.clear();
+    if (this.visibilityHandler && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     try { void this.channel.unsubscribe(); } catch { /* noop */ }
     try { this.client.disconnect(); } catch { /* noop */ }
   }

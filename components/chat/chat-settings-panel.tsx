@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
     CHAT_INITIAL_VISIBLE_MESSAGE_COUNT,
     CHAT_LOAD_MORE_MESSAGE_COUNT,
@@ -35,14 +35,142 @@ import {
 import { clearChatOfflineTurns } from "@/lib/chat-offline-storage";
 import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
-import { resolveUserIdentity } from "@/lib/settings-storage";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Trash2, Smile, Sparkles, type LucideIcon } from "lucide-react";
+import { isAgentComputerConfigured } from "@/lib/agent-computer";
+import { CharacterComputerPage } from "./character-computer-page";
+import { resolveUserIdentity, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
+import { getStatusRegionConfig, saveStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
+import { downloadFile } from "@/lib/download-utils";
+import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
+import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
+import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
+import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import { Toggle, Input } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
+
+// 自定义状态栏预填模板：微博主页（契约=「状态栏」章节整段正文，含【逻辑】【格式】与包裹要求）
+// 预览用的默认示例数据：契约没有自带示例时兜底，字段与下面的微博模板对应
+const STATUS_REGION_STARTER_PREVIEW = "名字=林晚\n认证=美食探店博主 · 深夜觅食团成员\n简介=白天写方案，晚上寻宵夜｜私信不回工作请走邮箱\n关注=132\n粉丝=8.7万\n帖子=23分钟前|谁懂啊，加班到十点，楼下面馆居然还给我留了最后一碗牛肉面🥹 #深夜食堂# 老板说看我常来……突然就不想跳槽了|🍜🌃✨|56|203|1.2万\n评论=小奶糖|这就是深夜的意义吧|赞 231\n评论=风住了|老板收留我当洗碗工吧，只求管饭|赞 89\n评论=momo不吃香菜|蹲一个面馆定位！|赞 156";
+
+const STATUS_REGION_STARTER_CONTRACT = [
+    "【逻辑】你在维护自己的微博主页。每行一个字段，用=分隔，除格式列出的字段外不要输出其他内容；帖子与评论要符合当前剧情与你的心境，网友评论可玩梗。按生成的内容整块用 [状态栏]...[/状态栏] 包裹输出。",
+    "【格式】",
+    "[状态栏]",
+    "名字=<微博昵称>",
+    "认证=<一句认证/身份标签>",
+    "简介=<一句个性签名，随剧情心境更新>",
+    "关注=<数字>",
+    "粉丝=<数字，可带万>",
+    "帖子=<时间，如 5分钟前>|<微博正文，可带 #话题#>|<0~4个emoji当配图，没有留空>|<转发数>|<评论数>|<点赞数>",
+    "评论=<网友昵称>|<评论内容>|<点赞数>",
+    "评论=<网友昵称>|<评论内容>|<点赞数>",
+    "评论=<网友昵称>|<评论内容>|<点赞数>",
+    "[/状态栏]",
+].join("\n");
+
+const STATUS_REGION_STARTER_RENDER = `<style>
+  :root{--bg:#fff;--text:#333;--sub:#93999f;--accent:#ff8200;--soft:#f6f7f9;--line:#f0f1f3}
+  @media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--text:#e8e8ea;--sub:#8e8e93;--soft:#2a2a2c;--line:#333}}
+  body{margin:0;font:12.5px/1.6 -apple-system,system-ui,sans-serif;color:var(--text);background:transparent}
+  .wb{background:var(--bg);border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+  .cover{height:44px;background:linear-gradient(120deg,#ffb46b,#ff7d52 55%,#f65e7c)}
+  .head{padding:0 14px 10px}
+  .ava{width:52px;height:52px;border-radius:50%;margin-top:-24px;border:3px solid var(--bg);
+       display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff}
+  .nrow{display:flex;align-items:center;gap:5px;margin-top:6px}
+  .name{font-size:15px;font-weight:700}
+  .vip{width:15px;height:15px;border-radius:50%;background:#ffa100;color:#fff;font-size:10px;font-weight:800;
+       display:inline-flex;align-items:center;justify-content:center}
+  .verify{color:var(--accent);font-size:11px;margin-top:2px}
+  .bio{color:var(--sub);font-size:11.5px;margin-top:3px}
+  .stats{display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--sub)}
+  .stats b{color:var(--text);font-size:12.5px;margin-right:3px}
+  .post{margin:0 10px;padding:10px 4px 8px;border-top:1px solid var(--line)}
+  .ptime{font-size:10.5px;color:var(--sub)}
+  .ptxt{margin-top:4px;white-space:pre-wrap;word-break:break-word}
+  .topic{color:#ff8200}
+  .pics{display:flex;gap:5px;margin-top:8px}
+  .pic{flex:0 0 30%;aspect-ratio:1;border-radius:8px;background:var(--soft);
+       display:flex;align-items:center;justify-content:center;font-size:30px}
+  .bar{display:flex;margin-top:8px;color:var(--sub);font-size:11px}
+  .bar span{flex:1;text-align:center}
+  .cmts{margin:0 10px 10px;background:var(--soft);border-radius:10px;padding:8px 10px}
+  .cmt{display:flex;gap:7px;padding:5px 0}
+  .cmt+.cmt{border-top:1px solid var(--line)}
+  .cava{width:22px;height:22px;border-radius:50%;flex:none;
+        display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .cbody{flex:1;min-width:0}
+  .cname{color:#eb7340;font-size:11px}
+  .ctxt{font-size:11.5px;word-break:break-word}
+  .clike{font-size:10px;color:var(--sub);flex:none;padding-top:2px}
+</style>
+<div id="app"></div>
+<script>
+(function(){
+  var G=[["#f89b6c","#f65e7c"],["#6cb6f8","#5e7cf6"],["#8ce08a","#3cb98f"],["#c99bf5","#8a6cf6"],["#f8d06c","#f6975e"]];
+  function grad(s){var n=0;for(var i=0;i<s.length;i++)n+=s.charCodeAt(i);var g=G[n%G.length];
+    return "linear-gradient(135deg,"+g[0]+","+g[1]+")";}
+  function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;
+    if(txt!=null)e.textContent=txt;return e;}
+  var d={},cmts=[];
+  (window.STATUS_RAW||"").split(/\\r?\\n/).forEach(function(line){
+    var i=line.indexOf("=");if(i<1)return;
+    var k=line.slice(0,i).trim(),v=line.slice(i+1).trim();
+    if(k==="评论")cmts.push(v);else d[k]=v;
+  });
+  var name=d["名字"]||"微博用户";
+  var app=document.getElementById("app"),wb=el("div","wb");
+  wb.appendChild(el("div","cover"));
+  var head=el("div","head");
+  var ava=el("div","ava",name.slice(0,1));ava.style.background=grad(name);head.appendChild(ava);
+  var nrow=el("div","nrow");nrow.appendChild(el("span","name",name));
+  nrow.appendChild(el("span","vip","V"));head.appendChild(nrow);
+  if(d["认证"])head.appendChild(el("div","verify","\\u5fae\\u535a\\u8ba4\\u8bc1\\uff1a"+d["认证"]));
+  if(d["简介"])head.appendChild(el("div","bio",d["简介"]));
+  var st=el("div","stats"),s1=el("span"),s2=el("span");
+  s1.appendChild(el("b",null,d["关注"]||"0"));s1.appendChild(document.createTextNode("关注"));
+  s2.appendChild(el("b",null,d["粉丝"]||"0"));s2.appendChild(document.createTextNode("粉丝"));
+  st.appendChild(s1);st.appendChild(s2);head.appendChild(st);wb.appendChild(head);
+  if(d["帖子"]){
+    var f=d["帖子"].split("|"),post=el("div","post");
+    post.appendChild(el("div","ptime",(f[0]||"刚刚")+" \\u00b7 来自微博手机版"));
+    var ptxt=el("div","ptxt");
+    (f[1]||"").split(/(#[^#]{1,20}#)/).forEach(function(seg){
+      if(!seg)return;
+      ptxt.appendChild(seg.charAt(0)==="#"&&seg.charAt(seg.length-1)==="#"?el("span","topic",seg):document.createTextNode(seg));
+    });
+    post.appendChild(ptxt);
+    var emo=Array.from(f[2]||"").filter(function(c){return c.trim()&&!/[\\ufe0f\\u200d]/.test(c)});
+    if(emo.length){var pics=el("div","pics");
+      emo.slice(0,3).forEach(function(c){pics.appendChild(el("div","pic",c));});
+      post.appendChild(pics);}
+    var bar=el("div","bar");
+    bar.appendChild(el("span",null,"\\u21bb "+(f[3]||"0")));
+    bar.appendChild(el("span",null,"\\ud83d\\udcac "+(f[4]||"0")));
+    bar.appendChild(el("span",null,"\\u2661 "+(f[5]||"0")));
+    post.appendChild(bar);wb.appendChild(post);
+  }
+  if(cmts.length){
+    var box=el("div","cmts");
+    cmts.forEach(function(line){
+      var p=line.split("|"),c=el("div","cmt");
+      var ca=el("div","cava",(p[0]||"?").slice(0,1));ca.style.background=grad(p[0]||"?");
+      var body=el("div","cbody");
+      body.appendChild(el("div","cname",p[0]||"网友"));
+      body.appendChild(el("div","ctxt",p[1]||""));
+      c.appendChild(ca);c.appendChild(body);
+      c.appendChild(el("div","clike","\\u2661 "+String(p[2]||"").replace(/[^0-9.\\u4e07\\u4ebf]/g,"")));
+      box.appendChild(c);
+    });
+    wb.appendChild(box);
+  }
+  app.appendChild(wb);
+})();
+</` + `script>`;
+
 import {
     DEFAULT_CHAT_BILINGUAL_PROMPT,
     DEFAULT_GROUP_CHAT_BILINGUAL_PROMPT,
@@ -167,6 +295,96 @@ export function ChatSettingsPanel({
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
+    // 自定义状态栏（状态区）
+    const [statusRegion, setStatusRegion] = useState<StatusRegionConfig>(() => getStatusRegionConfig(session.id));
+    const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
+    const [draftContract, setDraftContract] = useState("");
+    const [draftRender, setDraftRender] = useState("");
+    const [statusPreviewRaw, setStatusPreviewRaw] = useState(STATUS_REGION_STARTER_PREVIEW);
+    const [previewHtml, setPreviewHtml] = useState("");
+    const statusImportInputRef = useRef<HTMLInputElement | null>(null);
+    // 状态栏方案库：复用 CSS 方案存储，负载为 JSON（契约+渲染+示例数据），全局跨会话
+    const STATUS_SCHEME_TARGET = STATUS_REGION_SCHEME_TARGET;
+    const [showStatusSchemes, setShowStatusSchemes] = useState(false);
+    const [statusSchemes, setStatusSchemes] = useState<CSSScheme[]>([]);
+    const [statusSchemeName, setStatusSchemeName] = useState("");
+    const [statusSchemeDeleteId, setStatusSchemeDeleteId] = useState<string | null>(null);
+    const applyStatusScheme = (scheme: CSSScheme) => {
+        try {
+            const parsed = JSON.parse(scheme.css) as Record<string, unknown>;
+            const contract = typeof parsed.contract === "string" ? parsed.contract : "";
+            const renderHtml = typeof parsed.renderHtml === "string" ? parsed.renderHtml : "";
+            if (!contract && !renderHtml) throw new Error("empty");
+            setDraftContract(contract);
+            setDraftRender(renderHtml);
+            if (typeof parsed.previewRaw === "string" && parsed.previewRaw) setStatusPreviewRaw(parsed.previewRaw);
+            setPreviewHtml(renderHtml);
+        } catch {
+            alert("方案数据损坏，无法应用");
+        }
+    };
+    const exportStatusRegion = () => {
+        const payload = { type: "ai-phone-status-region", version: 1, contract: draftContract, renderHtml: draftRender, previewRaw: statusPreviewRaw };
+        void downloadFile(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), "自定义状态栏.json");
+    };
+    const importStatusRegion = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const parsed = JSON.parse(String(reader.result || "")) as Record<string, unknown>;
+                const contract = typeof parsed.contract === "string" ? parsed.contract : "";
+                const renderHtml = typeof parsed.renderHtml === "string" ? parsed.renderHtml : "";
+                if (!contract && !renderHtml) throw new Error("empty");
+                setDraftContract(contract);
+                setDraftRender(renderHtml);
+                if (typeof parsed.previewRaw === "string" && parsed.previewRaw) setStatusPreviewRaw(parsed.previewRaw);
+                setPreviewHtml(renderHtml);
+            } catch {
+                alert("导入失败：不是有效的状态栏配置文件");
+            }
+        };
+        reader.readAsText(file);
+    };
+    const statusPresetSupported = useMemo(() => {
+        if (session.isGroup) return false;
+        try {
+            const slot = resolveBinding(loadBindingConfig(), session.contactId, "chat");
+            const presets = loadPresets();
+            const preset = (slot.presetId ? presets.find(item => item.id === slot.presetId) : null) ?? presets.find(item => item.builtIn) ?? null;
+            return !!preset && presetSupportsStatusRegion(preset.prompts.map(item => item.content));
+        } catch { return false; }
+    }, [session.isGroup, session.contactId]);
+    const saveStatusRegion = (next: StatusRegionConfig) => {
+        setStatusRegion(next);
+        saveStatusRegionConfig(session.id, next);
+    };
+    // 小卷的状态栏工具写入后广播，这里同步刷新——否则本页状态只在挂载时初始化一次，
+    // 面板开着的时候被写入就会停在旧值，表现为「后台写了、前台看不到」。
+    // 弹窗正开着时连草稿一起换掉，用户看到的就是小卷刚写的那份，可继续手改。
+    useEffect(() => {
+        const onExternalWrite = (event: Event) => {
+            const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+            if (detail?.sessionId && detail.sessionId !== session.id) return;
+            const next = getStatusRegionConfig(session.id);
+            setStatusRegion(next);
+            if (showStatusRegionDialog) {
+                setDraftContract(next.contract || STATUS_REGION_STARTER_CONTRACT);
+                setDraftRender(next.renderHtml || STATUS_REGION_STARTER_RENDER);
+                setStatusPreviewRaw(next.previewRaw || STATUS_REGION_STARTER_PREVIEW);
+                setPreviewHtml("");
+            }
+        };
+        window.addEventListener(STATUS_REGION_UPDATED_EVENT, onExternalWrite);
+        return () => window.removeEventListener(STATUS_REGION_UPDATED_EVENT, onExternalWrite);
+    }, [session.id, showStatusRegionDialog]);
+    const openStatusRegionDialog = () => {
+        setDraftContract(statusRegion.contract || STATUS_REGION_STARTER_CONTRACT);
+        setDraftRender(statusRegion.renderHtml || STATUS_REGION_STARTER_RENDER);
+        // 示例数据跟着契约走：小卷写入时会一并给出，否则内置样例的字段对不上新契约
+        setStatusPreviewRaw(statusRegion.previewRaw || STATUS_REGION_STARTER_PREVIEW);
+        setPreviewHtml("");
+        setShowStatusRegionDialog(true);
+    };
     const [visionImagePromptLimit, setVisionImagePromptLimit] = useState(() => normalizeVisionImagePromptLimit(session.visionImagePromptLimit));
     const [bilingualTranslationEnabled, setBilingualTranslationEnabled] = useState(session.bilingualTranslationEnabled !== false);
     const [collapseBilingualTranslation, setCollapseBilingualTranslation] = useState(session.collapseBilingualTranslation !== false);
@@ -193,6 +411,8 @@ export function ChatSettingsPanel({
     const [editingCSS, setEditingCSS] = useState(false);
     const [showScreenEffects, setShowScreenEffects] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
+    // TA 的电脑：翻看角色云端电脑（连接了角色电脑才显示入口）
+    const [showComputer, setShowComputer] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
     const [searchHistoryMessages, setSearchHistoryMessages] = useState<ChatMessage[]>([]);
@@ -608,6 +828,16 @@ export function ChatSettingsPanel({
                         <div className="menu-label-group"><span className="menu-label">查找聊天记录</span></div>
                         <div className="menu-right"><ChevronRight size={16} /></div>
                     </button>
+                    {!session.isGroup && isAgentComputerConfigured() && (
+                        <button className="menu-item" onClick={() => setShowComputer(true)}>
+                            <ChatInfoIcon icon={Laptop} color={BINDING_ACCENTS.memory} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">TA 的电脑</span>
+                                <span className="menu-desc">看看 TA 在自己电脑上存了什么</span>
+                            </div>
+                            <div className="menu-right"><ChevronRight size={16} /></div>
+                        </button>
+                    )}
                 </div>
 
                 {/* Group member management */}
@@ -682,6 +912,60 @@ export function ChatSettingsPanel({
                                     <span className="menu-desc">上帝操作：无视群规则直接拿回群主</span>
                                 </div>
                             </button>
+                        )}
+                    </div>
+                )}
+
+                {/* 状态栏（状态区）：原生开关 + 自定义契约/渲染。
+                    群聊同样支持：群回复按 [角色名]: 切段后每段各自解析，
+                    一份契约 + 一份渲染，群里每个角色各出一条状态栏。 */}
+                {(
+                    <div className="menu-group">
+                        <div className="menu-item">
+                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">原生状态栏</span>
+                                <span className="menu-desc">{statusPresetSupported ? "状态值与内心的默认输出（关闭后整块从提示词移除）" : "当前预设未声明状态区宏，仅默认预设支持"}</span>
+                            </div>
+                            <div className="menu-right">
+                                <Toggle
+                                    checked={statusRegion.mode === "native"}
+                                    disabled={!statusPresetSupported}
+                                    onChange={c => {
+                                        if (!statusPresetSupported) return;
+                                        saveStatusRegion({
+                                            ...statusRegion,
+                                            mode: c ? "native" : (statusRegion.contract.trim() && statusRegion.renderHtml.trim() ? "custom" : "off"),
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        {statusPresetSupported && statusRegion.mode !== "native" && (
+                            <div className="menu-item cursor-pointer" onClick={openStatusRegionDialog}>
+                                <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                                <div className="menu-label-group">
+                                    <span className="menu-label">自定义状态栏</span>
+                                    <span className="menu-desc">{isCustomStatusRegionActive(statusRegion)
+                                        ? "已启用——点此编辑契约与渲染"
+                                        : statusRegion.contract.trim() && statusRegion.renderHtml.trim()
+                                            ? "已停用——配置保留，拨开关重新启用"
+                                            : "未配置——点此填写契约与渲染"}</span>
+                                </div>
+                                <div className="menu-right" onClick={e => e.stopPropagation()}>
+                                    <Toggle
+                                        checked={isCustomStatusRegionActive(statusRegion)}
+                                        onChange={c => {
+                                            if (!c) { saveStatusRegion({ ...statusRegion, mode: "off" }); return; }
+                                            if (statusRegion.contract.trim() && statusRegion.renderHtml.trim()) {
+                                                saveStatusRegion({ ...statusRegion, mode: "custom" });
+                                            } else {
+                                                openStatusRegionDialog(); // 还没配置：先进弹窗填，保存即启用
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
                         )}
                     </div>
                 )}
@@ -876,6 +1160,7 @@ export function ChatSettingsPanel({
 
                 {/* Advanced */}
                 <div className="menu-group">
+                    <KeyboardAutoSendDebounceItem sessionId={session.id} />
                     <button className="menu-item" onClick={() => setEditingCSS(true)}>
                         <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.embedding} />
                         <div className="menu-label-group"><span className="menu-label">自定义 CSS 样式</span></div>
@@ -1196,6 +1481,15 @@ export function ChatSettingsPanel({
                 </div>
             )}
 
+            {/* Sub-page: TA 的电脑 */}
+            {showComputer && (
+                <CharacterComputerPage
+                    characterId={session.contactId}
+                    characterName={characterName}
+                    onClose={() => setShowComputer(false)}
+                />
+            )}
+
             {/* Sub-page: Search History */}
             {showSearch && (
                 <div style={{ position: "absolute", inset: 0, zIndex: 9999, background: "#ffffff" }}>
@@ -1261,6 +1555,118 @@ export function ChatSettingsPanel({
                         </div>
                     </PageShell>
                 </div>
+                </div>
+            )}
+            {showStatusRegionDialog && (
+                <div className="fixed inset-0 z-[10030] flex items-end justify-center bg-black/45 sm:items-center" role="dialog" aria-modal="true" aria-label="自定义状态栏">
+                    <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-[var(--c-page-body-bg)] text-[var(--c-text)] shadow-2xl sm:rounded-2xl">
+                        <div className="flex items-center justify-between px-5 pb-2 pt-4">
+                            <div className="font-bold text-[var(--c-text-title)]">自定义状态栏</div>
+                            <div className="flex items-center gap-1.5">
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="状态栏方案" onClick={() => { setStatusSchemes(getSchemes(STATUS_SCHEME_TARGET)); setStatusSchemeDeleteId(null); setShowStatusSchemes(v => !v); }}><FolderOpen size={16} /></button>
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="导入状态栏" onClick={() => statusImportInputRef.current?.click()}><Upload size={16} /></button>
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="导出状态栏" onClick={exportStatusRegion}><Download size={16} /></button>
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="关闭" onClick={() => setShowStatusRegionDialog(false)}><X size={18} /></button>
+                            </div>
+                            <input ref={statusImportInputRef} type="file" accept="application/json,.json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importStatusRegion(f); e.target.value = ""; }} />
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-4 pb-4">
+                            {showStatusSchemes && (
+                                <div className="mb-3 rounded-xl p-3" style={{ background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}>
+                                    <div className="ts-12 font-semibold text-[var(--c-text-title)]">方案</div>
+                                    {statusSchemes.length === 0 && <div className="mt-1 ts-11 opacity-45">还没有保存的方案</div>}
+                                    {statusSchemes.map(scheme => (
+                                        <div key={scheme.id} className="mt-1.5 flex items-center gap-2">
+                                            <button type="button" className="flex-1 truncate text-left ts-12" onClick={() => { applyStatusScheme(scheme); setShowStatusSchemes(false); }}>{scheme.name}</button>
+                                            {statusSchemeDeleteId === scheme.id ? (
+                                                <button type="button" className="ts-11 text-[var(--c-danger)]" onClick={() => { deleteScheme(scheme.id); setStatusSchemes(getSchemes(STATUS_SCHEME_TARGET)); setStatusSchemeDeleteId(null); }}>确认删除</button>
+                                            ) : (
+                                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label={`删除方案 ${scheme.name}`} onClick={() => setStatusSchemeDeleteId(scheme.id)}><Trash2 size={13} /></button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <input
+                                            value={statusSchemeName}
+                                            onChange={e => setStatusSchemeName(e.target.value)}
+                                            placeholder="方案名称"
+                                            className="ui-input flex-1"
+                                            style={{ padding: "6px 10px", fontSize: 12, border: "none", borderRadius: 10, background: "var(--c-input)" }}
+                                        />
+                                        <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="保存当前为方案" onClick={() => {
+                                            const name = statusSchemeName.trim();
+                                            if (!name || !draftContract.trim() || !draftRender.trim()) return;
+                                            saveScheme(STATUS_SCHEME_TARGET, name, JSON.stringify({ contract: draftContract, renderHtml: draftRender, previewRaw: statusPreviewRaw }));
+                                            setStatusSchemes(getSchemes(STATUS_SCHEME_TARGET));
+                                            setStatusSchemeName("");
+                                        }}><Save size={15} /></button>
+                                    </div>
+                                </div>
+                            )}
+                            <div className="flex items-baseline justify-between px-1">
+                                <span className="ts-12 font-semibold text-[var(--c-text-title)]">输出契约</span>
+                                <span className="ts-10 opacity-40">整节写进提示词</span>
+                            </div>
+                            <textarea
+                                value={draftContract}
+                                onChange={e => setDraftContract(e.target.value)}
+                                className="ui-input mt-1 w-full font-mono"
+                                style={{ minHeight: 110, fontSize: 12, lineHeight: 1.6, border: "none", borderRadius: 12, background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}
+                                spellCheck={false}
+                            />
+                            <div className="mt-3 flex items-baseline justify-between px-1">
+                                <span className="ts-12 font-semibold text-[var(--c-text-title)]">输出渲染</span>
+                                <span className="ts-10 opacity-40">HTML · 沙盒运行</span>
+                            </div>
+                            <textarea
+                                value={draftRender}
+                                onChange={e => setDraftRender(e.target.value)}
+                                className="ui-input mt-1 w-full font-mono"
+                                style={{ minHeight: 180, fontSize: 12, lineHeight: 1.6, border: "none", borderRadius: 12, background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}
+                                spellCheck={false}
+                            />
+                            <div className="mt-3 flex items-center justify-between px-1">
+                                <div className="flex items-baseline gap-2">
+                                    <span className="ts-12 font-semibold text-[var(--c-text-title)]">预览</span>
+                                    <span className="ts-10 opacity-40">示例数据可改</span>
+                                </div>
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="运行预览" onClick={() => setPreviewHtml(draftRender)}><Play size={15} /></button>
+                            </div>
+                            <textarea
+                                value={statusPreviewRaw}
+                                onChange={e => setStatusPreviewRaw(e.target.value)}
+                                className="ui-input mt-1 w-full font-mono"
+                                style={{ minHeight: 56, fontSize: 11, lineHeight: 1.5, border: "none", borderRadius: 12, background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}
+                                spellCheck={false}
+                            />
+                            {previewHtml.trim() && (
+                                <div className="mt-2 rounded-xl p-2" style={{ background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}>
+                                    <CustomStatusFrame key={previewHtml + statusPreviewRaw} html={previewHtml} raw={statusPreviewRaw} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-2 px-5 pb-4 pt-1">
+                            <button
+                                type="button"
+                                className="ui-btn flex-1"
+                                onClick={() => setShowStatusRegionDialog(false)}
+                            >
+                                取消
+                            </button>
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-primary flex-1"
+                                onClick={() => {
+                                    const contract = draftContract.trim();
+                                    const renderHtml = draftRender.trim();
+                                    saveStatusRegion({ mode: contract && renderHtml ? "custom" : "off", contract, renderHtml, previewRaw: statusPreviewRaw });
+                                    setShowStatusRegionDialog(false);
+                                }}
+                            >
+                                保存并启用
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </PageShell>

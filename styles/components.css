@@ -2385,6 +2385,40 @@
   right: 24px;
 }
 
+/* ── 记忆来源选择弹层：等宽胶囊，每行三个 ── */
+.memory-source-sheet .modal-header {
+  border-bottom: none;
+}
+
+.memory-source-chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.memory-source-chip {
+  padding: 11px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-accent) 13%, var(--c-panel));
+  color: var(--chip-accent);
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.memory-source-chip[data-off] {
+  background: var(--c-page-body-bg);
+  color: var(--c-icon);
+  font-weight: 400;
+}
+
 .data-management-menu .menu-label-group > .menu-label {
   font-weight: 600;
 }

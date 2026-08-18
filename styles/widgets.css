@@ -1399,6 +1399,10 @@
 
 .theme-section-page {
   flex: 1 1 auto;
+  /* iOS WebKit 在嵌套 flex 列里不给带 overflow 的子项隐式 min-height:0，
+     容器被内容撑到超出视口、自身滚动永远不触发——表现为下面有内容却拖不动。
+     记忆库（memory-detail-scroll）、查手机（cp-browser-*）、音乐三处都是这么修的。 */
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
   padding: 12px 16px 24px;
@@ -1408,6 +1412,31 @@
 
 .theme-section-page::-webkit-scrollbar {
   display: none;
+}
+
+/* 底部预留：iOS 不把滚动容器自身的 padding-bottom 计入可滚动区域，超出量少时
+   末尾整段被安全区吞掉。改用 memory-detail-scroll::after 同款尾部占位块。
+   只给内容会超过一屏的子页开（data 属性 opt-in）——本类还被小卷/聊天设置里的
+   CSS、人格编辑页复用，那些是 flex-1 textarea 撑满、不靠滚动，无条件加占位块
+   会平白压掉一截输入框，也会和自带 padding 叠成双份（见音乐页那次善后）。 */
+.theme-section-page[data-bottom-reserve] {
+  padding-bottom: 0;
+}
+
+.theme-section-page[data-bottom-reserve]::after {
+  content: "";
+  flex: 0 0 calc(28px + env(safe-area-inset-bottom, 0px));
+  width: 1px;
+  min-height: 0;
+  pointer-events: none;
+}
+
+/* 内容超出一屏时，flex 会先把子项压扁再让容器滚动。带 overflow:hidden 或
+   aspect-ratio 的块（DOCK 预览槽正是）自动最小高度算作 0，会被一路压成
+   一条线——看着就是「上传槽位不见了」。长内容子页里的东西一律不参与压缩，
+   超出多少就滚多少。同 e33adb6 给设置子页包裹层加 shrink-0 的思路。 */
+.theme-section-page[data-bottom-reserve] > * {
+  flex-shrink: 0;
 }
 
 .wp-sliders {

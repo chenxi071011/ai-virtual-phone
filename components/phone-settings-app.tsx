@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, createContext, type CSSProperties, type ReactNode } from "react";
 import { appNow, loadAppClockConfig, offsetFromTargetTime, saveAppClockConfig } from "@/lib/app-clock";
-import { Activity, CalendarClock, Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Layers, Link2, Loader2, LogOut, MessageSquare, Mic, SlidersHorizontal, UserCircle, Wrench, X } from "lucide-react";
+import { Activity, CalendarClock, Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Laptop, Layers, Link2, Loader2, LogOut, MessageSquare, Mic, SlidersHorizontal, UserCircle, Wrench, X } from "lucide-react";
 import { ConfirmDialog } from "./ui/modal";
 import { useAccount } from "@/lib/account-context";
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
 import { changeAccountPassword } from "@/lib/account-client";
 import { ApiSettings } from "./settings/api-settings";
 import { VoiceSettings } from "./settings/voice-settings";
@@ -19,8 +20,8 @@ import { BindingManager } from "./settings/binding-manager";
 import { WeixinSettings } from "./settings/weixin-settings";
 import { ToolboxSettings } from "./settings/toolbox-settings";
 import { ModerationCenter } from "./settings/moderation-center";
+import { AgentComputerSettings } from "./settings/agent-computer-settings";
 import { fetchIsAdmin } from "@/lib/moderation-client";
-import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
 import { PageShell } from "./ui/page-shell";
 import { CardGrid, FeaturedCard, type CardItem, type FeaturedCardItem } from "./ui/card-grid";
 import { Toggle } from "./ui/form";
@@ -52,6 +53,7 @@ type SubPage =
     | "identity"
     | "weixin"
     | "toolbox"
+    | "agentComputer"
     | "moderation"
     | "about";
 
@@ -66,6 +68,7 @@ const SETTINGS_MENU = [
     { id: "binding", icon: Link2, label: "配置绑定", desc: "管理全局默认、角色与应用的配置绑定关系", iconColor: BINDING_ACCENTS.identity },
     { id: "weixin", icon: MessageSquare, label: "微信接入", desc: "iLink Bot", iconColor: CONTENT_APP_ACCENTS.chat },
     { id: "toolbox", icon: Wrench, label: "聊天工具箱", desc: "外部工具调用", iconColor: BINDING_ACCENTS.voice },
+    { id: "agentComputer", icon: Laptop, label: "角色电脑", desc: "云端小电脑（自部署）", iconColor: BINDING_ACCENTS.memory },
     { id: "identity", icon: UserCircle, label: "用户身份", desc: "个人信息", iconColor: BINDING_ACCENTS.identity },
     { id: "about", icon: Info, label: "关于与声明", desc: "版本与协议", iconColor: BINDING_ACCENTS.memory },
 ] as const;
@@ -142,6 +145,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
     const [customTimePicker, setCustomTimePicker] = useState("");
     // 秒针：让设置页上的预览真的在走，用户一眼能看出「时间还在流逝」
     const [clockTick, setClockTick] = useState(0);
+    // 角色电脑：施工中弹窗（返回 / 仍要看看）
     const pageBodyRef = useRef<HTMLDivElement | null>(null);
 
     // ── 账号：显示当前登录 / 修改密码 / 退出登录 ──
@@ -240,7 +244,10 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         label: item.label,
         desc: item.desc,
         iconColor: item.iconColor,
-        onClick: () => setCurrentPage(item.id as SubPage),
+        onClick: () => {
+            // 施工中：角色电脑先弹提示，可选择仍要看看
+            setCurrentPage(item.id as SubPage);
+        },
     });
 
     const handleTimeAwareChange = useCallback((next: boolean) => {
@@ -306,6 +313,16 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         onClick: () => setCurrentPage("imageGeneration"),
     };
 
+    const agentComputerItem = SETTINGS_MENU.find(i => i.id === "agentComputer")!;
+    const agentComputerFeaturedItem: FeaturedCardItem = {
+        id: agentComputerItem.id,
+        icon: agentComputerItem.icon,
+        label: agentComputerItem.label,
+        desc: agentComputerItem.desc,
+        iconColor: agentComputerItem.iconColor,
+        onClick: () => setCurrentPage("agentComputer"),
+    };
+
     const bindingItem = SETTINGS_MENU.find(i => i.id === "binding")!;
     const bindingFeaturedItem: FeaturedCardItem = {
         id: bindingItem.id,
@@ -338,6 +355,8 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                 return <WeixinSettings onOpenDataManagement={() => setCurrentPage("data")} />;
             case "toolbox":
                 return <ToolboxSettings />;
+            case "agentComputer":
+                return <AgentComputerSettings onNotice={onNotice} />;
             case "moderation":
                 return <ModerationCenter onNotice={onNotice} />;
             case "identity":
@@ -440,11 +459,16 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                 <FeaturedCard item={imageGenerationFeaturedItem} />
                             </div>
                         </div>
-                        <CardGrid
-                            label="Connections"
-                            labelClassName="settings-menu-section-title"
-                            items={SETTINGS_MENU.filter(item => ["weixin", "toolbox"].includes(item.id)).map(makeCardItem)}
-                        />
+                        <div>
+                            <CardGrid
+                                label="Connections"
+                                labelClassName="settings-menu-section-title"
+                                items={SETTINGS_MENU.filter(item => ["weixin", "toolbox"].includes(item.id)).map(makeCardItem)}
+                            />
+                            <div className="mt-[10px]">
+                                <FeaturedCard item={agentComputerFeaturedItem} />
+                            </div>
+                        </div>
                         <div className="settings-realtime-section">
                             <h3 className="settings-menu-section-title">Runtime</h3>
                             <div className="app-card card-featured settings-toggle-card">
@@ -652,7 +676,10 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                 )}
 
                 {currentPage !== "main" && (
-                    <div className="block min-h-full p-4 pb-8 box-border">
+                    // shrink-0：page-body 是 flex 容器，包裹层默认可压缩——内容超一屏时会被压到
+                    // 恰好一屏高、卡片从中溢出，底部 padding 落不到内容末尾，最后一张卡贴死滚动边界
+                    //（iOS 底部工具栏/安全区一盖就"没放下又滚不动"）。尾部留白 = 原 pb-8 + 安全区。
+                    <div className="block min-h-full shrink-0 p-4 box-border" style={{ paddingBottom: "calc(32px + env(safe-area-inset-bottom, 0px))" }}>
                         {renderSubPage()}
                     </div>
                 )}

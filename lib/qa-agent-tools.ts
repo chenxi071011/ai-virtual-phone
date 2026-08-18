@@ -23,6 +23,7 @@ import {
     createQaPullRequest,
     deleteQaBranch,
     mergeQaPullRequest,
+    syncQaForkWithUpstream,
     updateQaIssue,
     type QaCommitFile,
 } from "./qa-github-write";
@@ -33,6 +34,8 @@ import {
     formatQaFeedbackMarkdown,
     type QaFeedbackTicket,
 } from "./qa-feedback";
+import { QA_COMPUTER_TOOLS, QA_COMPUTER_ALIAS_TOOLS } from "./qa-computer-tools";
+import { isWorkshopComputerEnabled } from "./agent-computer";
 import {
     QA_CONTENT_TOOLS,
     workbenchWriteLocal,
@@ -826,7 +829,8 @@ const githubPullCreateTool: QaTool = {
         required: ["title", "head"],
     },
     description:
-        "从某个分支向目标分支发起 Pull Request。典型流程：新建分支 → 提交修改到该分支 → 创建PR → 用户审阅或让你合并。",
+        "从某个分支向目标分支发起 Pull Request（仅限当前已连接的这个仓库内部）。典型流程：新建分支 → 提交修改到该分支 → 创建PR → 用户审阅或让你合并。"
+        + "注意：用户想「把改动贡献给官方/上游仓库」时不要用本动作——那要走「对比官方版本 → 提交共同建设贡献」流程。",
     schemaLines: [
         "  参数：",
         "    · title (必填) — PR 标题",
@@ -875,6 +879,48 @@ const githubPullMergeTool: QaTool = {
         const result = await mergeQaPullRequest(gate.config, { number, method }, context?.signal);
         if (!result.merged) return `合并失败：${result.message || "PR 可能有冲突或已关闭"}。可用「查看PR」检查状态。`;
         return `✓ PR #${number} 已合并（${method}），合并提交 ${result.sha?.slice(0, 10) ?? ""}。`;
+    },
+};
+
+const githubSyncUpstreamTool: QaTool = {
+    name: "同步官方更新",
+    nativeName: "sync_fork_with_upstream",
+    parameters: {
+        type: "object",
+        properties: {
+            branch: { type: "string", description: "要同步的分支，缺省用连接仓库的默认分支" },
+        },
+    },
+    description:
+        "把官方（上游）仓库的最新提交合并进当前连接的 fork（等同 GitHub 网页的 Sync fork）。"
+        + "无冲突时一键完成，用户自己的改动原样保留；与官方改动冲突时 GitHub 会拒绝、fork 原样不动，此时按返回的指引处理。"
+        + "仅当连接的仓库是官方项目的 fork 时有效。",
+    schemaLines: [
+        "  参数：",
+        "    · branch (可选) — 要同步的分支，缺省用默认分支",
+        '  调用：[执行动作:同步官方更新({})]',
+    ],
+    async run(args, context) {
+        const gate = requireWritableConfig();
+        if ("error" in gate) return gate.error;
+        const branch = typeof args.branch === "string" && args.branch.trim()
+            ? args.branch.trim()
+            : (gate.config.branch || "main");
+        const result = await syncQaForkWithUpstream(gate.config, branch, context?.signal);
+        if (result.ok) {
+            const how = result.mergeType === "fast-forward" ? "快进" : result.mergeType === "merge" ? "合并提交" : (result.mergeType || "已是最新");
+            return `✓ 已同步官方更新到 ${branch}（${how}${result.baseBranch ? `，上游 ${result.baseBranch}` : ""}）。用户自己的改动原样保留；部署平台会自动重新构建。`;
+        }
+        if (result.conflict) {
+            return [
+                `同步被 GitHub 拒绝：${branch} 上的改动与官方新改动存在冲突，fork 保持原样、没有被改动。`,
+                "推荐的处理顺序：",
+                "1. 先把用户的有效改动贡献给官方——「对比官方版本」→「提交共同建设贡献」（拼合路径不受冲突影响）；",
+                "2. 官方采纳合并后，改动进入主线，用户的 fork 可直接重置为官方版本（在 GitHub 网页 Sync fork 里选 discard commits），冲突自然消失；",
+                "3. 若改动只想自用不贡献，需要在本地手工解决冲突，超出小坊的能力范围，如实告知用户。",
+            ].join("\n");
+        }
+        return `同步失败：${result.message}。常见原因：连接的仓库不是官方项目的 fork、分支名不存在、或 token 权限不足。`;
     },
 };
 
@@ -1326,18 +1372,23 @@ const UNIFIED_BASE_TOOLS: QaTool[] = [
     contentToolByNative("read_creation_guide"),
     faqTool,
     contentToolByNative("export_local_content"),
+    // 共同建设：贡献改动给官方仓库（读侧公共接口，提交走集市中转，与「连接仓库」无关）
+    contentToolByNative("compare_with_official"),
+    contentToolByNative("read_contrib_diff"),
+    contentToolByNative("submit_contribution"),
     diagnoseTool,
     feedbackTool,
 ];
 const UNIFIED_GITHUB_READ_TOOLS: QaTool[] = [githubSearchTool, repoQueryTool];
-const UNIFIED_GITHUB_WRITE_TOOLS: QaTool[] = [branchOpsTool, githubPullCreateTool, githubPullMergeTool, githubIssueUpdateTool];
+const UNIFIED_GITHUB_WRITE_TOOLS: QaTool[] = [branchOpsTool, githubPullCreateTool, githubPullMergeTool, githubIssueUpdateTool, githubSyncUpstreamTool];
 
-/** 当前可用工具集：统一 CRUD + 辅助 + （已连接仓库）查询 + （有 PAT）写入。 */
+/** 当前可用工具集：统一 CRUD + 辅助 + （已连接仓库）查询 + （有 PAT）写入 + （已连接角色电脑）工作机。 */
 export function getQaTools(): QaTool[] {
     const config = loadQaGithubConfig();
     const tools = [...UNIFIED_BASE_TOOLS];
     if (config) tools.push(...UNIFIED_GITHUB_READ_TOOLS);
     if (config?.token) tools.push(...UNIFIED_GITHUB_WRITE_TOOLS);
+    if (isWorkshopComputerEnabled()) tools.push(...QA_COMPUTER_TOOLS);
     return tools;
 }
 
@@ -1347,6 +1398,8 @@ export const QA_TOOLS: QaTool[] = [...new Set([
     ...UNIFIED_BASE_TOOLS,
     ...UNIFIED_GITHUB_READ_TOOLS,
     ...UNIFIED_GITHUB_WRITE_TOOLS,
+    ...QA_COMPUTER_TOOLS,
+    ...QA_COMPUTER_ALIAS_TOOLS,
     diagnoseLegacyAliasTool,
     ...BASE_TOOLS,
     ...GITHUB_TOOLS,

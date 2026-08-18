@@ -15,7 +15,7 @@ import { appNowISO } from "./app-clock";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
 import type { Prompt } from "./settings-types";
-import { CHARACTER_CARD_PROMPT, WORLDBOOK_PROMPT, PRESET_PROMPT, GENERAL_PRESET_PROMPT, REGEX_PROMPT, CSS_PROMPT, WIDGET_PROMPT } from "./mascot-prompts";
+import { CHARACTER_CARD_PROMPT, CHARACTER_WORLD_PROMPT, WORLDBOOK_PROMPT, PRESET_PROMPT, GENERAL_PRESET_PROMPT, REGEX_PROMPT, CSS_PROMPT, WIDGET_PROMPT } from "./mascot-prompts";
 import {
     buildCssAssetNineSliceCss,
     calibrateCssAssetNineSlice,
@@ -249,6 +249,7 @@ const CREATE_CHARACTER_SCHEMA = {
         name: { type: "string", description: "角色全名" },
         persona: { type: "string", description: "完整人设（7 段式 markdown）" },
         personality: { type: "string", description: "性格简介（80-200 字）" },
+        briefPersona: { type: "string", description: "简量版人设（可选，100-200 字）：写给同世界且与该角色有关联的其他角色看，让它们提到或与它互动时不 OOC" },
     },
     required: ["name", "persona", "personality"],
     additionalProperties: false,
@@ -258,10 +259,87 @@ const UPDATE_CHARACTER_FIELD_SCHEMA = {
     type: "object",
     properties: {
         name: { type: "string", description: "要修改的角色名" },
-        field: { type: "string", enum: ["name", "persona", "personality"], description: "字段名" },
+        field: { type: "string", enum: ["name", "persona", "personality", "briefPersona"], description: "字段名" },
         value: { type: "string", description: "新值" },
     },
     required: ["name", "field", "value"],
+    additionalProperties: false,
+};
+
+// ── 角色世界（世界卷宗）工具 ──
+const LIST_CHARACTER_WORLDS_SCHEMA = {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+};
+
+const CREATE_CHARACTER_WORLD_SCHEMA = {
+    type: "object",
+    properties: {
+        name: { type: "string", description: "世界卷宗名称，例如：现代都市 / 仙侠界" },
+    },
+    required: ["name"],
+    additionalProperties: false,
+};
+
+const RENAME_CHARACTER_WORLD_SCHEMA = {
+    type: "object",
+    properties: {
+        name: { type: "string", description: "世界卷宗名称" },
+        newName: { type: "string", description: "新的卷宗名称" },
+    },
+    required: ["name", "newName"],
+    additionalProperties: false,
+};
+
+const UPDATE_CHARACTER_WORLD_DESC_SCHEMA = {
+    type: "object",
+    properties: {
+        name: { type: "string", description: "世界卷宗名称" },
+        description: { type: "string", description: "世界观描述（会注入该世界所有角色的上下文）" },
+    },
+    required: ["name", "description"],
+    additionalProperties: false,
+};
+
+const DELETE_CHARACTER_WORLD_SCHEMA = {
+    type: "object",
+    properties: {
+        name: { type: "string", description: "要删除的世界卷宗名称（默认世界不可删除）" },
+    },
+    required: ["name"],
+    additionalProperties: false,
+};
+
+const MOVE_CHARACTER_TO_WORLD_SCHEMA = {
+    type: "object",
+    properties: {
+        characterName: { type: "string", description: "角色名，用「读取角色」确认" },
+        worldName: { type: "string", description: "目标世界卷宗名称；角色会从原世界移出并加入这个世界" },
+    },
+    required: ["characterName", "worldName"],
+    additionalProperties: false,
+};
+
+const ADD_CHARACTER_RELATION_SCHEMA = {
+    type: "object",
+    properties: {
+        worldName: { type: "string", description: "世界卷宗名称（两个角色须已在同一世界，否则先用「移动角色到世界」）" },
+        fromCharacterName: { type: "string", description: "关系发起方角色名。例：「A 是 B 的哥哥」→ from=A" },
+        toCharacterName: { type: "string", description: "关系指向方角色名。例：「A 是 B 的哥哥」→ to=B" },
+        label: { type: "string", description: "关系标签，如：哥哥 / 宿敌 / 上司 / 恋人 / 发小" },
+    },
+    required: ["worldName", "fromCharacterName", "toCharacterName", "label"],
+    additionalProperties: false,
+};
+
+const DELETE_CHARACTER_RELATION_SCHEMA = {
+    type: "object",
+    properties: {
+        worldName: { type: "string", description: "世界卷宗名称" },
+        relationId: { type: "string", description: "关系 id（从「列出世界卷宗」结果获取）" },
+    },
+    required: ["worldName", "relationId"],
     additionalProperties: false,
 };
 
@@ -464,7 +542,10 @@ const REGEX_RULE_OBJ = {
         disabled: { type: "boolean" },
         markdownOnly: { type: "boolean", description: "仅显示层应用，不影响存储" },
         promptOnly: { type: "boolean", description: "仅 prompt 应用，不影响显示" },
+        historyOnly: { type: "boolean", description: "仅历史消息（true=这条规则只作用于聊天历史消息，不碰系统提示词/预设/世界书）。与「用户输入」位置 + promptOnly 组合时，可精确剥离历史消息里的自定义标签（如 <thinking>/<pixel-console>），且不会误删系统提示词里的格式约束示例" },
         substituteRegex: { type: "string", enum: ["0", "1", "2"], description: "0=不替换 1=原始替换 2=转义后替换宏（如{{user}}）" },
+        minDepth: { type: "number", description: "最小消息深度（可选）。最近一条消息 depth=0，越旧数字越大；-1=不限制最小深度，即只看最新一条往前的范围下界。不传=不限" },
+        maxDepth: { type: "number", description: "最大消息深度（可选）。0=只处理最新一条消息；不传=不限（含 ∞ 语义）。只处理最近几条时配合 minDepth 使用" },
     },
     required: ["scriptName", "findRegex", "replaceString"],
 };
@@ -600,6 +681,88 @@ const IMAGE_ASSET_USAGE_GUIDE = [
 
 // ── 套件定义 ────────────────────────────────────────────
 
+// ── 线上聊天状态栏（自定义状态栏）──────────────────────
+const STATUS_BAR_SESSION_DESC = "会话名：单聊填角色名/备注名，群聊填群名。不传则用当前页面正在打开的会话；没打开时工具会返回可选会话列表。";
+
+const READ_STATUS_BAR_SCHEMA = {
+    type: "object",
+    properties: {
+        sessionName: { type: "string", description: STATUS_BAR_SESSION_DESC },
+    },
+    required: [],
+    additionalProperties: false,
+};
+
+const WRITE_STATUS_BAR_SCHEMA = {
+    type: "object",
+    properties: {
+        sessionName: { type: "string", description: STATUS_BAR_SESSION_DESC },
+        contract: { type: "string", description: "输出契约：提示词「状态栏」章节的整段正文。必须含【逻辑】【格式】，且明确要求把内容整块用 [状态栏]...[/状态栏] 包裹。禁止使用 {{char}} 宏。" },
+        renderHtml: { type: "string", description: "输出渲染：完整 HTML（可含 <style>/<script>），沙盒 iframe 执行。数据从 window.STATUS_RAW 取（原文字符串），或用 {{RAW}} 直插（已 HTML 转义）。" },
+        previewRaw: { type: "string", description: "示例数据：按契约格式编造的一份样例，供编辑弹窗预览。不给的话用户打开弹窗会看到与契约对不上的默认样例。" },
+    },
+    required: ["contract", "renderHtml", "previewRaw"],
+    additionalProperties: false,
+};
+
+const PREVIEW_STATUS_BAR_SCHEMA = {
+    type: "object",
+    properties: {
+        sessionName: { type: "string", description: STATUS_BAR_SESSION_DESC },
+    },
+    required: [],
+    additionalProperties: false,
+};
+
+const STATUS_BAR_PROMPT = `线上聊天状态栏 = 让 AI 每轮在 [状态栏]...[/状态栏] 里吐一小段数据，
+再由一段固定的 HTML 把它画成卡片（微博主页、心情面板、随身物品……随意）。
+数据每轮变、画法不变，所以比"让 AI 每轮直接吐 HTML"省很多 token，长相也稳定。
+
+===== 适用范围（务必先确认）=====
+· 只适用于**线上聊天**：单聊 + 群聊，都支持。
+· **不适用**：线下模式、剧情/漫卷、语音视频通话、朋友圈、查手机、小红书等。
+  这些场景要做状态栏，只能用老办法（让 AI 输出 [状态栏]...[/状态栏]，再配 placement=[2] 的正则渲染）。
+· 用户说"聊天状态栏"通常就是指这个；说"剧情里的状态栏"要走正则那条路，别用本套件。
+
+===== 工作流（3 个工具）=====
+1. 读取线上状态栏 —— 看该会话现在是什么模式、有没有已存在的契约/渲染。**改之前必读**，
+   已有内容要先问用户是覆盖还是在原基础上改。
+2. 写线上状态栏 —— 契约 + 渲染 + 示例数据一次写入，自动置为自定义模式并启用。
+3. 预览线上状态栏 —— 弹窗里用示例数据跑一遍给用户看。写完建议顺手预览。
+
+===== 契约怎么写（硬规则，违反会被工具拒绝）=====
+· **必须出现成对的 [状态栏] 与 [/状态栏]**：既要在【格式】里画出成对标签，也要用一句话
+  明确要求"按生成的内容整块用 [状态栏]...[/状态栏] 包裹输出"。
+  漏了这条，AI 会把字段当成普通聊天消息发出来——这是最常见的翻车方式。
+· **禁止使用 {{char}}**：群聊的输出格式条目是全群共享的，{{char}} 在那里会展开成
+  全体成员名字的拼接（如"甲、乙、丙"）。一律用第二人称"你"。
+· **只让 AI 吐数据，不要让它吐 HTML**。一行一个字段、用 = 分隔最稳，例如：
+  心情=有点烦躁
+  位置=公司楼下便利店
+  多值字段用 | 分隔，重复字段（如多条评论）就重复写同一个键。
+· 结构建议：【逻辑】说清这是什么场景、字段怎么取值、要不要跟着剧情变；
+  【格式】给出完整的 [状态栏]...[/状态栏] 样板，字段用 <尖括号说明> 占位。
+· 字段别贪多。群聊里每个发言角色都要各出一份，字段多了输出 token 会翻好几倍。
+
+===== 渲染怎么写 =====
+· 一段完整 HTML，可含 <style> 与 <script>，在沙盒 iframe 里跑（allow-scripts，无 same-origin，
+  访问不到宿主也发不了网络请求，一切自包含）。
+· 取数据两个口子：window.STATUS_RAW（原文字符串，JS 里 split 解析）；{{RAW}}（模板直插，
+  已 HTML 转义，只能当纯文本用）。想按行解析就用前者。
+· **不要用 100vh / 100dvh**：高度由外部自动测量，用视口单位会触发反馈环保护、把高度锁死。
+· 深浅色都要能看：用 prefers-color-scheme 或半透明叠色，别写死一种背景。
+· 解析要容错：字段缺失、顺序变化、数量不定都要不崩（AI 的输出不会每轮都完美）。
+
+===== 示例数据 =====
+· 必填。按自己写的契约格式编一份真实感的样例，字段要和契约完全对得上。
+· 不给的话，用户打开编辑弹窗看到的是内置的默认样例（微博字段），和新契约对不上，
+  预览会一片空白或错乱，用户会以为坏了。
+
+===== 写完要告诉用户的 =====
+· 已写入哪个会话，可在 聊天信息 → 自定义状态栏 里看到并继续手改。
+· **启用后原生的好感度/占有欲/焦虑值会停止更新**（状态区整块被契约取代了）。
+· 如果该会话之前用正则渲染过状态栏，两套会互相竞争，让用户二选一。`;
+
 export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
     {
         id: "css_pack",
@@ -633,13 +796,29 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
     {
         id: "character_pack",
         label: "角色卡套件",
-        description: "创建 / 修改 / 查看 角色卡。角色由 name/persona/personality 三个字段组成。",
+        description: "创建 / 修改 / 查看 角色卡。角色由 name/persona/personality 三个字段组成，可另写简量人设 briefPersona（给同世界有关联的角色看，防 OOC）。",
         subTools: [
             { name: "读取角色", description: "不传 name 时列出所有角色；传 name 时返回完整字段。", parameterSchema: READ_CHARACTER_SCHEMA },
             { name: "创建角色", description: "新建一张角色卡。persona 必须包含 7 段式人设（基础信息/外貌/世界观/性格/补充信息/经历）。", parameterSchema: CREATE_CHARACTER_SCHEMA },
             { name: "更新角色字段", description: "修改某角色的单个字段（name/persona/personality）。", parameterSchema: UPDATE_CHARACTER_FIELD_SCHEMA },
         ],
         usageGuide: CHARACTER_CARD_PROMPT,
+    },
+    {
+        id: "character_world_pack",
+        label: "角色世界套件",
+        description: "管理「角色世界」的世界卷宗：创建/重命名/删除世界卷宗、把角色移入某个世界、在角色之间拉关系线（如 A 是 B 的哥哥）。关系线会注入相关角色上下文，同世界角色才能互见朋友圈。",
+        subTools: [
+            { name: "列出世界卷宗", description: "列出所有世界卷宗，含成员名单、关系线（带 relationId）与世界观描述。操作前建议先看。", parameterSchema: LIST_CHARACTER_WORLDS_SCHEMA },
+            { name: "创建世界卷宗", description: "新建一个世界卷宗（如：现代都市 / 仙侠界），初始为空，之后用「移动角色到世界」把角色放进去。", parameterSchema: CREATE_CHARACTER_WORLD_SCHEMA },
+            { name: "重命名世界卷宗", description: "修改某个世界卷宗的名字（默认世界不可改名）。", parameterSchema: RENAME_CHARACTER_WORLD_SCHEMA },
+            { name: "更新世界描述", description: "写入或修改某个世界卷宗的世界观描述，会注入该世界所有角色的上下文。", parameterSchema: UPDATE_CHARACTER_WORLD_DESC_SCHEMA },
+            { name: "删除世界卷宗", description: "删除某个世界卷宗（默认世界不可删除），其成员自动并回默认世界。", parameterSchema: DELETE_CHARACTER_WORLD_SCHEMA },
+            { name: "移动角色到世界", description: "把某个角色移入目标世界卷宗；角色会自动从原世界移出。", parameterSchema: MOVE_CHARACTER_TO_WORLD_SCHEMA },
+            { name: "添加关系", description: "在同一世界的两个角色之间拉一条关系线（如：A 是 B 的哥哥 / 宿敌 / 上司）。两个角色必须已在同一世界。", parameterSchema: ADD_CHARACTER_RELATION_SCHEMA },
+            { name: "删除关系", description: "剪断某条关系线，relationId 从「列出世界卷宗」获取。", parameterSchema: DELETE_CHARACTER_RELATION_SCHEMA },
+        ],
+        usageGuide: CHARACTER_WORLD_PROMPT,
     },
     {
         id: "worldbook_pack",
@@ -683,6 +862,17 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
             { name: "更新正则规则", description: "修改某规则的字段（updates 里传部分字段即可）。", parameterSchema: UPDATE_REGEX_RULE_SCHEMA },
         ],
         usageGuide: REGEX_PROMPT,
+    },
+    {
+        id: "status_bar_pack",
+        label: "线上聊天状态栏套件",
+        description: "为**线上聊天**（单聊 + 群聊）配置自定义状态栏：写一份输出契约（AI 每轮吐什么数据）+ 一段输出渲染（怎么把数据画成卡片），直接写入指定会话并启用，用户可在聊天信息页继续手改。不适用于线下模式、剧情、通话、朋友圈——那些场景只能用 [状态栏] + 正则的老办法。",
+        subTools: [
+            { name: "读取线上状态栏", description: "读取某会话当前的状态栏模式、契约、渲染与示例数据。改之前必读。不传会话名时用当前打开的会话。", parameterSchema: READ_STATUS_BAR_SCHEMA },
+            { name: "写线上状态栏", description: "把契约 + 渲染 + 示例数据写入指定会话并启用（自动置为自定义模式）。契约必须含成对的 [状态栏]/[/状态栏] 且不能用 {{char}}，否则工具会拒绝。", parameterSchema: WRITE_STATUS_BAR_SCHEMA },
+            { name: "预览线上状态栏", description: "在对话里弹窗预览该会话已写入的状态栏效果（用示例数据渲染），不离开聊天。", parameterSchema: PREVIEW_STATUS_BAR_SCHEMA },
+        ],
+        usageGuide: STATUS_BAR_PROMPT,
     },
     {
         id: "widget_pack",
@@ -796,6 +986,7 @@ function numberOption(value: unknown, fallback: number): number {
     return fallback;
 }
 
+
 // ── 原生协议下的工具定义 ─────────────────────────────────
 
 const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
@@ -803,6 +994,9 @@ const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
     "读取CSS": "mascot_read_css",
     "覆写CSS": "mascot_write_css",
     "清除CSS": "mascot_clear_css",
+    "读取线上状态栏": "mascot_read_status_bar",
+    "写线上状态栏": "mascot_write_status_bar",
+    "预览线上状态栏": "mascot_preview_status_bar",
     "生成图像素材": "mascot_generate_css_asset",
     "列出用户图片": "mascot_list_user_images",
     "导入用户图片为素材": "mascot_import_user_image_asset",
@@ -816,6 +1010,14 @@ const MASCOT_NATIVE_TOOL_NAMES: Record<string, string> = {
     "读取角色": "mascot_read_character",
     "创建角色": "mascot_create_character",
     "更新角色字段": "mascot_update_character_field",
+    "列出世界卷宗": "mascot_list_character_worlds",
+    "创建世界卷宗": "mascot_create_character_world",
+    "重命名世界卷宗": "mascot_rename_character_world",
+    "更新世界描述": "mascot_update_character_world_description",
+    "删除世界卷宗": "mascot_delete_character_world",
+    "移动角色到世界": "mascot_move_character_to_world",
+    "添加关系": "mascot_add_character_relation",
+    "删除关系": "mascot_delete_character_relation",
     "列出世界书": "mascot_list_worldbooks",
     "读取词条": "mascot_read_worldbook_entry",
     "创建词条": "mascot_create_worldbook_entry",
@@ -848,9 +1050,11 @@ const MASCOT_NATIVE_LOADER_NAMES: Record<string, string> = {
     css_pack: "mascot_load_css_pack",
     image_pack: "mascot_load_image_pack",
     character_pack: "mascot_load_character_pack",
+    character_world_pack: "mascot_load_character_world_pack",
     worldbook_pack: "mascot_load_worldbook_pack",
     preset_pack: "mascot_load_preset_pack",
     regex_pack: "mascot_load_regex_pack",
+    status_bar_pack: "mascot_load_status_bar_pack",
     widget_pack: "mascot_load_widget_pack",
 };
 
@@ -926,6 +1130,8 @@ export function buildMascotNativeNameMap(): Map<string, string> {
 export type MascotToolContext = {
     pageContext: MascotPageContext;
     history?: CssAssetUserImageHistoryMessage[];
+    /** 同一条用户消息触发的整轮任务共享，用于保证每个角色只备份一次。 */
+    characterBackupIds?: Set<string>;
 };
 
 /** 执行小卷工具调用 */
@@ -936,6 +1142,10 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
             case "读取CSS": return await handleReadCss(call.args, ctx);
             case "覆写CSS": return await handleOverwriteCss(call.args, ctx);
             case "清除CSS": return await handleClearCss(call.args, ctx);
+            // ─── 线上聊天状态栏 ───
+            case "读取线上状态栏": return await handleReadStatusBar(call.args, ctx);
+            case "写线上状态栏": return await handleWriteStatusBar(call.args, ctx);
+            case "预览线上状态栏": return await handlePreviewStatusBar(call.args, ctx);
 
             // ─── 图像处理 ───
             case "生成图像素材": return await handleGenerateCssAsset(call.args);
@@ -952,7 +1162,17 @@ export async function executeMascotToolCall(call: ToolCall, ctx: MascotToolConte
             // ─── 角色 ───
             case "读取角色": return await handleReadCharacter(call.args);
             case "创建角色": return await handleCreateCharacter(call.args);
-            case "更新角色字段": return await handleUpdateCharacterField(call.args);
+            case "更新角色字段": return await handleUpdateCharacterField(call.args, ctx);
+
+            // ─── 角色世界（世界卷宗）───
+            case "列出世界卷宗": return await handleListCharacterWorlds();
+            case "创建世界卷宗": return await handleCreateCharacterWorld(call.args);
+            case "重命名世界卷宗": return await handleRenameCharacterWorld(call.args);
+            case "更新世界描述": return await handleUpdateCharacterWorldDescription(call.args);
+            case "删除世界卷宗": return await handleDeleteCharacterWorld(call.args);
+            case "移动角色到世界": return await handleMoveCharacterToWorld(call.args);
+            case "添加关系": return await handleAddCharacterRelation(call.args);
+            case "删除关系": return await handleDeleteCharacterRelation(call.args);
 
             // ─── 世界书 ───
             case "列出世界书": return await handleListWorldbooks(call.args);
@@ -1356,6 +1576,96 @@ async function writeCssAt(location: string, css: string, ctx: MascotToolContext,
     throw new Error(`未知 CSS 位置：${location}`);
 }
 
+
+// ── 线上聊天状态栏 handlers ───────────────────────────
+// 只覆盖「线上聊天」（单聊 + 群聊）。线下模式、剧情、通话、朋友圈都不走这套机制，
+// 那些场景仍然只能用 [状态栏] + 正则的老办法。
+
+async function statusBarSession(
+    sessionName: string | undefined,
+    ctx: MascotToolContext,
+    toolName: string,
+): Promise<{ err: ToolResult; ok?: undefined } | { ok: { sessionId: string; displayName: string }; err?: undefined }> {
+    const resolved = await resolveChatSession(sessionName, ctx);
+    if ("error" in resolved) {
+        const hint = resolved.choices?.length ? `。可选：${resolved.choices.join("、")}` : "";
+        return { err: { name: toolName, success: false, error: resolved.error + hint } as ToolResult };
+    }
+    return { ok: resolved };
+}
+
+async function handleReadStatusBar(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
+    const NAME = "读取线上状态栏";
+    const r = await statusBarSession(args.sessionName as string | undefined, ctx, NAME);
+    if (r.err) return r.err;
+    const { sessionId, displayName } = r.ok;
+    const { getStatusRegionConfig, isCustomStatusRegionActive } = await import("./chat-status-region");
+    const cfg = getStatusRegionConfig(sessionId);
+    const active = isCustomStatusRegionActive(cfg);
+    const lines = [
+        `会话：${displayName}`,
+        `当前模式：${cfg.mode === "custom" ? (active ? "自定义（已生效）" : "自定义（未生效：契约或渲染为空）") : cfg.mode === "off" ? "已关闭状态区" : "原生状态栏"}`,
+        "",
+        "【当前契约】",
+        cfg.contract.trim() || "（空）",
+        "",
+        "【当前渲染】",
+        cfg.renderHtml.trim() || "（空）",
+        "",
+        "【当前示例数据】",
+        cfg.previewRaw?.trim() || "（空，编辑弹窗会用内置样例）",
+    ];
+    return { name: NAME, success: true, data: lines.join("\n") };
+}
+
+async function handleWriteStatusBar(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
+    const NAME = "写线上状态栏";
+    const contract = typeof args.contract === "string" ? args.contract.trim() : "";
+    const renderHtml = typeof args.renderHtml === "string" ? args.renderHtml.trim() : "";
+    const previewRaw = typeof args.previewRaw === "string" ? args.previewRaw.trim() : "";
+    if (!contract) return { name: NAME, success: false, error: "contract 不能为空" };
+    if (!renderHtml) return { name: NAME, success: false, error: "renderHtml 不能为空——契约与渲染缺一，自定义状态栏不会生效" };
+    // 最常见也最致命的写法错误：契约没写包裹要求，AI 会把字段当普通消息发出来
+    if (!contract.includes("[状态栏]") || !contract.includes("[/状态栏]")) {
+        return { name: NAME, success: false, error: "契约里必须出现 [状态栏] 与 [/状态栏]：既要在【格式】里给出成对标签，也要用一句话要求 AI 把内容整块包裹输出。缺了这条，AI 会把状态栏字段当成普通聊天消息发出来。" };
+    }
+    if (contract.includes("{{char}}")) {
+        return { name: NAME, success: false, error: "契约里不能用 {{char}}：群聊的共享条目里它会展开成全体成员名字的拼接（如「甲、乙、丙」）。改用第二人称「你」。" };
+    }
+    const r = await statusBarSession(args.sessionName as string | undefined, ctx, NAME);
+    if (r.err) return r.err;
+    const { sessionId, displayName } = r.ok;
+    const { saveStatusRegionConfig, STATUS_REGION_UPDATED_EVENT } = await import("./chat-status-region");
+    saveStatusRegionConfig(sessionId, { mode: "custom", contract, renderHtml, previewRaw });
+    // 广播：聊天信息页开着时同步刷新，用户立刻能在输入框里看到并继续手改
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(STATUS_REGION_UPDATED_EVENT, { detail: { sessionId } }));
+    }
+    return {
+        name: NAME,
+        success: true,
+        data: `已写入「${displayName}」的线上状态栏并启用（契约 ${contract.length} 字符、渲染 ${renderHtml.length} 字符）。用户可在 聊天信息 → 自定义状态栏 里看到并修改。注意：启用后原生的好感度等状态值会停止更新。`,
+    };
+}
+
+async function handlePreviewStatusBar(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
+    const NAME = "预览线上状态栏";
+    const r = await statusBarSession(args.sessionName as string | undefined, ctx, NAME);
+    if (r.err) return r.err;
+    const { sessionId, displayName } = r.ok;
+    const { getStatusRegionConfig } = await import("./chat-status-region");
+    const cfg = getStatusRegionConfig(sessionId);
+    if (!cfg.renderHtml.trim()) return { name: NAME, success: false, error: `「${displayName}」还没有渲染代码，先用 写线上状态栏 写入` };
+    const { requestStatusBarPreview } = await import("./mascot-events");
+    const handled = requestStatusBarPreview({
+        displayName,
+        renderHtml: cfg.renderHtml,
+        previewRaw: cfg.previewRaw || "",
+    });
+    if (!handled) return { name: NAME, success: false, error: "预览弹窗当前不可用（桌宠界面未挂载）" };
+    return { name: NAME, success: true, data: `已弹出「${displayName}」的状态栏预览，用户可直接查看效果。` };
+}
+
 async function handleOverwriteCss(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
     const location = args.location as string;
     const css = args.css as string;
@@ -1390,6 +1700,7 @@ async function handleReadCharacter(args: Record<string, unknown>): Promise<ToolR
     parts.push(`id: ${char.id}`);
     parts.push(`name: ${char.name || ""}`);
     parts.push(`personality: ${char.personality || ""}`);
+    parts.push(`briefPersona: ${char.briefPersona || "（未设置）"}`);
     parts.push(`persona:\n${char.persona || ""}`);
     return { name: "读取角色", success: true, data: parts.join("\n") };
 }
@@ -1399,37 +1710,57 @@ async function handleCreateCharacter(args: Record<string, unknown>): Promise<Too
     const chars = loadCharacters();
     if (chars.find((c) => c.name === args.name)) return { name: "创建角色", success: false, error: "已存在同名角色" };
     const now = appNowISO();
+    const briefPersona = typeof args.briefPersona === "string" ? args.briefPersona.trim() : "";
     const newChar = {
         id: `char_${Date.now()}`,
         name: args.name as string,
         avatar: null,
         persona: args.persona as string,
         personality: args.personality as string,
+        briefPersona: briefPersona || undefined,
+        briefPersonaUpdatedAt: briefPersona ? now : undefined,
         createdAt: now,
         updatedAt: now,
     };
     chars.push(newChar as typeof chars[number]);
     saveCharacters(chars);
-    return { name: "创建角色", success: true, data: `已创建角色 ${newChar.name} (${newChar.id})` };
+    return { name: "创建角色", success: true, data: `已创建角色 ${newChar.name} (${newChar.id})${briefPersona ? "，含简量人设" : ""}` };
 }
 
-async function handleUpdateCharacterField(args: Record<string, unknown>): Promise<ToolResult> {
+async function handleUpdateCharacterField(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
     const { loadCharacters, saveCharacters } = await import("./character-storage");
+    const { backupCharacterVersion, getCharacterCurrentVersion } = await import("./character-version-storage");
     const chars = loadCharacters();
     const idx = chars.findIndex((c) => c.name === args.name);
     if (idx < 0) return { name: "更新角色字段", success: false, error: `找不到角色：${args.name}` };
     const field = args.field as string;
     const value = args.value as string;
+    const now = appNowISO();
     const char = { ...chars[idx] } as Record<string, unknown>;
     if (field === "name" || field === "persona" || field === "personality") {
         char[field] = value;
+    } else if (field === "briefPersona") {
+        char.briefPersona = value;
+        char.briefPersonaUpdatedAt = now;
     } else {
         return { name: "更新角色字段", success: false, error: `不支持的字段：${field}` };
     }
-    char.updatedAt = appNowISO();
+    // 一条用户消息触发的整轮小卷任务中，同一角色只在第一次写入前备份。
+    const backupIds = ctx.characterBackupIds ?? (ctx.characterBackupIds = new Set<string>());
+    const didBackup = !backupIds.has(chars[idx].id);
+    const nextVersion = didBackup
+        ? backupCharacterVersion(chars[idx], "mascot", "小卷本次任务修改前自动备份")
+        : getCharacterCurrentVersion(chars[idx].id);
+    backupIds.add(chars[idx].id);
+
+    char.updatedAt = now;
     chars[idx] = char as typeof chars[number];
     saveCharacters(chars);
-    return { name: "更新角色字段", success: true, data: `已更新 ${args.name} 的 ${field}` };
+    return {
+        name: "更新角色字段",
+        success: true,
+        data: `${didBackup ? "已为本次任务自动备份旧卡，并" : "本次任务已备份，继续"}更新 ${args.name} 的 ${field}；当前版本 V${nextVersion}`,
+    };
 }
 
 // ── Worldbook Handlers ──────────────────────────
@@ -1535,6 +1866,139 @@ async function handleDeleteWorldbookEntry(args: Record<string, unknown>): Promis
     books[bookIdx] = book;
     saveWorldBooks(books);
     return { name: "删除词条", success: true, data: `已删除词条 ${args.entryUid}` };
+}
+
+// ── 角色世界（世界卷宗）Handlers ───────────────
+
+async function resolveCharacterIdByName(name: string): Promise<{ id: string; name: string } | null> {
+    const { loadCharacters } = await import("./character-storage");
+    const chars = loadCharacters();
+    const exact = chars.find((c) => c.name === name);
+    if (exact) return { id: exact.id, name: exact.name };
+    const fuzzy = chars.find((c) => c.name && c.name.includes(name));
+    if (fuzzy) return { id: fuzzy.id, name: fuzzy.name };
+    return null;
+}
+
+async function resolveCharacterWorldIdByName(name: string): Promise<{ id: string; name: string; isDefault: boolean } | null> {
+    const { loadCharacterWorldGroups, DEFAULT_CHARACTER_WORLD_ID } = await import("./character-world-storage");
+    const groups = loadCharacterWorldGroups();
+    const exact = groups.find((g) => g.name === name);
+    if (exact) return { id: exact.id, name: exact.name, isDefault: exact.id === DEFAULT_CHARACTER_WORLD_ID };
+    const fuzzy = groups.find((g) => g.name.includes(name));
+    if (fuzzy) return { id: fuzzy.id, name: fuzzy.name, isDefault: fuzzy.id === DEFAULT_CHARACTER_WORLD_ID };
+    return null;
+}
+
+async function handleListCharacterWorlds(): Promise<ToolResult> {
+    const { loadCharacterWorldGroups, DEFAULT_CHARACTER_WORLD_ID } = await import("./character-world-storage");
+    const { loadCharacters } = await import("./character-storage");
+    const groups = loadCharacterWorldGroups();
+    if (groups.length === 0) return { name: "列出世界卷宗", success: true, data: "（还没有世界卷宗）" };
+    const chars = loadCharacters();
+    const nameById = new Map(chars.map((c) => [c.id, c.name || c.id]));
+    const lines: string[] = [];
+    for (const group of groups) {
+        lines.push(`· ${group.name} [id: ${group.id}]${group.id === DEFAULT_CHARACTER_WORLD_ID ? "（默认世界，不可改名/删除）" : ""}`);
+        if (group.description.trim()) lines.push(`  描述：${group.description.trim().replace(/\s+/g, " ").slice(0, 80)}`);
+        const memberNames = group.memberIds.map((id) => nameById.get(id) || id);
+        lines.push(`  成员（${memberNames.length}）：${memberNames.join("、") || "（空）"}`);
+        if (group.relations.length > 0) {
+            for (const rel of group.relations) {
+                lines.push(`  关系：${nameById.get(rel.fromCharacterId) || rel.fromCharacterId} 是 ${nameById.get(rel.toCharacterId) || rel.toCharacterId} 的${rel.label} [relationId: ${rel.id}]`);
+            }
+        }
+    }
+    return { name: "列出世界卷宗", success: true, data: lines.join("\n") };
+}
+
+async function handleCreateCharacterWorld(args: Record<string, unknown>): Promise<ToolResult> {
+    const { createCharacterWorldGroup } = await import("./character-world-storage");
+    const name = typeof args.name === "string" ? args.name.trim() : "";
+    if (!name) return { name: "创建世界卷宗", success: false, error: "name 不能为空" };
+    const group = createCharacterWorldGroup(name);
+    return { name: "创建世界卷宗", success: true, data: `已创建世界卷宗「${group.name}」(${group.id})` };
+}
+
+async function handleRenameCharacterWorld(args: Record<string, unknown>): Promise<ToolResult> {
+    const { renameCharacterWorldGroup } = await import("./character-world-storage");
+    const name = typeof args.name === "string" ? args.name : "";
+    const newName = typeof args.newName === "string" ? args.newName.trim() : "";
+    if (!newName) return { name: "重命名世界卷宗", success: false, error: "newName 不能为空" };
+    const world = await resolveCharacterWorldIdByName(name);
+    if (!world) return { name: "重命名世界卷宗", success: false, error: `找不到世界卷宗：${name}。用「列出世界卷宗」确认名称。` };
+    if (world.isDefault) return { name: "重命名世界卷宗", success: false, error: "默认世界不可改名" };
+    renameCharacterWorldGroup(world.id, newName);
+    return { name: "重命名世界卷宗", success: true, data: `世界卷宗「${world.name}」已改名为「${newName}」` };
+}
+
+async function handleUpdateCharacterWorldDescription(args: Record<string, unknown>): Promise<ToolResult> {
+    const { updateCharacterWorldDescription } = await import("./character-world-storage");
+    const name = typeof args.name === "string" ? args.name : "";
+    const description = typeof args.description === "string" ? args.description.trim() : "";
+    const world = await resolveCharacterWorldIdByName(name);
+    if (!world) return { name: "更新世界描述", success: false, error: `找不到世界卷宗：${name}。用「列出世界卷宗」确认名称。` };
+    updateCharacterWorldDescription(world.id, description);
+    return { name: "更新世界描述", success: true, data: `已更新世界卷宗「${world.name}」的世界观描述` };
+}
+
+async function handleDeleteCharacterWorld(args: Record<string, unknown>): Promise<ToolResult> {
+    const { deleteCharacterWorldGroup } = await import("./character-world-storage");
+    const name = typeof args.name === "string" ? args.name : "";
+    const world = await resolveCharacterWorldIdByName(name);
+    if (!world) return { name: "删除世界卷宗", success: false, error: `找不到世界卷宗：${name}` };
+    if (world.isDefault) return { name: "删除世界卷宗", success: false, error: "默认世界不可删除" };
+    deleteCharacterWorldGroup(world.id);
+    return { name: "删除世界卷宗", success: true, data: `已删除世界卷宗「${world.name}」，其成员已并回默认世界` };
+}
+
+async function handleMoveCharacterToWorld(args: Record<string, unknown>): Promise<ToolResult> {
+    const { moveCharacterToWorld } = await import("./character-world-storage");
+    const characterName = typeof args.characterName === "string" ? args.characterName : "";
+    const worldName = typeof args.worldName === "string" ? args.worldName : "";
+    const character = await resolveCharacterIdByName(characterName);
+    if (!character) return { name: "移动角色到世界", success: false, error: `找不到角色：${characterName}。用「读取角色」确认名称。` };
+    const world = await resolveCharacterWorldIdByName(worldName);
+    if (!world) return { name: "移动角色到世界", success: false, error: `找不到世界卷宗：${worldName}。用「列出世界卷宗」确认名称，或先「创建世界卷宗」。` };
+    moveCharacterToWorld(character.id, world.id);
+    return { name: "移动角色到世界", success: true, data: `已将角色「${character.name}」移入世界「${world.name}」` };
+}
+
+async function handleAddCharacterRelation(args: Record<string, unknown>): Promise<ToolResult> {
+    const { addCharacterWorldRelation } = await import("./character-world-storage");
+    const worldName = typeof args.worldName === "string" ? args.worldName : "";
+    const fromName = typeof args.fromCharacterName === "string" ? args.fromCharacterName : "";
+    const toName = typeof args.toCharacterName === "string" ? args.toCharacterName : "";
+    const label = typeof args.label === "string" ? args.label.trim() : "";
+    if (!label) return { name: "添加关系", success: false, error: "label 不能为空" };
+    const world = await resolveCharacterWorldIdByName(worldName);
+    if (!world) return { name: "添加关系", success: false, error: `找不到世界卷宗：${worldName}。用「列出世界卷宗」确认名称。` };
+    const from = await resolveCharacterIdByName(fromName);
+    if (!from) return { name: "添加关系", success: false, error: `找不到角色：${fromName}。用「读取角色」确认名称。` };
+    const to = await resolveCharacterIdByName(toName);
+    if (!to) return { name: "添加关系", success: false, error: `找不到角色：${toName}。用「读取角色」确认名称。` };
+    if (from.id === to.id) return { name: "添加关系", success: false, error: "不能给角色自己建立关系" };
+    // 存储层对非成员会静默拒绝——先查成员资格，别报假成功
+    const { loadCharacterWorldGroups } = await import("./character-world-storage");
+    const group = loadCharacterWorldGroups().find((g) => g.id === world.id);
+    const memberSet = new Set(group?.memberIds ?? []);
+    const missing = [from, to].filter((c) => !memberSet.has(c.id)).map((c) => c.name);
+    if (missing.length > 0) {
+        return { name: "添加关系", success: false, error: `${missing.join("、")}不在世界「${world.name}」里。先用「移动角色到世界」把角色移进去。` };
+    }
+    addCharacterWorldRelation(world.id, from.id, to.id, label);
+    return { name: "添加关系", success: true, data: `已添加关系：${from.name} 是 ${to.name} 的${label}（世界：${world.name}）` };
+}
+
+async function handleDeleteCharacterRelation(args: Record<string, unknown>): Promise<ToolResult> {
+    const { deleteCharacterWorldRelation } = await import("./character-world-storage");
+    const worldName = typeof args.worldName === "string" ? args.worldName : "";
+    const relationId = typeof args.relationId === "string" ? args.relationId : "";
+    if (!relationId) return { name: "删除关系", success: false, error: "缺少 relationId，先用「列出世界卷宗」获取" };
+    const world = await resolveCharacterWorldIdByName(worldName);
+    if (!world) return { name: "删除关系", success: false, error: `找不到世界卷宗：${worldName}` };
+    deleteCharacterWorldRelation(world.id, relationId);
+    return { name: "删除关系", success: true, data: `已删除世界「${world.name}」中的关系 ${relationId}` };
 }
 
 // ── Preset Handlers ────────────────────────────
@@ -1841,6 +2305,8 @@ async function handleReadRegexGroup(args: Record<string, unknown>): Promise<Tool
         lines.push(`    replace: ${r.replaceString}`);
         lines.push(`    tags: ${JSON.stringify(r.tags || ["chat", "text"])}`);
         lines.push(`    placement: ${JSON.stringify(r.placement)}`);
+        lines.push(`    markdownOnly: ${r.markdownOnly ? "true" : "false"} / promptOnly: ${r.promptOnly ? "true" : "false"} / historyOnly: ${r.historyOnly ? "true" : "false"} / substituteRegex: ${r.substituteRegex ?? 0}`);
+        lines.push(`    minDepth: ${r.minDepth != null ? r.minDepth : "不限"} / maxDepth: ${r.maxDepth != null ? r.maxDepth : "不限"}`);
     });
     return { name: "读取正则组", success: true, data: lines.join("\n") };
 }
@@ -1870,12 +2336,23 @@ function normalizeRule(r: Record<string, unknown>): Record<string, unknown> {
         placement: r.placement || [2],
         markdownOnly: r.markdownOnly ?? false,
         promptOnly: r.promptOnly ?? false,
+        historyOnly: r.historyOnly ?? false,
         substituteRegex: numberOption(r.substituteRegex, 0),
         runOnEdit: r.runOnEdit ?? false,
         trimStrings: r.trimStrings || [],
-        minDepth: r.minDepth,
-        maxDepth: r.maxDepth,
+        minDepth: normalizeRegexDepth(r.minDepth),
+        maxDepth: normalizeRegexDepth(r.maxDepth),
     };
+}
+
+/** 把深度字段规范化为合法值：合法数字保留，否则视为不限（undefined）。 */
+function normalizeRegexDepth(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
 }
 
 async function handleCreateRegexGroup(args: Record<string, unknown>): Promise<ToolResult> {
@@ -1915,6 +2392,8 @@ async function handleUpdateRegexRule(args: Record<string, unknown>): Promise<Too
     const updates = { ...(args.updates as Record<string, unknown>) };
     if ("substituteRegex" in updates) updates.substituteRegex = numberOption(updates.substituteRegex, 0);
     if ("tags" in updates) updates.tags = normalizeMascotRegexRuleTags(updates.tags);
+    if ("minDepth" in updates) updates.minDepth = normalizeRegexDepth(updates.minDepth);
+    if ("maxDepth" in updates) updates.maxDepth = normalizeRegexDepth(updates.maxDepth);
     group.rules[ruleIdx] = { ...group.rules[ruleIdx], ...updates } as typeof group.rules[number];
     group.updatedAt = Date.now();
     groups[idx] = group;

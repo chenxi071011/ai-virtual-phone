@@ -110,7 +110,9 @@ export async function getQaGithubTree(config: QaGithubConfig, signal?: AbortSign
 
 export type QaGithubFile = { path: string; text: string; size: number; truncated: boolean };
 
-/** 读取单个文件内容（base64 解码）。 */
+/** 读取单个文件内容（base64 解码）。
+ *  兼容两种响应形态：标准 contents API（JSON，content 为 base64）与 raw 媒体类型（直接返回源码）。
+ *  一律先按文本收下再尝试解包 JSON，绝不直接 response.json()——否则 raw 源码会被当成 JSON 解析而崩溃。 */
 export async function readQaGithubFile(config: QaGithubConfig, path: string, signal?: AbortSignal): Promise<QaGithubFile> {
     const branch = await resolveBranch(config, signal);
     const cleanPath = path.replace(/^\/+/, "");
@@ -121,17 +123,36 @@ export async function readQaGithubFile(config: QaGithubConfig, path: string, sig
     );
     if (response.status === 404) throw new Error(`文件不存在：${cleanPath}`);
     if (!response.ok) throw new Error(`读取文件失败：HTTP ${response.status}`);
-    const data = (await response.json()) as { content?: string; encoding?: string; size?: number; type?: string };
-    if (data.type !== "file") throw new Error(`${cleanPath} 不是文件（可能是目录）`);
-    let text = "";
-    if (data.encoding === "base64" && typeof data.content === "string") {
-        try {
-            text = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ""))));
-        } catch {
-            text = atob(data.content.replace(/\n/g, ""));
+    const text = await response.text();
+    // 解析放在独立 try 里：目录报错要能穿透出去，不能被"非 JSON→当原文"的兜底吞掉
+    let parsed: unknown = null;
+    let isJson = false;
+    try {
+        parsed = JSON.parse(text);
+        isJson = true;
+    } catch {
+        // 响应不是 JSON（raw 源码 / 代理返回原文）→ 直接作为文件内容返回
+    }
+    if (isJson) {
+        // contents API 对目录返回数组：保留明确报错，别把 JSON 数组当文件内容
+        if (Array.isArray(parsed)) throw new Error(`${cleanPath} 不是文件（可能是目录）`);
+        const data = parsed as { content?: string; encoding?: string; size?: number; type?: string };
+        if (data && typeof data === "object" && data.type === "dir") throw new Error(`${cleanPath} 不是文件（可能是目录）`);
+        if (data && typeof data === "object" && data.type === "file" && data.encoding === "base64" && typeof data.content === "string") {
+            const binary = atob(data.content.replace(/\n/g, ""));
+            let decoded: string;
+            try {
+                decoded = new TextDecoder("utf-8").decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+            } catch {
+                decoded = binary;
+            }
+            return { path: cleanPath, text: decoded, size: data.size ?? decoded.length, truncated: false };
+        }
+        if (data && typeof data === "object" && data.type === "file" && typeof data.content === "string") {
+            return { path: cleanPath, text: data.content, size: data.size ?? data.content.length, truncated: false };
         }
     }
-    return { path: cleanPath, text, size: data.size ?? text.length, truncated: false };
+    return { path: cleanPath, text, size: text.length, truncated: false };
 }
 
 export type QaGithubCommitSummary = { sha: string; message: string; author: string; date: string };

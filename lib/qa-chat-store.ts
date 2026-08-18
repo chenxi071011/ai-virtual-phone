@@ -8,7 +8,10 @@ import { commitQaFiles, revertQaCommit, type QaCommitResult } from "./qa-github-
 // 独立 DB，多会话。
 
 const QA_DB_NAME = "AiPhoneQaDB";
-const QA_DB_VERSION = 1;
+// A restore into a fresh browser creates the missing store in DB version 2.
+// Keep the owner at least that high so reopening the restored DB cannot fail
+// with VersionError (opening a lower version than the one on disk).
+const QA_DB_VERSION = 2;
 const QA_STORE = "qa";
 const QA_STATE_KEY = "state";
 const MAX_SESSIONS = 30;
@@ -352,6 +355,17 @@ export function deleteQaSession(sessionId: string) {
     if (activeSessionId === sessionId) {
         activeSessionId = sessions[0]?.id ?? null;
     }
+    publish();
+}
+
+/** 编辑一条已发送消息的内容（小坊助手界面"编辑"）。
+ *  只覆盖 content 并清掉时序分段缓存（保证渲染用新内容），工具行/提交卡等历史保留。 */
+export function updateQaMessageContent(sessionId: string, msgId: string, content: string): void {
+    sessions = sessions.map((s) =>
+        s.id !== sessionId
+            ? s
+            : { ...s, messages: s.messages.map((m) => (m.id === msgId ? { ...m, content, segments: undefined } : m)) }
+    );
     publish();
 }
 

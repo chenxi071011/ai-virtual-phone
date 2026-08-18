@@ -1,4 +1,5 @@
 import type { InternalCapabilityConfig } from "./settings-types";
+import { isAgentComputerConfigured, isContainerComputer } from "./agent-computer";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 
 const INTERNAL_CAPABILITIES_KEY = "ai_phone_internal_capabilities_v1";
@@ -9,6 +10,7 @@ export const NOTE_WALL_CAPABILITY_ID = "note_wall_service";
 export const MUSIC_CONTROL_CAPABILITY_ID = "music_control";
 export const CALENDAR_MANAGEMENT_CAPABILITY_ID = "calendar_management";
 export const SEND_FILE_CAPABILITY_ID = "send_file";
+export const AGENT_COMPUTER_CAPABILITY_ID = "agent_computer";
 export const LOCAL_DATA_LIBRARY_CAPABILITY_ID = "local_data_library";
 export const TOOLBOX_MANAGEMENT_CAPABILITY_ID = "toolbox_management";
 export const TIMED_WAKE_CAPABILITY_ID = "timed_wake";
@@ -572,6 +574,31 @@ const CALENDAR_MANAGEMENT_SUBTOOLS: InternalToolDefinition[] = [
         parameterSchema: CALENDAR_DELETE_PARAMETER_SCHEMA,
     },
 ];
+
+const AGENT_COMPUTER_PARAMETER_SCHEMA = JSON.stringify({
+    type: "object",
+    properties: {
+        op: { type: "string", enum: ["write", "read", "list", "send", "exec"], description: "操作：write 写文件 / read 读文件 / list 列目录 / send 把文件发给用户 / exec 执行 shell 命令" },
+        path: { type: "string", description: "自己电脑里的文件或目录路径，如 /日记/八月.txt" },
+        content: { type: "string", description: "写入的完整内容（op=write 必填）" },
+        command: { type: "string", description: "要执行的 shell 命令（op=exec 必填）" },
+    },
+    required: ["op"],
+});
+
+function buildAgentComputerUsageGuide(): string {
+    const execLine = isContainerComputer()
+        ? "· op=exec：在终端里执行 shell 命令。你的电脑是真正的 Linux（bash 完整、可安装软件、可自由联网；文件在 /workspace 下持久保存）。删除类命令（rm）会真的删掉文件且无法恢复，动手前想清楚。"
+        : "· op=exec：在终端里执行 shell 命令（ls/cat/grep/sed/awk/jq 等常用工具齐全，curl 可只读访问公开网页；不是完整 Linux，装不了软件）。删除类命令（rm）会真的删掉文件且无法恢复，动手前想清楚。";
+    return [
+        "这是你自己的电脑（云端、持久，只属于你这个角色）。你可以：",
+        "· op=write：把想留存的东西写成文件（日记、写给对方的东西、随手记）。路径自己规划，如 /日记/2026-08-14.txt；",
+        "· op=read / op=list：翻自己以前存的文件；",
+        "· op=send：把电脑里的一个文件发给对方（会以文件消息出现在聊天里）；",
+        execLine,
+        "写什么、何时写由你自己决定，像真人使用电脑一样自然；不必每次聊天都用。",
+    ].join("\n");
+}
 
 const SEND_FILE_PARAMETER_SCHEMA = JSON.stringify({
     type: "object",
@@ -1187,6 +1214,15 @@ const BUILTIN_INTERNAL_CAPABILITIES: InternalCapabilityConfig[] = [
         updatedAt: 0,
     },
     {
+        id: AGENT_COMPUTER_CAPABILITY_ID,
+        name: "角色电脑",
+        description: "你拥有一台自己的云端小电脑（持久硬盘 + 终端）：可以自己写文件记录生活、翻看旧文件，把电脑里的文件发给{{user}}，也能在终端里执行 shell 命令。",
+        enabled: false,
+        mode: "auto",
+        createdAt: 0,
+        updatedAt: 0,
+    },
+    {
         id: SEND_FILE_CAPABILITY_ID,
         name: "发送文件",
         description: "将外部 URL 文件（音频、图片、视频）发送给{{user}}，{{user}}可以直接播放或下载。用于配合其他工具生成内容后交付给用户。",
@@ -1248,6 +1284,8 @@ export function getEnabledInternalCapabilities(appId?: string): InternalCapabili
     if (appId !== "chat" && appId !== "group_chat") return [];
     return loadInternalCapabilities().filter(item => {
         if (!item.enabled || item.mode === "off") return false;
+        // 角色电脑是可插拔模块：没连接就不注入，模型完全看不见
+        if (item.id === AGENT_COMPUTER_CAPABILITY_ID && !isAgentComputerConfigured()) return false;
         return true;
     });
 }
@@ -1283,6 +1321,14 @@ export function getInternalCapabilityToolDefinition(capability: InternalCapabili
             description: capability.description,
             parameterSchema: "{}",
             usageGuide: CALENDAR_MANAGEMENT_USAGE_GUIDE,
+        };
+    }
+    if (capability.id === AGENT_COMPUTER_CAPABILITY_ID) {
+        return {
+            name: capability.name,
+            description: capability.description,
+            parameterSchema: AGENT_COMPUTER_PARAMETER_SCHEMA,
+            usageGuide: buildAgentComputerUsageGuide(),
         };
     }
     if (capability.id === SEND_FILE_CAPABILITY_ID) {

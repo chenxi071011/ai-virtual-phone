@@ -152,6 +152,8 @@ export type NeteaseUserDetail = {
     level?: number;
     listenSongs?: number;
     createDays?: number;
+    follows?: number;
+    followeds?: number;
 };
 
 export type NeteaseToplist = NeteasePlaylist & {
@@ -428,6 +430,8 @@ export type NeteasePlaylist = {
     trackCount: number;
     creator: string;
     playCount?: number;
+    subscribed?: boolean;
+    specialType?: number;
 };
 
 /** Get current logged-in user's uid */
@@ -476,6 +480,9 @@ export async function getUserPlaylists(): Promise<NeteasePlaylist[]> {
             coverUrl: secureHttpUrl(p.coverImgUrl),
             trackCount: p.trackCount,
             creator: p.creator?.nickname || "",
+            subscribed: !!p.subscribed,
+            playCount: p.playCount,
+            specialType: p.specialType,
         }));
     } catch { return []; }
 }
@@ -867,6 +874,8 @@ export async function getUserDetail(): Promise<NeteaseUserDetail | null> {
             level: data?.level,
             listenSongs: data?.listenSongs,
             createDays: data?.createDays,
+            follows: profile.follows,
+            followeds: profile.followeds,
         };
     } catch { return null; }
 }
@@ -1070,4 +1079,153 @@ export async function findPlayableMatch(title: string, _artist?: string): Promis
     }
 
     return null;
+}
+
+
+// ── 「我的」页真数据接口（全部优雅降级：接口缺失/未登录返回空） ──
+
+export type NeteaseDjRadio = {
+    id: number;
+    name: string;
+    picUrl?: string;
+    programCount?: number;
+    dj?: string;
+    lastProgramName?: string;
+};
+
+/** 订阅的播客电台 /dj/sublist */
+export async function getDjSublist(): Promise<NeteaseDjRadio[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/dj/sublist?timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.djRadios || []).map((r: any) => ({
+            id: r.id,
+            name: r.name || "",
+            picUrl: secureHttpUrl(r.picUrl),
+            programCount: r.programCount,
+            dj: r.dj?.nickname || "",
+            lastProgramName: r.lastProgramName || "",
+        }));
+    } catch { return []; }
+}
+
+export type NeteaseDjProgram = {
+    id: number;
+    name: string;
+    mainSongId: number;
+    duration: number;
+    coverUrl?: string;
+    createTime?: number;
+    listenerCount?: number;
+};
+
+/** 电台节目列表 /dj/program（节目经 mainSong 走普通歌曲播放链路） */
+export async function getDjPrograms(radioId: number, limit = 50): Promise<NeteaseDjProgram[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/dj/program?rid=${radioId}&limit=${limit}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.programs || []).map((p: any) => ({
+            id: p.id,
+            name: p.name || "",
+            mainSongId: p.mainSong?.id || 0,
+            duration: p.mainSong?.duration || p.duration || 0,
+            coverUrl: secureHttpUrl(p.coverUrl),
+            createTime: p.createTime,
+            listenerCount: p.listenerCount,
+        })).filter((p: NeteaseDjProgram) => p.mainSongId);
+    } catch { return []; }
+}
+
+export type NeteaseAlbumSub = {
+    id: number;
+    name: string;
+    picUrl?: string;
+    artist?: string;
+    size?: number;
+};
+
+/** 收藏的专辑 /album/sublist */
+export async function getAlbumSublist(): Promise<NeteaseAlbumSub[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/album/sublist?timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.data || []).map((a: any) => ({
+            id: a.id,
+            name: a.name || "",
+            picUrl: secureHttpUrl(a.picUrl),
+            artist: (a.artists || []).map((x: any) => x.name).filter(Boolean).join("/"),
+            size: a.size,
+        }));
+    } catch { return []; }
+}
+
+/** 专辑曲目 /album */
+export async function getAlbumTracks(albumId: number): Promise<NeteaseSearchResult[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/album?id=${albumId}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.songs || []).map(mapSongToSearchResult);
+    } catch { return []; }
+}
+
+export type NeteaseUserEvent = {
+    id: number;
+    time?: number;
+    text: string;
+    pics: string[];
+    song?: NeteaseSearchResult | null;
+};
+
+/** 用户动态（笔记）/user/event —— json 字段是字符串化的载荷 */
+export async function getUserEvents(limit = 30): Promise<NeteaseUserEvent[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    const uid = await getLoginUid();
+    if (!uid) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/user/event?uid=${uid}&limit=${limit}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.events || []).map((ev: any) => {
+            let payload: any = {};
+            try { payload = JSON.parse(ev.json || "{}"); } catch { /* 保底空载荷 */ }
+            const song = payload?.song ? mapSongToSearchResult(payload.song) : null;
+            return {
+                id: ev.id,
+                time: ev.eventTime,
+                text: payload?.msg || "",
+                pics: (ev.pics || []).map((p: any) => secureHttpUrl(p.originUrl || p.pcSquareUrl || p.squareUrl)).filter(Boolean),
+                song: song && song.id ? song : null,
+            };
+        }).filter((ev: NeteaseUserEvent) => ev.text || ev.pics.length > 0 || ev.song);
+    } catch { return []; }
+}
+
+/** 真·最近播放（跨设备）/record/recent/song */
+export async function getRecentSongs(limit = 100): Promise<NeteaseSearchResult[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/record/recent/song?limit=${limit}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.data?.list || []).map((item: any) => mapSongToSearchResult(item.data || {})).filter((s: NeteaseSearchResult) => s.id);
+    } catch { return []; }
+}
+
+/** 心动模式 /playmode/intelligence/list —— 以喜欢列表为底、种子歌曲展开的智能队列 */
+export async function getIntelligenceList(seedSongId: number, likePlaylistId: number): Promise<NeteaseSearchResult[]> {
+    const base = neteaseBase();
+    if (!base) return [];
+    try {
+        const resp = await fetch(withNeteaseParams(`${base}/playmode/intelligence/list?id=${seedSongId}&pid=${likePlaylistId}&timestamp=${Date.now()}`));
+        const data = await resp.json();
+        return (data?.data || []).map((item: any) => mapSongToSearchResult(item.songInfo || {})).filter((s: NeteaseSearchResult) => s.id);
+    } catch { return []; }
 }

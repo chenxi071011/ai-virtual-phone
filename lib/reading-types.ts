@@ -36,6 +36,8 @@ export type ReadingProgress = {
     progressCurrent?: number;
     progressTotal?: number;
     progressScope?: "book" | "chapter";
+    /** 保存进度时的阅读模式；滚动模式下 scrollPosition 存的是章节内滚动比例(0-1) */
+    readingMode?: "page" | "scroll";
     lastReadAt: string;
 };
 

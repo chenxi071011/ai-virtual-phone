@@ -1,6 +1,7 @@
 // lib/chat-storage.ts
 
 import {
+    chatDb,
     initChatDb,
     dbPutMessage, dbDeleteMessage, dbDeleteMessagesBySession, dbDeleteMessagesByIds,
     dbPutMessages, dbPutSessions, dbPutContacts, dbDeleteSession,
@@ -238,6 +239,7 @@ export type ChatMessage = {
     };
     isTyping?: boolean; // temporary flag for UI rendering
     statusPanel?: string; // AI display-only status content from [状态栏] tags
+    statusRegionMode?: "custom"; // 该消息生成时会话处于自定义状态栏模式（缺省=原生渲染）
     innerMonologue?: string; // AI inner monologue content from [内心] tags
     reasoning?: string; // model chain-of-thought from <thinking> tags (own collapsed UI above the bubble)
     stateValues?: StateValue[]; // parsed character state values from inner monologue
@@ -268,7 +270,16 @@ export type ChatAppSettings = {
     quickActionEnabled?: boolean; // When true, show the floating quick action entry
     browserNotificationsEnabled?: boolean; // When true, send browser Notification API alerts when page is hidden
     enterToSendEnabled?: boolean; // When true, Enter sends chat input and Shift+Enter inserts a newline
+    callVibrationEnabled?: boolean; // 语音/视频来电等待接听时循环振动（默认开；iOS 网页不支持振动则无效果）
+    maxToolRounds?: number; // 单条消息的工具循环轮数上限（默认 5；每轮=一次模型请求，轮内调用条数不限）
 };
+
+/** 单条消息工具循环轮数上限（默认 5，夹在 1–20 之间） */
+export function getMaxToolRounds(): number {
+    const raw = loadChatAppSettings().maxToolRounds;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return 5;
+    return Math.max(1, Math.min(20, Math.round(raw)));
+}
 
 export const CHAT_APP_SETTINGS_UPDATED_EVENT = "chat-app-settings-updated";
 export const CHAT_MESSAGE_PUSHED_EVENT = "chat-message-pushed";
@@ -1716,6 +1727,41 @@ export function updateMessageMediaUrl(messageId: string, mediaUrl: string) {
     }
 }
 
+/**
+ * 语音合成结果落库：优先走内存缓存（当前会话可见时同步生效）；缓存里没有
+ * （合成期间用户已切走会话）就直接读库改库——合成一次的音频绝不能丢，
+ * 丢了就是下一次白花钱的重新合成。
+ */
+export async function persistMessageVoiceAudio(
+    messageId: string,
+    mediaUrl: string,
+    synthesizedFromText: string,
+): Promise<void> {
+    const idx = _messagesCache.findIndex(m => m.id === messageId);
+    if (idx !== -1) {
+        const next = {
+            ..._messagesCache[idx],
+            mediaUrl,
+            mediaData: { ..._messagesCache[idx].mediaData, synthesizedFromText },
+        };
+        _messagesCache[idx] = next;
+        dbPutMessage(next);
+        return;
+    }
+    try {
+        const stored = await chatDb.messages.get(messageId);
+        if (stored) {
+            await chatDb.messages.put({
+                ...stored,
+                mediaUrl,
+                mediaData: { ...stored.mediaData, synthesizedFromText },
+            });
+        }
+    } catch (err) {
+        console.warn("[ChatDB] persist voice audio failed:", err);
+    }
+}
+
 export function updateChatMessage(
     messageId: string,
     patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData">>,
@@ -1865,6 +1911,7 @@ export function replaceResponseBatchWithParts(
     parts: { content: string; mediaType?: ChatMessage["mediaType"]; mediaData?: ChatMessage["mediaData"] }[],
     options?: {
         statusPanel?: string;
+        statusRegionMode?: "custom";
         innerMonologue?: string;
         reasoning?: string;
         stateValues?: StateValue[];
@@ -1907,6 +1954,7 @@ export function replaceResponseBatchWithParts(
         responseRoundId: firstMessage.responseRoundId,
         editableResponseText: firstMessage.editableResponseText,
         statusPanel: index === (options?.metaPartIndex ?? 0) ? options?.statusPanel : undefined,
+        statusRegionMode: index === (options?.metaPartIndex ?? 0) && options?.statusPanel ? options?.statusRegionMode : undefined,
         innerMonologue: index === (options?.metaPartIndex ?? 0) ? options?.innerMonologue : undefined,
         reasoning: index === (options?.metaPartIndex ?? 0) ? options?.reasoning : undefined,
         stateValues: index === (options?.metaPartIndex ?? 0) ? options?.stateValues : undefined,
@@ -1969,6 +2017,7 @@ export function replaceGroupResponseRound(
         rawResponseText?: string;
         responseBatchId?: string;
         statusPanel?: string;
+        statusRegionMode?: "custom";
         innerMonologue?: string;
         reasoning?: string;
         stateValues?: StateValue[];
@@ -2010,6 +2059,7 @@ export function replaceGroupResponseRound(
         responseRoundId,
         editableResponseText,
         statusPanel: msg.statusPanel,
+        statusRegionMode: msg.statusRegionMode,
         innerMonologue: msg.innerMonologue,
         reasoning: msg.reasoning,
         stateValues: msg.stateValues,

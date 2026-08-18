@@ -211,6 +211,27 @@ export async function mergeQaPullRequest(
     return { merged: Boolean(result.merged), sha: result.sha, message: result.message || "" };
 }
 
+/** 同步官方更新：等同网页上的 Sync fork（merge-upstream）。
+ *  返回 conflict=true 表示与上游改动冲突，GitHub 拒绝自动合并（fork 原样未动）。 */
+export async function syncQaForkWithUpstream(
+    config: QaGithubConfig,
+    branch: string,
+    signal?: AbortSignal,
+): Promise<{ ok: boolean; conflict: boolean; mergeType?: string; baseBranch?: string; message: string }> {
+    const response = await fetch(
+        `${apiBase(config)}/repos/${config.owner}/${config.repo}/merge-upstream`,
+        { method: "POST", headers: writeHeaders(config), body: JSON.stringify({ branch }), signal },
+    );
+    const data = await response.json().catch(() => ({})) as { message?: string; merge_type?: string; base_branch?: string };
+    if (response.ok) {
+        return { ok: true, conflict: false, mergeType: data.merge_type, baseBranch: data.base_branch, message: data.message || "" };
+    }
+    if (response.status === 409) {
+        return { ok: false, conflict: true, message: data.message || "merge conflict" };
+    }
+    return { ok: false, conflict: false, message: `GitHub ${response.status}: ${(data.message || "").slice(0, 200)}` };
+}
+
 /** 更新 issue：追加评论和/或开关状态。 */
 export async function updateQaIssue(
     config: QaGithubConfig,

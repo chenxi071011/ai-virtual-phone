@@ -335,7 +335,8 @@ export const CHAT_SESSION_CSS_EXAMPLE = `/* ═══ 单独聊天室 CSS 示例
   max-height: min(36vh, 340px);
 }
 
-.chat-thought-card .chat-html-inline-frame {
+.chat-thought-card .chat-html-inline-frame,
+.chat-status-bare .chat-html-inline-frame {
   max-height: min(52vh, 420px);
 }
 
@@ -848,7 +849,8 @@ export const CHAT_APP_CSS_EXAMPLE = `/* ═══ 聊天应用 CSS 示例 ══
   max-height: min(36vh, 340px);
 }
 
-.chat-thought-card .chat-html-inline-frame {
+.chat-thought-card .chat-html-inline-frame,
+.chat-status-bare .chat-html-inline-frame {
   max-height: min(52vh, 420px);
 }
 
@@ -2142,6 +2144,70 @@ export const MUSIC_CSS_EXAMPLE = `/* ══════════════�
 }
 .mart-song-idx[data-top] {
   color: var(--c-music-primary);
+}
+
+/* ━━ 我的页 · 头部 ━━ */
+.music-mine-ava {
+  /* 头像光环（双层描边+投影） */
+  box-shadow: 0 0 0 2px rgba(220, 180, 255, 0.4), 0 0 0 6px rgba(180, 120, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* width: 76px; height: 76px; */
+}
+.music-mine-name {
+  font-size: calc(16.2px*var(--app-text-scale,1));
+}
+.music-mine-sig {
+  /* 签名 */
+  /* font-style: italic; */
+}
+.music-mine-stats b {
+  /* 关注/粉丝/等级 数字 */
+  color: var(--c-music-white);
+}
+.music-mine-chips button {
+  /* 最近/本地/歌单/设置 快捷块 */
+  border-radius: 12px;
+  background: var(--c-music-surface-solid);
+}
+
+/* ━━ 我的页 · 歌单横滑卡 ━━ */
+.music-mine-cover-card {
+  border-radius: 14px;
+  /* flex-basis: 104px; height: 104px; */
+}
+
+/* ━━ 我的页 · 音乐/播客/笔记 tabs ━━ */
+.music-mine-tabs button[data-active]::after {
+  /* 选中下划线颜色 */
+  background: var(--c-music-primary);
+}
+.music-mine-subtabs button[data-active] {
+  color: var(--c-music-white);
+}
+
+/* ━━ 我的页 · 歌单/专辑/播客行 ━━ */
+.music-mine-pl-row:active {
+  background: var(--c-music-surface);
+}
+.music-mine-pl-cover {
+  border-radius: 10px;
+}
+.music-mine-like-heart {
+  /* 我喜欢封面上的红心 */
+  color: var(--c-music-liked);
+}
+.music-heart-btn {
+  /* 心动模式按钮 */
+  background: linear-gradient(135deg, #c86bff, #ff5c8a);
+}
+
+/* ━━ 我的页 · 笔记（动态卡） ━━ */
+.music-mine-event-card {
+  border-radius: 14px;
+  background: var(--c-music-surface);
+}
+.music-mine-event-song {
+  /* 动态附带的歌曲行 */
+  background: var(--c-music-surface-solid);
 }
 
 /* ━━ 我的页 · 听歌周报卡 ━━ */

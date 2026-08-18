@@ -22,23 +22,42 @@ import { isMascotPanelOpen } from "./mascot-state";
 const MASCOT_DB_NAME = "AiPhoneMascotDB";
 const MASCOT_DB_VERSION = 2;
 const MASCOT_CHAT_STORE = "chat";
-const MASCOT_MESSAGES_KEY = "messages";
+const MASCOT_MESSAGES_KEY = "messages"; // 旧版单会话键，仅用于迁移
+const MASCOT_STATE_KEY = "state";
 const MAX_STORED_MASCOT_MESSAGES = 50;
+const MAX_MASCOT_SESSIONS = 30;
 
-type MascotChatSnapshot = {
+export type MascotSession = {
+    id: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
     messages: MascotMsg[];
+};
+
+type PersistedMascotState = {
+    sessions: MascotSession[];
+    activeSessionId: string | null;
+};
+
+export type MascotChatSnapshot = {
+    messages: MascotMsg[];
+    sessions: MascotSession[];
+    activeSessionId: string | null;
     hydrated: boolean;
     isThinking: boolean;
 };
 
 const listeners = new Set<() => void>();
 let messages: MascotMsg[] = [];
+let sessions: MascotSession[] = [];
+let activeSessionId: string | null = null;
 let hydrated = false;
 let hydratePromise: Promise<void> | null = null;
 let isThinking = false;
 let abortRequested = false;
 let abortController: AbortController | null = null;
-let snapshot: MascotChatSnapshot = { messages, hydrated, isThinking };
+let snapshot: MascotChatSnapshot = { messages, sessions, activeSessionId, hydrated, isThinking };
 
 function openMascotDb(): IDBOpenDBRequest {
     const request = indexedDB.open(MASCOT_DB_NAME, MASCOT_DB_VERSION);
@@ -51,14 +70,14 @@ function openMascotDb(): IDBOpenDBRequest {
 }
 
 function emit() {
-    snapshot = { messages, hydrated, isThinking };
+    snapshot = { messages, sessions, activeSessionId, hydrated, isThinking };
     for (const listener of listeners) listener();
     if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("mascot-chat-updated", { detail: snapshot }));
     }
 }
 
-function persistMessages(nextMessages: MascotMsg[]) {
+function persistState() {
     if (typeof indexedDB === "undefined") return;
     try {
         const req = openMascotDb();
@@ -66,7 +85,10 @@ function persistMessages(nextMessages: MascotMsg[]) {
             try {
                 if (!req.result.objectStoreNames.contains(MASCOT_CHAT_STORE)) return;
                 const tx = req.result.transaction(MASCOT_CHAT_STORE, "readwrite");
-                tx.objectStore(MASCOT_CHAT_STORE).put(nextMessages, MASCOT_MESSAGES_KEY);
+                const state: PersistedMascotState = { sessions, activeSessionId };
+                tx.objectStore(MASCOT_CHAT_STORE).put(state, MASCOT_STATE_KEY);
+                tx.oncomplete = () => req.result.close();
+                tx.onerror = () => req.result.close();
             } catch {
                 // Keep in-memory chat usable even if persistence fails.
             }
@@ -243,9 +265,31 @@ export function deleteMascotMessageWithLinkedTools(
     return { messages: messagesAfterDelete, deletedMessages, cleanedMessages };
 }
 
+function makeMascotSessionId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function autoMascotSessionTitle(text: string): string {
+    const compact = text.replace(/\s+/g, " ").trim();
+    return compact.length > 18 ? `${compact.slice(0, 18)}…` : compact || "新对话";
+}
+
+function getActiveMascotSession(): MascotSession | null {
+    return sessions.find((session) => session.id === activeSessionId) ?? null;
+}
+
 function publishMessages(nextMessages: MascotMsg[], options: { persist?: boolean } = {}) {
     messages = normalizeMessages(nextMessages);
-    if (options.persist !== false) persistMessages(messages);
+    const active = getActiveMascotSession();
+    if (active) {
+        const now = Date.now();
+        sessions = sessions
+            .map((session) => session.id === active.id
+                ? { ...session, messages, updatedAt: now }
+                : session)
+            .sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    if (options.persist !== false) persistState();
     emit();
 }
 
@@ -268,6 +312,72 @@ export function setMascotMessages(updater: MascotMsg[] | ((prev: MascotMsg[]) =>
     publishMessages(next);
 }
 
+export function createMascotSession(): string | null {
+    if (!hydrated || isThinking) return null;
+    clearExpandedPackages();
+    const now = Date.now();
+    const greeting = defaultGreetingMessage();
+    const session: MascotSession = {
+        id: makeMascotSessionId(),
+        title: "新对话",
+        createdAt: now,
+        updatedAt: now,
+        messages: greeting ? [greeting] : [],
+    };
+    sessions = [session, ...sessions].slice(0, MAX_MASCOT_SESSIONS);
+    activeSessionId = session.id;
+    messages = session.messages;
+    persistState();
+    emit();
+    return session.id;
+}
+
+export function switchMascotSession(sessionId: string): boolean {
+    if (!hydrated || isThinking) return false;
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return false;
+    activeSessionId = session.id;
+    messages = normalizeMessages(session.messages);
+    persistState();
+    emit();
+    return true;
+}
+
+export function renameMascotSession(sessionId: string, title: string): boolean {
+    const nextTitle = title.replace(/\s+/g, " ").trim();
+    if (!nextTitle || !hydrated || isThinking || !sessions.some((session) => session.id === sessionId)) return false;
+    sessions = sessions.map((session) => session.id === sessionId ? { ...session, title: nextTitle } : session);
+    persistState();
+    emit();
+    return true;
+}
+
+export function deleteMascotSession(sessionId: string): boolean {
+    if (!hydrated || isThinking || !sessions.some((session) => session.id === sessionId)) return false;
+    sessions = sessions.filter((session) => session.id !== sessionId);
+    if (activeSessionId === sessionId) {
+        activeSessionId = sessions[0]?.id ?? null;
+        messages = sessions[0]?.messages ?? [];
+    }
+    if (sessions.length === 0) {
+        const now = Date.now();
+        const greeting = defaultGreetingMessage();
+        const replacement: MascotSession = {
+            id: makeMascotSessionId(),
+            title: "新对话",
+            createdAt: now,
+            updatedAt: now,
+            messages: greeting ? [greeting] : [],
+        };
+        sessions = [replacement];
+        activeSessionId = replacement.id;
+        messages = replacement.messages;
+    }
+    persistState();
+    emit();
+    return true;
+}
+
 function defaultGreetingMessage(): MascotMsg | null {
     const greeting = PAGE_GREETINGS["desktop"];
     return greeting ? { role: "mascot", text: greeting, createdAt: appNowISO() } : null;
@@ -281,54 +391,84 @@ export function resetMascotConversation(options: { withGreeting?: boolean } = {}
 }
 
 export async function hydrateMascotChat(): Promise<void> {
+    if (hydrated) return;
     if (hydratePromise) return hydratePromise;
     hydratePromise = new Promise<void>((resolve) => {
-        if (typeof indexedDB === "undefined") {
+        const finishWithMessages = (loaded: MascotMsg[], migrated: boolean) => {
+            const greeting = loaded.length > 0 ? null : defaultGreetingMessage();
+            messages = greeting ? [greeting] : loaded;
+            const now = Date.now();
+            const session: MascotSession = {
+                id: makeMascotSessionId(),
+                title: migrated && loaded.length > 0 ? "之前的对话" : "新对话",
+                createdAt: now,
+                updatedAt: now,
+                messages,
+            };
+            sessions = [session];
+            activeSessionId = session.id;
             hydrated = true;
-            const greeting = defaultGreetingMessage();
-            messages = greeting ? [greeting] : [];
+            persistState();
             emit();
             resolve();
+        };
+
+        if (typeof indexedDB === "undefined") {
+            finishWithMessages([], false);
             return;
         }
         const req = openMascotDb();
         req.onsuccess = () => {
             try {
                 if (!req.result.objectStoreNames.contains(MASCOT_CHAT_STORE)) {
-                    hydrated = true;
-                    const greeting = defaultGreetingMessage();
-                    messages = greeting ? [greeting] : [];
-                    emit();
-                    resolve();
+                    req.result.close();
+                    finishWithMessages([], false);
                     return;
                 }
                 const tx = req.result.transaction(MASCOT_CHAT_STORE, "readonly");
-                const get = tx.objectStore(MASCOT_CHAT_STORE).get(MASCOT_MESSAGES_KEY);
-                get.onsuccess = () => {
-                    const loaded = Array.isArray(get.result) ? normalizeMessages(get.result) : [];
-                    const greeting = loaded.length > 0 ? null : defaultGreetingMessage();
-                    messages = greeting ? [greeting] : loaded;
-                    hydrated = true;
-                    if (greeting) persistMessages(messages);
-                    emit();
-                    resolve();
+                const store = tx.objectStore(MASCOT_CHAT_STORE);
+                const stateGet = store.get(MASCOT_STATE_KEY);
+                stateGet.onsuccess = () => {
+                    const state = stateGet.result as PersistedMascotState | undefined;
+                    if (state && Array.isArray(state.sessions) && state.sessions.length > 0) {
+                        sessions = state.sessions
+                            .filter((session) => session && typeof session.id === "string" && Array.isArray(session.messages))
+                            .map((session) => ({ ...session, messages: normalizeMessages(session.messages) }))
+                            .sort((a, b) => b.updatedAt - a.updatedAt)
+                            .slice(0, MAX_MASCOT_SESSIONS);
+                        activeSessionId = state.activeSessionId && sessions.some((session) => session.id === state.activeSessionId)
+                            ? state.activeSessionId
+                            : sessions[0]?.id ?? null;
+                        messages = sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
+                        hydrated = true;
+                        emit();
+                        req.result.close();
+                        resolve();
+                        return;
+                    }
+
+                    // 首次升级：保留旧键，并将旧版单会话记录复制进多会话 state。
+                    const legacyGet = store.get(MASCOT_MESSAGES_KEY);
+                    legacyGet.onsuccess = () => {
+                        const loaded = Array.isArray(legacyGet.result) ? normalizeMessages(legacyGet.result) : [];
+                        req.result.close();
+                        finishWithMessages(loaded, loaded.length > 0);
+                    };
+                    legacyGet.onerror = () => {
+                        req.result.close();
+                        finishWithMessages([], false);
+                    };
                 };
-                get.onerror = () => {
-                    hydrated = true;
-                    emit();
-                    resolve();
+                stateGet.onerror = () => {
+                    req.result.close();
+                    finishWithMessages([], false);
                 };
             } catch {
-                hydrated = true;
-                emit();
-                resolve();
+                try { req.result.close(); } catch {}
+                finishWithMessages([], false);
             }
         };
-        req.onerror = () => {
-            hydrated = true;
-            emit();
-            resolve();
-        };
+        req.onerror = () => finishWithMessages([], false);
     });
     return hydratePromise;
 }
@@ -338,24 +478,42 @@ export function stopMascotGeneration() {
     abortController?.abort();
 }
 
-export async function sendMascotMessage({
+export async function appendMascotMessage({
     text,
     images = [],
-    context = getMascotContext(),
 }: {
     text: string;
     images?: string[];
-    context?: MascotPageContext;
-}): Promise<void> {
+}): Promise<boolean> {
     await hydrateMascotChat();
     const trimmed = text.trim();
-    if ((!trimmed && images.length === 0) || isThinking) return;
+    if ((!trimmed && images.length === 0) || isThinking) return false;
 
     const userMsg: MascotMsg = images.length > 0
         ? { role: "user", text: trimmed, images, createdAt: appNowISO() }
         : { role: "user", text: trimmed, createdAt: appNowISO() };
-    let workingMessages = normalizeMessages([...messages, userMsg]);
+    const shouldAutoTitle = !messages.some((msg) => msg.role === "user");
+    const workingMessages = normalizeMessages([...messages, userMsg]);
+    if (shouldAutoTitle && activeSessionId) {
+        sessions = sessions.map((session) => session.id === activeSessionId
+            ? { ...session, title: autoMascotSessionTitle(trimmed || "（图片）") }
+            : session);
+    }
     publishMessages(workingMessages);
+    return true;
+}
+
+export async function generateMascotReply({
+    context = getMascotContext(),
+}: {
+    context?: MascotPageContext;
+} = {}): Promise<void> {
+    await hydrateMascotChat();
+    if (isThinking) return;
+    const latestVisibleMessage = [...messages].reverse().find((msg) => !msg.hidden && msg.role !== "tool");
+    if (latestVisibleMessage?.role !== "user") return;
+
+    let workingMessages = normalizeMessages(messages);
     setThinking(true);
 
     const MAX_ROUNDS = 8;
@@ -363,7 +521,12 @@ export async function sendMascotMessage({
     const controller = new AbortController();
     abortController = controller;
     let expandedPackageIds = loadExpandedPackages();
-    const toolCtx: MascotToolContext = { pageContext: context, history: workingMessages };
+    // 每次用户发送消息就是一次独立任务；最多 8 轮工具调用共享同一备份集合。
+    const toolCtx: MascotToolContext = {
+        pageContext: context,
+        history: workingMessages,
+        characterBackupIds: new Set<string>(),
+    };
 
     try {
         for (let round = 0; round < MAX_ROUNDS; round += 1) {
@@ -509,7 +672,9 @@ export async function sendMascotMessage({
                     publishMessages(workingMessages);
                     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-                    const result = await executeMascotToolCall(call, { ...toolCtx, history: workingMessages });
+                    // 复用同一上下文，确保多轮工具调用共享角色备份状态。
+                    toolCtx.history = workingMessages;
+                    const result = await executeMascotToolCall(call, toolCtx);
                     if (result.success) mascotFillField({ field: call.name, value: result.data || "" });
 
                     const resultText = result.success ? (result.data || "完成") : (result.error || "未知错误");
@@ -552,6 +717,19 @@ export async function sendMascotMessage({
         setThinking(false);
         abortController = null;
     }
+}
+
+export async function sendMascotMessage({
+    text,
+    images = [],
+    context = getMascotContext(),
+}: {
+    text: string;
+    images?: string[];
+    context?: MascotPageContext;
+}): Promise<void> {
+    const accepted = await appendMascotMessage({ text, images });
+    if (accepted) await generateMascotReply({ context });
 }
 
 export function getMascotLastPreview(): string {

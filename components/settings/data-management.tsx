@@ -10,6 +10,7 @@ import {
   Loader2,
   MessageCircle,
   Palette,
+  RotateCcw,
   Share2,
   ShieldCheck,
   Settings2,
@@ -34,6 +35,7 @@ import {
   saveCloudBackupConfig,
   type CloudBackupConfig,
 } from "@/lib/cloud-backup/config";
+import { getRuntimePwaDisplayMode } from "@/lib/pwa-display-mode";
 import { testCloudBackupConnection } from "@/lib/cloud-backup/storage-client";
 import { listCloudBackups, loadCloudBackupState, restoreFromCloudManifest, runCloudBackup, type CloudBackupListItem, type CloudBackupState } from "@/lib/cloud-backup/engine";
 import { CloudDownload } from "lucide-react";
@@ -44,7 +46,7 @@ import {
   formatBytes,
   importBackupBlob,
   inspectData,
-  readBackupBlob,
+  readBackupManifest,
 } from "@/lib/data-management/backup";
 import {
   cleanupOrphanThemeAssets,
@@ -59,11 +61,11 @@ import {
 } from "@/lib/media-maintenance";
 import { Capacitor } from "@capacitor/core";
 import { isAndroidBrowser, isIOSBrowser, usesNativeShareSheet } from "@/lib/download-utils";
-import type { BackupEnvelope, BackupManifest, DataModuleId, DataSnapshot, ImportResult, ModuleStats } from "@/lib/data-management/types";
+import type { BackupManifest, DataModuleId, DataSnapshot, ImportResult, ModuleStats } from "@/lib/data-management/types";
 
 type PendingImport = {
   file: File;
-  envelope: BackupEnvelope;
+  manifest: BackupManifest;
 };
 
 type PendingExport = {
@@ -73,7 +75,6 @@ type PendingExport = {
 
 type PendingCloudRestore = {
   item: CloudBackupListItem;
-  overwrite: boolean;
 };
 
 type ConfirmRequest =
@@ -256,6 +257,27 @@ function formatTime(value?: string): string {
   }
 }
 
+type RestartNotice = {
+  title: string;
+  summary: string;
+};
+
+/**
+ * 导入 / 云端恢复 / 清理之后必须彻底重启应用。
+ *
+ * kv 层（lib/kv-db.ts）是「IndexedDB + 同步内存缓存」：启动时把整张 kv 表读进内存，
+ * 之后所有读都只走内存。导入是直接写 IndexedDB 的，不会回灌这份内存缓存，所以留在
+ * 当前页面不仅看到的还是旧数据，接下来任何一次写入都会用内存里的旧值把刚恢复的数据
+ * 覆盖掉。以前只用一条 2.2 秒的 toast 提示「请刷新」，用户基本看不到，改成弹窗。
+ */
+function buildRestartMessage(summary: string): string {
+  const standalone = typeof window !== "undefined" && getRuntimePwaDisplayMode() !== "browser";
+  const howTo = standalone
+    ? "请彻底关闭应用（从系统后台任务列表里划掉），然后重新打开。"
+    : "请彻底重启应用：点下方按钮，或手动关掉页面重新进入。";
+  return `${summary}\n\n数据已经写进本机，但当前页面还在用重启前的旧缓存运行。${howTo}\n\n在重启之前继续使用，可能让旧缓存把刚导入的数据重新覆盖掉。`;
+}
+
 export function DataManagement({ onNotice }: DataManagementProps) {
   const [snapshot, setSnapshot] = useState<DataSnapshot | null>(null);
   const [selectedExportModules, setSelectedExportModules] = useState<DataModuleId[]>(ALL_MODULE_IDS);
@@ -265,6 +287,7 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   const [pendingExport, setPendingExport] = useState<PendingExport | null>(null);
   const [exportSaving, setExportSaving] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const [restartNotice, setRestartNotice] = useState<RestartNotice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [persistSupported, setPersistSupported] = useState(false);
@@ -279,7 +302,6 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   const [showRestore, setShowRestore] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [restoreList, setRestoreList] = useState<CloudBackupListItem[]>([]);
-  const [restoreOverwrite, setRestoreOverwrite] = useState(false);
   const [restorePending, setRestorePending] = useState<PendingCloudRestore | null>(null);
   const [mediaConfig, setMediaConfig] = useState<MediaMaintenanceConfig>(DEFAULT_MEDIA_MAINTENANCE_CONFIG);
   const [mediaState, setMediaState] = useState<MediaMaintenanceState>({});
@@ -349,9 +371,18 @@ export function DataManagement({ onNotice }: DataManagementProps) {
       if (result.errors.length > 0) {
         console.warn("[DataManagement] cloud restore errors:", result.errors);
       }
+      const restoredCount = result.added + result.overwritten;
+      if (restoredCount === 0 && result.errors.length > 0) {
+        throw new Error(`云端恢复失败：${result.errors[0]}`);
+      }
       const errorNote = result.errors.length > 0 ? `，${result.errors.length} 项出错` : "";
-      const firstError = result.errors[0] ? `首个错误：${result.errors[0]}。` : "";
-      return `已从云端恢复：新增 ${result.added}，覆盖 ${result.overwritten}，跳过 ${result.skipped}${errorNote}。${firstError}请刷新应用让缓存重新载入。`;
+      const errorDetails = result.errors.length > 0
+        ? `\n错误详情：${result.errors.slice(0, 3).join("；")}`
+        : "";
+      setRestartNotice({
+        title: result.errors.length > 0 ? "恢复部分完成，请彻底重启应用" : "恢复完成，请彻底重启应用",
+        summary: `已从云端恢复：新增 ${result.added}，覆盖 ${result.overwritten}，跳过 ${result.skipped}${errorNote}。${errorDetails}`,
+      });
     } finally {
       setCloudProgress(null);
     }
@@ -393,7 +424,7 @@ export function DataManagement({ onNotice }: DataManagementProps) {
     [],
   );
   const pendingImportItems = useMemo<ModuleChipItem[]>(
-    () => pendingImport?.envelope.manifest.modules.map((module) => ({
+    () => pendingImport?.manifest.modules.map((module) => ({
       id: module.id,
       label: module.label,
       meta: `${module.records} 项 · ${formatBytes(module.bytes)}`,
@@ -438,14 +469,17 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   };
 
   const executeExport = (moduleIds: DataModuleId[]) => runAction("导出中", async () => {
-    const { blob, manifest } = await createBackupBlob(moduleIds, { excludeMedia: cloudConfig.excludeMedia });
+    const { blob, manifest, warnings } = await createBackupBlob(moduleIds, { excludeMedia: cloudConfig.excludeMedia });
     const note = manifest.mediaExcluded ? "（不含图片/多媒体）" : "";
+    // 导出侧不静默：数据库打不开 / 关键模块 0 记录必须当面告知，
+    // 否则用户会带着一个"看起来成功、实际缺整库"的备份走（用户实报踩坑）
+    const warnNote = warnings.length > 0 ? `⚠️ ${warnings.join("；")}` : "";
     if (isIOSBrowser() || isAndroidBrowser()) {
       setPendingExport({ blob, manifest });
-      return `备份文件已生成：${manifest.modules.length} 个模块，${formatBytes(manifest.totalBytes)}${note}。请点“保存备份文件”。`;
+      return `备份文件已生成：${manifest.modules.length} 个模块，${formatBytes(manifest.totalBytes)}${note}。请点“保存备份文件”。${warnNote}`;
     }
     await downloadBackupBlob(blob, manifest, { disableNativeShare: true });
-    return `已导出 ${manifest.modules.length} 个模块，${formatBytes(manifest.totalBytes)}${note}。`;
+    return `已导出 ${manifest.modules.length} 个模块，${formatBytes(manifest.totalBytes)}${note}。${warnNote}`;
   });
 
   const savePendingExport = async () => {
@@ -470,10 +504,10 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   const handleFileSelected = async (file: File | undefined) => {
     if (!file) return;
     await runAction("读取备份", async () => {
-      const envelope = await readBackupBlob(file);
-      setPendingImport({ file, envelope });
-      setSelectedImportModules(envelope.manifest.modules.map((module) => module.id));
-      return `已读取备份：${envelope.manifest.modules.map((module) => module.label).join("、")}`;
+      const manifest = await readBackupManifest(file);
+      setPendingImport({ file, manifest });
+      setSelectedImportModules(manifest.modules.map((module) => module.id));
+      return `已读取备份：${manifest.modules.map((module) => module.label).join("、")}`;
     });
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -494,13 +528,16 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   const executeImport = (moduleIds: DataModuleId[], overwrite = false) => runAction("导入中", async () => {
     if (!pendingImport) return "请先选择备份文件。";
     const result: ImportResult = await importBackupBlob(pendingImport.file, moduleIds, { overwrite });
+    const importedCount = result.added + result.overwritten;
+    if (importedCount === 0 && result.errors.length > 0) {
+      throw new Error(`导入失败：${result.errors[0]}`);
+    }
     setPendingImport(null);
     const summary = `导入完成：新增 ${result.added}，跳过 ${result.skipped}，覆盖 ${result.overwritten}`;
-    if (result.errors.length > 0) {
-      const firstError = result.errors[0] ? `首个错误：${result.errors[0]}。` : "";
-      return `${summary}。错误 ${result.errors.length} 个，${firstError}建议刷新后检查。`;
-    }
-    return `${summary}。请刷新应用让缓存重新载入。`;
+    const errorNote = result.errors.length > 0
+      ? `，错误 ${result.errors.length} 个${result.errors[0] ? `\n首个错误：${result.errors[0]}` : ""}`
+      : "";
+    setRestartNotice({ title: "导入完成，请彻底重启应用", summary: `${summary}${errorNote}。` });
   });
 
   const handlePersist = () => runAction("申请保护", async () => {
@@ -530,8 +567,8 @@ export function DataManagement({ onNotice }: DataManagementProps) {
   const executeClearSelected = (moduleIds: DataModuleId[]) => runAction("清理中", async () => {
     const result = await clearModules(moduleIds);
     setSelectedClearModules([]);
-    if (result.errors.length > 0) return `已清理 ${result.removed} 项，另有 ${result.errors.length} 个错误。`;
-    return `已清理 ${result.removed} 项。请刷新应用让缓存重新载入。`;
+    const errorNote = result.errors.length > 0 ? `，另有 ${result.errors.length} 个错误` : "";
+    setRestartNotice({ title: "清理完成，请彻底重启应用", summary: `已清理 ${result.removed} 项${errorNote}。` });
   });
 
   const executeMediaMaintenance = () => runAction("媒体清理中", async () => {
@@ -785,13 +822,15 @@ export function DataManagement({ onNotice }: DataManagementProps) {
                 {cloudState.lastResult === "skipped" ? " · 无变化已跳过" : ""}
               </div>
             )}
+            {cloudState.lastResult === "error" && cloudState.lastError && (
+              <div className="data-cloud-result is-err" role="status">
+                最近一次云备份失败：{cloudState.lastError}
+              </div>
+            )}
 
             {showRestore && (
               <div className="data-cloud-restore">
-                <label className="data-cloud-restore-overwrite">
-                  <input type="checkbox" checked={restoreOverwrite} onChange={(e) => setRestoreOverwrite(e.target.checked)} />
-                  <span>覆盖恢复提醒（不勾选则合并；同 ID 仍以云端为准）</span>
-                </label>
+                <div className="data-cloud-status">恢复会合并写入：同 ID 以云端为准，本机额外数据会保留。</div>
                 {busy === "恢复中" ? (
                   <div className="data-cloud-progress" role="status">
                     <div className="data-cloud-progress-track">
@@ -810,14 +849,18 @@ export function DataManagement({ onNotice }: DataManagementProps) {
                     {restoreList.map((item) => (
                       <li key={item.name} className="data-cloud-restore-item">
                         <div className="menu-label-group">
-                          <span className="menu-label">{formatTime(item.createdAt)}{item.quarantine ? " · 待复核" : ""}</span>
-                          <span className="menu-desc">{formatBytes(item.totalBytes)} · {item.totalRecords} 项</span>
+                          <span className="menu-label">
+                            {formatTime(item.createdAt)}{item.error ? " · 清单损坏" : item.quarantine ? " · 待复核" : ""}
+                          </span>
+                          <span className="menu-desc">
+                            {item.error ?? `${formatBytes(item.totalBytes)} · ${item.totalRecords} 项`}
+                          </span>
                         </div>
                         <button
                           type="button"
                           className="ui-btn ui-btn-outline py-1 px-3 ts-12"
-                          onClick={() => setRestorePending({ item, overwrite: restoreOverwrite })}
-                          disabled={Boolean(busy)}
+                          onClick={() => setRestorePending({ item })}
+                          disabled={Boolean(busy) || Boolean(item.error)}
                         >
                           恢复
                         </button>
@@ -914,8 +957,8 @@ export function DataManagement({ onNotice }: DataManagementProps) {
             </div>
             <div className="modal-body" data-ui="modal-body" style={{ textAlign: "left", width: "100%" }}>
               <p className="menu-desc" style={{ marginBottom: 12 }}>
-                {formatTime(pendingImport.envelope.manifest.createdAt)} · {formatBytes(pendingImport.envelope.manifest.totalBytes)}
-                {pendingImport.envelope.manifest.mediaExcluded ? " · 不含图片" : ""}
+                {formatTime(pendingImport.manifest.createdAt)} · {formatBytes(pendingImport.manifest.totalBytes)}
+                {pendingImport.manifest.mediaExcluded ? " · 不含图片" : ""}
               </p>
               <div className="data-inline-actions" style={{ marginBottom: 10 }}>
                 <span className="menu-desc" style={{ marginRight: "auto" }}>选择要导入的模块（{selectedImportModules.length} / {pendingImportItems.length}）</span>
@@ -1028,18 +1071,39 @@ export function DataManagement({ onNotice }: DataManagementProps) {
 
       {restorePending && (
         <ConfirmDialog
-          title={restorePending.overwrite ? "确认覆盖恢复？" : "确认合并恢复？"}
-          message={
-            restorePending.overwrite
-              ? `将用 ${formatTime(restorePending.item.createdAt)} 这份云端备份覆盖本机同 ID 数据。建议先「立即备份」当前数据。是否继续？`
-              : `将把 ${formatTime(restorePending.item.createdAt)} 这份云端备份合并到本机数据；本机没有的数据会新增，同 ID 数据以备份为准。是否继续？`
-          }
+          title="确认从云端恢复？"
+          message={`将把 ${formatTime(restorePending.item.createdAt)} 这份云端备份合并到本机数据；本机没有的数据会新增，同 ID 数据以云端为准，本机额外数据会保留。建议先「立即备份」当前数据。是否继续？`}
           icon={CloudDownload}
-          variant={restorePending.overwrite ? "danger" : "action"}
-          confirmLabel={restorePending.overwrite ? "确认覆盖" : "确认合并"}
+          variant="action"
+          confirmLabel="确认恢复"
           onConfirm={() => { const pending = restorePending; setRestorePending(null); if (pending) void confirmRestore(pending); }}
           onCancel={() => setRestorePending(null)}
         />
+      )}
+
+      {/* 不给遮罩挂 onClick：这条必须让用户显式选一个，误触关掉就等于没提示过。 */}
+      {restartNotice && (
+        <div className="modal-overlay" data-ui="modal">
+          <div className="modal-dialog" data-ui="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header" data-ui="modal-header">
+              <div className="ui-icon-circle"><RotateCcw size={20} /></div>
+              <h3 className="modal-title">{restartNotice.title}</h3>
+            </div>
+            <div className="modal-body" data-ui="modal-body" style={{ textAlign: "left", width: "100%" }}>
+              <p style={{ whiteSpace: "pre-line" }}>{buildRestartMessage(restartNotice.summary)}</p>
+            </div>
+            <div className="modal-footer" data-ui="modal-footer" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                type="button"
+                className="ui-btn ui-btn-primary"
+                style={{ width: "100%", whiteSpace: "nowrap" }}
+                onClick={() => window.location.reload()}
+              >
+                <RotateCcw size={16} /> 立即重启
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

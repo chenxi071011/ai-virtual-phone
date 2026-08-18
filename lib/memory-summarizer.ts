@@ -17,7 +17,7 @@ import {
     incrementCoreMemoryCounter,
 } from "./memory-storage";
 import { resolveAuxiliaryApiConfig } from "./settings-storage";
-import { loadNativeTimeline, formatTimelineForSummarization } from "./short-term-assembler";
+import { loadNativeTimeline, formatTimelineForSummarization, filterTimelineByAllowedSources } from "./short-term-assembler";
 import { generateEmbedding, resolveEmbeddingModel } from "./memory-embedding";
 import { simpleLLMCall } from "./api-helpers";
 import { maybeRunCoreMemoryPipeline } from "./core-memory-builder";
@@ -76,7 +76,13 @@ export async function runSummarizationPipeline(
     const afterTimestamp = options?.force
         ? undefined
         : options?.sinceTimestamp ?? (getLastSummarizedTimestamp(characterId) ?? undefined);
-    const allEntries = loadNativeTimeline(characterId, afterTimestamp ? { afterTimestamp } : undefined);
+    // 记忆来源开关同样作用于长期总结：被关掉的来源不进总结素材。
+    // 进度水位线取「过滤后」最后一条的时间，因此关掉的来源不会把水位线推过头，
+    // 但已被水位线越过的内容重新打开后也不会回补——这一点在设置里已注明。
+    const allEntries = filterTimelineByAllowedSources(
+        loadNativeTimeline(characterId, afterTimestamp ? { afterTimestamp } : undefined),
+        config.shortTermAllowedSources,
+    );
 
     if (allEntries.length < 4) {
         if (!options?.force) resetEventCounter(characterId);

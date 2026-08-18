@@ -32,11 +32,13 @@ import ReadingApp from "@/components/reading/reading-app";
 import MapApp from "@/components/map/map-app";
 import { DwellingApp } from "@/components/dwelling/dwelling-app";
 import { MascotFloat } from "@/components/mascot/mascot-float";
+import { MascotPreviewHost } from "@/components/mascot/mascot-preview-host";
 import { useMusicControlsOptional } from "@/lib/music-context";
 import { PhoneResourcesApp, type ResourceSubPage } from "@/components/phone-resources-app";
 import { CheckPhoneApp } from "@/components/checkphone/checkphone-app";
 import { ShoppingApp } from "@/components/shopping/shopping-app";
 import { GameHubApp } from "@/components/game/game-hub-app";
+import { MixologyApp } from "@/components/mixology/mixology-app";
 import InterviewMagazineApp from "@/components/interview/interview-magazine-app";
 import { CoCreateApp } from "@/components/cocreate/cocreate-app";
 import { AppMarketApp } from "@/components/app-market/app-market-app";
@@ -56,6 +58,8 @@ import {
   PAGE_1_DEFAULT,
   PAGE_2_DEFAULT,
   PAGE_3_DEFAULT,
+  createFolderIconId,
+  isFolderIconId,
   type DesktopIconId,
   type IconId,
   type IconPosition
@@ -111,8 +115,11 @@ import {
   loadDockLayout,
   normalizeDock,
   writeDockLayout,
+  loadDesktopFolders,
+  writeDesktopFolders,
   DOCK_LAYOUT_STORAGE_KEY,
   DOCK_MAX,
+  type DesktopFolderMap,
   type DesktopIconLayout,
   type DesktopPageKey,
 } from "@/lib/desktop-layout-storage";
@@ -127,6 +134,7 @@ import { generateChatCompletion, flattenCompletionResult } from "@/lib/chat-engi
 import { parseAIResponse } from "@/lib/rich-message-parser";
 import { requestBackgroundChatReply, scheduleFollowUp } from "@/lib/follow-up-service";
 import { CHAT_MESSAGE_NOTICE_EVENT, CHAT_OPEN_SESSION_EVENT, type ChatMessageNoticeDetail } from "@/lib/chat-notification-events";
+import { startIncomingCallVibration } from "@/lib/call-vibration";
 import { setMascotContext } from "@/lib/mascot-context";
 import { DESKTOP_WIDGETS_CHANGED_EVENT } from "@/lib/mascot-events";
 import { useWeixinBridge } from "@/lib/use-weixin-bridge";
@@ -408,7 +416,7 @@ function migrateLegacyDesktopIconId(id: string, customIconIds = getInstalledCust
 }
 
 /** Validate an IconPosition[] page, dedup by id and position */
-function normalizePageV2(raw: unknown, pageWidgets: WidgetInstance[]): IconPosition[] {
+function normalizePageV2(raw: unknown, pageWidgets: WidgetInstance[], folderIds: Set<string> = new Set()): IconPosition[] {
   if (!Array.isArray(raw)) return [];
 
   const allKnown = new Set<string>(Object.keys(ICONS));
@@ -422,8 +430,11 @@ function normalizePageV2(raw: unknown, pageWidgets: WidgetInstance[]): IconPosit
     if (!item || typeof item !== "object") continue;
     const { id, row, col } = item as { id: string; row: number; col: number };
     if (typeof id !== "string" || typeof row !== "number" || typeof col !== "number") continue;
-    const iconId = migrateLegacyDesktopIconId(id, customIconIds);
-    if (!iconId || (!allKnown.has(iconId) && !customIconIds.has(iconId))) continue;
+    // 文件夹 tile：只认内容表里真实存在的文件夹，防止幽灵 tile
+    const iconId = isFolderIconId(id)
+      ? (folderIds.has(id) ? id : null)
+      : migrateLegacyDesktopIconId(id, customIconIds);
+    if (!iconId || (!isFolderIconId(iconId) && !allKnown.has(iconId) && !customIconIds.has(iconId))) continue;
     if (seenIds.has(iconId)) continue;
     if (row < 1 || row > GRID_ROWS || col < 1 || col > GRID_COLS) continue;
     const cellKey = `${row},${col}`;
@@ -477,9 +488,10 @@ function migratePageV1(raw: unknown, defaults: IconId[], pageWidgets: WidgetInst
   return result;
 }
 
-function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<DesktopIconId> = new Set()): DesktopLayout {
+function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<DesktopIconId> = new Set(), folders: DesktopFolderMap = {}): DesktopLayout {
   if (!raw || typeof raw !== "object") return createDefaultDesktopIconLayout(widgets);
   const candidate = raw as Record<string, unknown>;
+  const folderIds = new Set(Object.keys(folders));
   const maxPage = Math.max(
     2,
     ...Object.keys(candidate).map(getDesktopPageNumber),
@@ -489,7 +501,7 @@ function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<D
   for (let page = 1; page <= maxPage; page += 1) {
     const pageKey = getDesktopPageKey(page);
     // Icons that live in the dock must never also appear on a page.
-    layout[pageKey] = normalizePageV2(candidate[pageKey], widgets.filter(w => w.page === page))
+    layout[pageKey] = normalizePageV2(candidate[pageKey], widgets.filter(w => w.page === page), folderIds)
       .filter((ic) => !dockIds.has(ic.id));
   }
 
@@ -497,7 +509,11 @@ function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<D
   // the user has moved into the dock). DOCK_DEFAULT 也纳入兜底：若某默认 dock
   // 图标（如设置）既不在任何页面也不在 dock（如恢复默认/导入主题后 dock 未含它），
   // 就近放回页面，防止图标彻底丢失。
+  // 「已放置」包括藏在文件夹里的图标，否则重启后文件夹成员会被兜底复制一份铺回桌面。
   const allPlaced = new Set<DesktopIconId>(getDesktopIconLayoutItems(layout).map(ic => ic.id));
+  for (const folder of Object.values(folders)) {
+    for (const memberId of folder.icons) allPlaced.add(memberId);
+  }
   const allDefaults = [...PAGE_1_DEFAULT, ...PAGE_2_DEFAULT, ...PAGE_3_DEFAULT, ...DOCK_DEFAULT];
 
   for (const id of allDefaults) {
@@ -521,6 +537,76 @@ function normalizeLayout(raw: unknown, widgets: WidgetInstance[], dockIds: Set<D
   }
 
   return trimEmptyTrailingPages(layout, widgets);
+}
+
+/**
+ * 文件夹与布局的一致性收拾：
+ * - 成员若已经出现在页面/dock 上（以摆出来的为准），从文件夹里摘除；
+ * - 卸载掉的自定义 APP 成员摘除（normalizeDesktopFolders 已管，这里兜底运行时变化）；
+ * - 只剩 ≤1 个成员的文件夹解散：剩下的图标顶回 tile 原来的格子；
+ * - 布局里指向不存在文件夹的 tile 由 normalizeLayout 过滤，这里不重复。
+ * 返回新对象；changed=false 时引用原样返回，调用方可以跳过持久化。
+ */
+function sanitizeDesktopFolders(
+  folders: DesktopFolderMap,
+  layout: DesktopLayout,
+  dock: DesktopIconId[],
+  widgets: WidgetInstance[],
+): { folders: DesktopFolderMap; layout: DesktopLayout; changed: boolean } {
+  const placedOutside = new Set<DesktopIconId>([
+    ...getDesktopIconLayoutItems(layout).map(ic => ic.id),
+    ...dock,
+  ]);
+  const customIconIds = getInstalledCustomIconIds();
+  let changed = false;
+  const nextFolders: DesktopFolderMap = {};
+  let nextLayout = layout;
+
+  const removeTile = (folderId: string): { pageKey: DesktopPageKey; row: number; col: number } | null => {
+    for (const pageKey of getDesktopPageKeysForState(nextLayout, widgets)) {
+      const tile = (nextLayout[pageKey] ?? []).find(ic => ic.id === folderId);
+      if (!tile) continue;
+      if (nextLayout === layout) nextLayout = cloneDesktopLayout(layout, widgets);
+      nextLayout[pageKey] = nextLayout[pageKey].filter(ic => ic.id !== folderId);
+      return { pageKey, row: tile.row, col: tile.col };
+    }
+    return null;
+  };
+
+  for (const [folderId, folder] of Object.entries(folders)) {
+    const members = folder.icons.filter(id =>
+      !placedOutside.has(id)
+      && !isFolderIconId(id)
+      && (id in ICONS || customIconIds.has(id)));
+    if (members.length !== folder.icons.length) changed = true;
+    if (members.length <= 1) {
+      // 解散：tile 换成剩下的那个图标（若有）
+      changed = true;
+      const spot = removeTile(folderId);
+      const remaining = members[0];
+      if (remaining) {
+        if (nextLayout === layout) nextLayout = cloneDesktopLayout(layout, widgets);
+        if (spot) {
+          nextLayout[spot.pageKey] = [...(nextLayout[spot.pageKey] ?? []), { id: remaining, row: spot.row, col: spot.col }];
+        } else {
+          placeIconOnAvailablePage(nextLayout, widgets, { id: remaining, row: 1, col: 1 }, 1);
+        }
+      }
+      continue;
+    }
+    nextFolders[folderId] = members.length === folder.icons.length ? folder : { ...folder, icons: members };
+    // 崩溃等意外可能造成"文件夹记录在、格子却不在任何页面"：成员被文件夹托管着，
+    // 桌面上却什么都不渲染，默认图标兜底又把成员算作"已放置"——图标就永久隐身了
+    //（用户表现：某图标凭空消失，恢复默认布局才回来）。这里把格子就近放回页面自愈。
+    const tilePlaced = getDesktopIconLayoutItems(nextLayout).some(ic => ic.id === folderId);
+    if (!tilePlaced) {
+      if (nextLayout === layout) nextLayout = cloneDesktopLayout(layout, widgets);
+      placeIconOnAvailablePage(nextLayout, widgets, { id: folderId as DesktopIconId, row: 1, col: 1 }, 1);
+      changed = true;
+    }
+  }
+  if (!changed) return { folders, layout, changed: false };
+  return { folders: nextFolders, layout: trimEmptyTrailingPages(nextLayout, widgets), changed: true };
 }
 
 function StatusClock() {
@@ -667,12 +753,18 @@ function placeIconOnAvailablePage(
   }
 }
 
-/** Convert pointer screen position to a grid cell (0-based) */
-function pointerToGridCell(
-  px: number,
-  py: number,
-  gridEl: HTMLElement
-): { row: number; col: number } | null {
+/** 网格几何：格子原点/步距/内容尺寸（屏幕像素）。指针→格子换算和
+ *  图标矩形碰撞检测共用同一份，保证两套判定不会各说各话。 */
+type GridGeometry = {
+  originX: number;
+  originY: number;
+  colStep: number;
+  rowStep: number;
+  colWidth: number;
+  rowHeight: number;
+};
+
+function getGridGeometry(gridEl: HTMLElement): GridGeometry {
   const rect = gridEl.getBoundingClientRect();
   const computed = getComputedStyle(gridEl);
   const colWidths = computed.gridTemplateColumns.split(/\s+/).map(parseFloat);
@@ -684,12 +776,20 @@ function pointerToGridCell(
   const contentWidth = colWidths.length * colWidth + (colWidths.length - 1) * colGap;
   const originX = rect.left + (rect.width - contentWidth) / 2;
   const originY = rect.top + (parseFloat(computed.paddingTop) || 0);
-  const colStep = colWidth + colGap;
   const totalRowGap = (GRID_ROWS - 1) * rowGap;
   const rowHeight = (rect.height - padY - totalRowGap) / GRID_ROWS;
-  const rowStep = rowHeight + rowGap;
-  const col = Math.floor((px - originX) / colStep);
-  const row = Math.floor((py - originY) / rowStep);
+  return { originX, originY, colStep: colWidth + colGap, rowStep: rowHeight + rowGap, colWidth, rowHeight };
+}
+
+/** Convert pointer screen position to a grid cell (0-based) */
+function pointerToGridCell(
+  px: number,
+  py: number,
+  gridEl: HTMLElement
+): { row: number; col: number } | null {
+  const geom = getGridGeometry(gridEl);
+  const col = Math.floor((px - geom.originX) / geom.colStep);
+  const row = Math.floor((py - geom.originY) / geom.rowStep);
   if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return null;
   return { row, col };
 }
@@ -959,6 +1059,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [layout, setLayout] = useState<DesktopLayout>(DEFAULT_LAYOUT);
   // Dock is an ordered icon-id list (max DOCK_MAX), kept disjoint from `layout`.
   const [dock, setDock] = useState<DesktopIconId[]>(DOCK_DEFAULT);
+  // 桌面文件夹：tile 在 layout 里占格子，这张表管名字和成员
+  const [folders, setFolders] = useState<DesktopFolderMap>({});
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  const [folderPageIndex, setFolderPageIndex] = useState(0);
+  // 拖拽悬停到某图标中心足够久 → 该图标高亮为“松手成组”目标
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
   const [desktopReady, setDesktopReady] = useState(false);
   const [glassPaintPass, setGlassPaintPass] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -994,6 +1100,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [incomingCall, setIncomingCall] = useState<{
     sessionId: string; type: "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean;
   } | null>(null);
+  // 桌面来电横幅显示期间循环振动（开关在聊天主页"语音/视频来电振动"）
+  useEffect(() => {
+    if (!incomingCall) return;
+    return startIncomingCallVibration();
+  }, [incomingCall]);
   const [chatMessageNotice, setChatMessageNotice] = useState<{
     sessionId: string;
     title: string;
@@ -1211,6 +1322,20 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     initialLayout: DesktopLayout;
     initialWidgets: WidgetInstance[];
     initialDock: DesktopIconId[];
+    // ── 文件夹 ──
+    // 从打开的文件夹里拖出来时：记来源文件夹（取消时把成员放回去）
+    sourceFolderId: string | null;
+    initialFolders: DesktopFolderMap;
+    // ── 碰撞裁决（iOS 手感）──
+    // 悬浮图标矩形和目标图标矩形从分开变为相交的那一刻裁决一次：
+    // 任一边重叠过半 = 合并，否则 = 换位；相交期间不改判，分开后重置。
+    contactId: DesktopIconId | null;
+    contactIntent: "merge" | "swap" | null;
+    // 合并目标接触约 0.2s 后亮圈并"武装"；未武装时松手只弹回，防路过误进组
+    mergeTimer: ReturnType<typeof setTimeout> | null;
+    mergeArmed: boolean;
+    mergeTargetIconId: DesktopIconId | null;
+    mergeTargetPage: DesktopPageKey | null;
   } | null>(null);
   const editTapRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   // Refs to latest state for use in stable callbacks
@@ -1222,6 +1347,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   layoutRef.current = layout;
   const dockRef = useRef(dock);
   dockRef.current = dock;
+  const foldersRef = useRef(folders);
+  foldersRef.current = folders;
 
   const activeIconSkins = useMemo(() => resolveActiveIconSkins(draftTheme), [draftTheme]);
   const themeAssetKey = useMemo(() => collectThemeAssetIds(draftTheme).sort().join("|"), [draftTheme]);
@@ -1360,9 +1487,21 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       const hydratedDock = loadDockLayout();
       setDock(hydratedDock);
       const dockIds = new Set<DesktopIconId>(hydratedDock);
+      const hydratedFolders = loadDesktopFolders();
       const rawV2 = kvGet(ICON_LAYOUT_STORAGE_KEY);
       if (rawV2) {
-        try { setLayout(normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds)); setDesktopReady(true); return; } catch {}
+        try {
+          const normalized = normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds, hydratedFolders);
+          const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
+          setFolders(sane.folders);
+          setLayout(sane.layout);
+          if (sane.changed) {
+            writeDesktopFolders(sane.folders);
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
+          }
+          setDesktopReady(true);
+          return;
+        } catch {}
       }
       const rawV1 = kvGet(ICON_LAYOUT_STORAGE_KEY_V1);
       if (rawV1) {
@@ -1398,9 +1537,15 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       }
       const dockIds = new Set<DesktopIconId>(nextDock);
       setLayout(prev => {
-        const next = normalizeLayout(prev, widgetsRef.current, dockIds);
-        kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(next));
-        return next;
+        const normalized = normalizeLayout(prev, widgetsRef.current, dockIds, foldersRef.current);
+        // 成员被卸载的文件夹要摘人/解散（sanitize 内会连带调整布局）
+        const sane = sanitizeDesktopFolders(foldersRef.current, normalized, nextDock, widgetsRef.current);
+        if (sane.changed) {
+          setFolders(sane.folders);
+          writeDesktopFolders(sane.folders);
+        }
+        kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
+        return sane.layout;
       });
       setActiveApp(prev => {
         const appId = prev ? customAppIdFromIconId(prev) : null;
@@ -1922,6 +2067,30 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
 
   const activeIcon = activeApp ? getDesktopIconMeta(activeApp) : null;
 
+  // 文件夹 tile 里的迷你图标：皮肤/自定义图标优先，否则画小号 glyph。
+  // 底板样式全靠 CSS 变量，跟随图标材质调节。
+  const renderFolderMini = (memberId: DesktopIconId) => {
+    const meta = getDesktopIconMeta(memberId);
+    if (!meta) return null;
+    const skinId = activeIconSkins[memberId];
+    const skinUrl = skinId ? themeAssets[skinId] ?? null : null;
+    const customUrl = meta.customApp && customAppIconStyles[meta.customApp.id] !== "global"
+      ? meta.customApp.iconDataUrl ?? null
+      : null;
+    const imageUrl = skinUrl || customUrl;
+    return (
+      <span key={memberId} className="folder-mini" aria-hidden>
+        {imageUrl ? (
+          <span className="icon-skin-layer" style={{ backgroundImage: `url("${imageUrl}")` }} />
+        ) : meta.customApp ? (
+          <CustomAppGlyph seed={meta.customApp.name} className="folder-mini-glyph" />
+        ) : (
+          <IconGlyph id={meta.id as IconId} className="folder-mini-glyph" />
+        )}
+      </span>
+    );
+  };
+
   function openWorldBuilder(path: string): void {
     // 打包成静态导出后，Capacitor 的 WebViewLocalServer 只认识实际存在的文件名
     // （构建产物是 world-builder.html，没有扩展名的 /world-builder 匹配不到任何资源，
@@ -1994,6 +2163,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   }
 
   function openApp(iconId: DesktopIconId): void {
+    if (isFolderIconId(iconId)) return; // 文件夹 tile 由点击处打开面板，不走这里
     if (customAppIdFromIconId(iconId)) {
       openCustomAppWithBackgroundUpdateCheck(iconId);
       return;
@@ -2016,7 +2186,9 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     setLayout(prev => {
       const widgets = widgetsRef.current;
       const next = cloneDesktopLayout(prev, widgets);
-      if (getDesktopIconLayoutItems(next).some(icon => icon.id === iconId) || dockRef.current.includes(iconId)) {
+      if (getDesktopIconLayoutItems(next).some(icon => icon.id === iconId)
+        || dockRef.current.includes(iconId)
+        || Object.values(foldersRef.current).some(folder => folder.icons.includes(iconId))) {
         return next;
       }
       const pageNumbers = getDesktopPageKeysForState(next, widgets).map(getDesktopPageNumber);
@@ -2267,10 +2439,38 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     editDragRef.current = null;
     editTapRef.current = null;
     if (ghostRef.current) ghostRef.current.style.display = "none";
-    // Save layout, dock and widgets once on exit
+    // Save layout, dock, folders and widgets once on exit
     kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(layoutRef.current));
     kvSet(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(dockRef.current));
+    writeDesktopFolders(foldersRef.current);
     saveWidgets(widgetsRef.current);
+  }
+
+  /** 文件夹只剩 ≤1 个成员就地解散：剩下的图标顶回 tile 的格子 */
+  function dissolveFolderIfTiny(folderId: string) {
+    const folder = foldersRef.current[folderId];
+    if (!folder || folder.icons.length > 1) return;
+    const remaining = folder.icons[0] ?? null;
+    const widgets = widgetsRef.current;
+    const next = cloneDesktopLayout(layoutRef.current, widgets);
+    let replaced = false;
+    for (const pageKey of getDesktopPageKeysForState(next, widgets)) {
+      const tile = (next[pageKey] ?? []).find(ic => ic.id === folderId);
+      if (!tile) continue;
+      next[pageKey] = next[pageKey].filter(ic => ic.id !== folderId);
+      if (remaining) next[pageKey] = [...next[pageKey], { id: remaining, row: tile.row, col: tile.col }];
+      replaced = true;
+      break;
+    }
+    if (!replaced && remaining) placeIconOnAvailablePage(next, widgets, { id: remaining, row: 1, col: 1 }, 1);
+    const nextFolders = { ...foldersRef.current };
+    delete nextFolders[folderId];
+    const trimmed = trimEmptyTrailingPages(next, widgets);
+    setFolders(nextFolders);
+    setLayout(trimmed);
+    setOpenFolderId(current => (current === folderId ? null : current));
+    writeDesktopFolders(nextFolders);
+    kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(trimmed));
   }
 
   function startDragPending(
@@ -2327,6 +2527,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       initialLayout: layoutRef.current,
       initialWidgets: widgetsRef.current,
       initialDock: dockRef.current,
+      sourceFolderId: null,
+      initialFolders: foldersRef.current,
+      contactId: null,
+      contactIntent: null,
+      mergeTimer: null,
+      mergeArmed: false,
+      mergeTargetIconId: null,
+      mergeTargetPage: null,
     };
     // Kill swipe tracking for this pointer
     swipeRef.current.pointerId = null;
@@ -2345,6 +2553,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   }, []);
 
   function activateDrag(e: React.PointerEvent) {
+    activateDragAt(e.pointerId, e.clientX, e.clientY);
+  }
+
+  // 文件夹面板里长按拖出时面板会立刻卸载，没有 React 事件可传，
+  // 所以激活逻辑用裸坐标实现，两个入口共用。
+  function activateDragAt(pointerId: number, clientX: number, clientY: number) {
     const drag = editDragRef.current;
     if (!drag) return;
     drag.active = true;
@@ -2377,8 +2591,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     drag.shellLeft = shellRect?.left ?? 0;
     drag.shellTop = shellRect?.top ?? 0;
     setDragItem({ type: drag.itemType, id: drag.itemId, sourcePage: drag.sourcePage });
-    workspaceRef.current?.setPointerCapture(e.pointerId);
-    updateGhostPos(e.clientX, e.clientY);
+    try { workspaceRef.current?.setPointerCapture(pointerId); } catch { /* pointer 可能已抬起 */ }
+    updateGhostPos(clientX, clientY);
   }
 
   function updateGhostPos(x: number, y: number) {
@@ -2415,16 +2629,34 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     setDock(drag.initialDock);
   }
 
+  /** 取消“成组”意图：停表 + 熄灭高亮 + 解除武装 */
+  function clearMergeIntent(drag: NonNullable<typeof editDragRef.current>) {
+    if (drag.mergeTimer) { clearTimeout(drag.mergeTimer); drag.mergeTimer = null; }
+    if (drag.mergeTargetIconId) setMergeTargetId(null);
+    drag.mergeArmed = false;
+    drag.mergeTargetIconId = null;
+    drag.mergeTargetPage = null;
+  }
+
+  /** 接触结束（矩形完全分开/离开网格/进 dock）：重置裁决，下次相交重新算 */
+  function clearContact(drag: NonNullable<typeof editDragRef.current>) {
+    drag.contactId = null;
+    drag.contactIntent = null;
+    clearMergeIntent(drag);
+  }
+
   function updateDropTargetFromPointer(x: number, y: number) {
     const drag = editDragRef.current;
     if (!drag) return;
 
     // ── Dock drop zone (icons only; widgets can't live in the dock) ──
     if (drag.itemType === "icon" && pointerOverDock(x, y)) {
+      clearContact(drag);
       const fromDock = drag.sourcePage === DOCK_PAGE_KEY;
       const baseLen = drag.initialDock.filter((id) => id !== drag.itemId).length;
       // Dock full and the icon comes from a page → not allowed. Behave as no-target.
-      if (!fromDock && baseLen >= DOCK_MAX) {
+      // 文件夹 tile 不允许进 dock，一律按无目标处理。
+      if ((!fromDock && baseLen >= DOCK_MAX) || isFolderIconId(drag.itemId)) {
         if (drag.targetPage !== null) resetDragPreview(drag);
         drag.targetPage = null;
         drag.lastTargetKey = "";
@@ -2448,19 +2680,88 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     const gridEl = gridRefs.current[pageKey];
     if (!gridEl) return;
 
-    const cell = pointerToGridCell(x, y, gridEl);
-    if (!cell) {
-      if (drag.targetPage !== null) resetDragPreview(drag);
-      drag.targetPage = null;
-      drag.lastTargetKey = "";
-      setDropTarget(null);
-      return;
-    }
-
     const pageNum = getDesktopPageNumber(pageKey) || 1;
     const ws = widgetsRef.current;
 
     if (drag.itemType === "icon") {
+      // ── 矩形碰撞裁决（iOS 手感）──
+      // 悬浮图标矩形 vs 目标图标矩形（位置取拖起时的原始布局）。两矩形从
+      // 分开变为相交的那一刻裁决一次：任一边重叠过半 = 合并（目标原地不动，
+      // ~0.2s 后亮圈武装，松手成组）；两边都不过半 = 换位（目标让位，照旧）。
+      // 相交期间不改判——边对边推进去永远是合并，切着角进去永远是换位；
+      // 想改判把图标拉开重新进即可。文件夹 tile 只换位不合并（不嵌套）。
+      const geom = getGridGeometry(gridEl);
+      const dragBoxW = Math.min(58, drag.ghostW);
+      const dragLeft = x - drag.offsetX + (drag.ghostW - dragBoxW) / 2;
+      const dragTop = y - drag.offsetY;
+      const targetBoxW = Math.min(58, geom.colWidth);
+      let best: { id: DesktopIconId; row: number; col: number; ox: number; oy: number; area: number } | null = null;
+      for (const ic of drag.initialLayout[pageKey] ?? []) {
+        if (ic.id === drag.itemId) continue;
+        const tLeft = geom.originX + (ic.col - 1) * geom.colStep + (geom.colWidth - targetBoxW) / 2;
+        const tTop = geom.originY + (ic.row - 1) * geom.rowStep;
+        const ox = Math.min(dragLeft + dragBoxW, tLeft + targetBoxW) - Math.max(dragLeft, tLeft);
+        const oy = Math.min(dragTop + dragBoxW, tTop + targetBoxW) - Math.max(dragTop, tTop);
+        if (ox <= 0 || oy <= 0) continue;
+        const area = ox * oy;
+        if (!best || area > best.area) best = { id: ic.id, row: ic.row, col: ic.col, ox, oy, area };
+      }
+
+      if (best && best.id === drag.contactId) {
+        // 同一次接触持续中：维持裁决。合并=冻结中无事可做；换位=目标已锁定。
+        return;
+      }
+      if (best) {
+        // 新接触：只在此刻裁决一次
+        clearMergeIntent(drag);
+        drag.contactId = best.id;
+        // 合并阈值：接触瞬间任一边重叠超过边长的 60%（50% 手感偏灵，容易误判成组）
+        const mergeEdge = Math.min(dragBoxW, targetBoxW) * 0.6;
+        const merge = !isFolderIconId(drag.itemId) && (best.ox > mergeEdge || best.oy > mergeEdge);
+        drag.contactIntent = merge ? "merge" : "swap";
+        if (merge) {
+          const targetId = best.id;
+          drag.mergeTargetIconId = targetId;
+          drag.mergeTargetPage = pageKey;
+          // 冻结让位预览：合并目标原地不动
+          resetDragPreview(drag);
+          drag.targetPage = null;
+          drag.lastTargetKey = `merge:${pageKey}:${targetId}`;
+          setDropTarget(null);
+          drag.mergeTimer = setTimeout(() => {
+            const live = editDragRef.current;
+            if (live !== drag || !drag.active || drag.mergeTargetIconId !== targetId) return;
+            drag.mergeTimer = null;
+            drag.mergeArmed = true;
+            setMergeTargetId(targetId);
+            try { navigator.vibrate?.(10); } catch { /* 不支持就算了 */ }
+          }, 180);
+          return;
+        }
+        // 换位：目标锁定为对方的格子
+        const key = `${pageKey}:${best.row - 1}:${best.col - 1}`;
+        if (key === drag.lastTargetKey) return;
+        drag.lastTargetKey = key;
+        drag.targetPage = pageKey;
+        drag.targetRow = best.row;
+        drag.targetCol = best.col;
+        setDropTarget({ page: pageKey, row: best.row, col: best.col });
+        simulateDragReflow(drag, pageKey, best.row, best.col);
+        return;
+      }
+
+      // ── 无接触：空格/缝隙落点，用悬浮图标盒中心所在格 ──
+      if (drag.contactId) clearContact(drag);
+      const probeX = x - drag.offsetX + drag.ghostW / 2;
+      const probeY = y - drag.offsetY + dragBoxW / 2;
+      const cell = pointerToGridCell(probeX, probeY, gridEl);
+      if (!cell) {
+        if (drag.targetPage !== null) resetDragPreview(drag);
+        drag.targetPage = null;
+        drag.lastTargetKey = "";
+        setDropTarget(null);
+        return;
+      }
       const key = `${pageKey}:${cell.row}:${cell.col}`;
       if (key === drag.lastTargetKey) return;
       drag.lastTargetKey = key;
@@ -2470,6 +2771,14 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       setDropTarget({ page: pageKey, row: cell.row + 1, col: cell.col + 1 });
       simulateDragReflow(drag, pageKey, cell.row + 1, cell.col + 1);
     } else {
+      const cell = pointerToGridCell(x, y, gridEl);
+      if (!cell) {
+        if (drag.targetPage !== null) resetDragPreview(drag);
+        drag.targetPage = null;
+        drag.lastTargetKey = "";
+        setDropTarget(null);
+        return;
+      }
       const w = ws.find((ww) => ww.id === drag.itemId);
       if (!w) return;
       const [wRows, wCols] = WIDGET_SIZE_CELLS[w.size];
@@ -2518,15 +2827,17 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     if (drag.itemType === "icon") {
       const iconId = drag.itemId as DesktopIconId;
       const fromDock = drag.sourcePage === DOCK_PAGE_KEY;
+      // 从文件夹拖出的图标不在任何页面上，和"从 dock 进入页面"走同一条外来路径
+      const fromOutside = fromDock || drag.sourceFolderId !== null;
       const targetPageWidgets = drag.initialWidgets.filter((w) => w.page === targetPageNum);
       const occ = buildWidgetOccupancy(targetPageWidgets);
       if (!occ[tRow - 1][tCol - 1]) {
         const next = cloneDesktopLayout(drag.initialLayout, drag.initialWidgets);
         ensureDesktopPage(next, tPage);
 
-        if (fromDock) {
-          // Coming out of the dock onto a page.
-          setDock(drag.initialDock.filter((id) => id !== iconId));
+        if (fromOutside) {
+          // Coming out of the dock (or an open folder) onto a page.
+          setDock(fromDock ? drag.initialDock.filter((id) => id !== iconId) : drag.initialDock);
           const tgtArr = (next[tPage] ?? []).filter((ic) => ic.id !== iconId);
           const occupant = tgtArr.find((ic) => ic.row === tRow && ic.col === tCol);
           if (occupant) {
@@ -2703,24 +3014,99 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     }
   }
 
+  /**
+   * 松手在“合并目标”上：拖着的图标进组。目标是普通图标就俩人组新文件夹
+   * （占目标的格子），目标已是文件夹就并入。基于 initial 状态重建，
+   * 不依赖中途的让位预览。返回 false 表示目标已失效，按取消处理。
+   */
+  function commitMergeDrop(drag: NonNullable<typeof editDragRef.current>): boolean {
+    const draggedId = drag.itemId as DesktopIconId;
+    const targetId = drag.mergeTargetIconId as DesktopIconId;
+    const tPage = drag.mergeTargetPage as DesktopPageKey;
+    const nextLayout = cloneDesktopLayout(drag.initialLayout, drag.initialWidgets);
+    let nextDock = drag.initialDock;
+
+    // 把拖着的图标从来源摘掉（文件夹来源在拖起时已从表里预移除）
+    if (drag.sourcePage === DOCK_PAGE_KEY) {
+      nextDock = nextDock.filter(id => id !== draggedId);
+    } else if (!drag.sourceFolderId) {
+      const src = drag.sourcePage as DesktopPageKey;
+      ensureDesktopPage(nextLayout, src);
+      nextLayout[src] = nextLayout[src].filter(ic => ic.id !== draggedId);
+    }
+
+    const nextFolders: DesktopFolderMap = { ...foldersRef.current };
+    const targetTile = (nextLayout[tPage] ?? []).find(ic => ic.id === targetId);
+    if (!targetTile || draggedId === targetId) return false;
+
+    if (isFolderIconId(targetId)) {
+      const folder = nextFolders[targetId];
+      if (!folder) return false;
+      if (!folder.icons.includes(draggedId)) {
+        nextFolders[targetId] = { ...folder, icons: [...folder.icons, draggedId] };
+      }
+    } else {
+      const folderId = createFolderIconId();
+      nextFolders[folderId] = { name: "文件夹", icons: [targetId, draggedId] };
+      nextLayout[tPage] = (nextLayout[tPage] ?? []).map(ic =>
+        ic.id === targetId ? { ...ic, id: folderId } : ic);
+    }
+
+    // 来源文件夹被掏得只剩 ≤1 人 → 就地解散
+    const srcFolderId = drag.sourceFolderId;
+    if (srcFolderId && nextFolders[srcFolderId] && nextFolders[srcFolderId].icons.length <= 1) {
+      const remaining = nextFolders[srcFolderId].icons[0] ?? null;
+      delete nextFolders[srcFolderId];
+      for (const pageKey of getDesktopPageKeysForState(nextLayout, drag.initialWidgets)) {
+        const tile = (nextLayout[pageKey] ?? []).find(ic => ic.id === srcFolderId);
+        if (!tile) continue;
+        nextLayout[pageKey] = nextLayout[pageKey].filter(ic => ic.id !== srcFolderId);
+        if (remaining) nextLayout[pageKey] = [...nextLayout[pageKey], { id: remaining, row: tile.row, col: tile.col }];
+        break;
+      }
+    }
+
+    const trimmed = trimEmptyTrailingPages(nextLayout, drag.initialWidgets);
+    setLayout(trimmed);
+    setDock(nextDock);
+    setWidgets(drag.initialWidgets);
+    setFolders(nextFolders);
+    writeDesktopFolders(nextFolders);
+    kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(trimmed));
+    kvSet(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(nextDock));
+    return true;
+  }
+
   function commitDrop() {
     const drag = editDragRef.current;
     if (!drag) return;
 
     // Read target from ref (NOT React state — avoids stale closure)
-    const hasTarget = drag.active && drag.targetPage;
-    if (!hasTarget) {
+    // 成组必须已"武装"（圈亮了才算数）：快速滑过图标时松手只弹回，不误进组
+    const isMergeDrop = Boolean(drag.active && drag.itemType === "icon"
+      && drag.mergeArmed && drag.mergeTargetIconId && drag.mergeTargetPage);
+    const hasTarget = drag.active && (drag.targetPage || isMergeDrop);
+    if (isMergeDrop && commitMergeDrop(drag)) {
+      // 已合并入组 — 状态在 commitMergeDrop 里整体写好
+    } else if (!hasTarget || isMergeDrop) {
+      // 无落点，或合并目标中途失效 → 全部还原（含文件夹成员）
       setLayout(drag.initialLayout);
       setWidgets(drag.initialWidgets);
       setDock(drag.initialDock);
+      setFolders(drag.initialFolders);
     } else {
+      const srcFolderId = drag.sourceFolderId;
       window.setTimeout(() => {
         const trimmedLayout = trimEmptyTrailingPages(layoutRef.current, widgetsRef.current);
         const trimmedPageCount = getDesktopPageKeysForState(trimmedLayout, widgetsRef.current).length;
         setLayout(trimmedLayout);
         setCurrentPageIndex((index) => Math.min(index, Math.max(0, trimmedPageCount - 1)));
+        // 从文件夹拖出成功落位：来源文件夹可能只剩一个人，解散
+        if (srcFolderId) dissolveFolderIfTiny(srcFolderId);
       }, 0);
     }
+    if (drag.mergeTimer) clearTimeout(drag.mergeTimer);
+    if (drag.mergeTargetIconId) setMergeTargetId(null);
 
     // Cleanup drag
     if (drag.edgeTimer) clearTimeout(drag.edgeTimer);
@@ -2759,6 +3145,87 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       ghost.style.transform = `translate3d(${r.left - shellLeft}px, ${r.top - shellTop}px, 0)`;
       window.setTimeout(finalize, 210);
     });
+  }
+
+  // ── 文件夹面板：长按成员图标 → 拖出到桌面 ──
+  const folderPressRef = useRef<{
+    timer: ReturnType<typeof setTimeout>;
+    pointerId: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+
+  function cancelFolderIconPress() {
+    if (folderPressRef.current) clearTimeout(folderPressRef.current.timer);
+    folderPressRef.current = null;
+  }
+
+  function handleFolderIconPointerDown(e: React.PointerEvent, iconId: DesktopIconId) {
+    const folderId = openFolderId;
+    if (!folderId) return;
+    e.preventDefault();
+    const element = e.currentTarget as HTMLElement;
+    const { pointerId, clientX, clientY } = e;
+    cancelFolderIconPress();
+    folderPressRef.current = {
+      timer: setTimeout(() => {
+        folderPressRef.current = null;
+        beginDragOutOfFolder(pointerId, clientX, clientY, iconId, folderId, element);
+      }, 500),
+      pointerId,
+      startX: clientX,
+      startY: clientY,
+    };
+  }
+
+  function handleFolderIconPointerMove(e: React.PointerEvent) {
+    const press = folderPressRef.current;
+    if (!press || press.pointerId !== e.pointerId) return;
+    const dx = e.clientX - press.startX;
+    const dy = e.clientY - press.startY;
+    // 移动超过阈值当作翻页/滚动手势，放弃长按
+    if (dx * dx + dy * dy > 100) cancelFolderIconPress();
+  }
+
+  /**
+   * 面板成员被拖起：预先从文件夹里摘出（取消会还原），关面板，
+   * 无缝移交给桌面拖拽引擎 —— 之后的移动/落格和普通图标一模一样。
+   */
+  function beginDragOutOfFolder(
+    pointerId: number,
+    x: number,
+    y: number,
+    iconId: DesktopIconId,
+    folderId: string,
+    element: HTMLElement
+  ) {
+    const folder = foldersRef.current[folderId];
+    if (!folder || !folder.icons.includes(iconId)) return;
+    setEditMode(true);
+    try { navigator.vibrate?.(30); } catch { /* 不支持就算了 */ }
+    const activePageKeys = getDesktopPageKeysForState(layoutRef.current, widgetsRef.current);
+    const pageKey = activePageKeys[Math.min(currentPageIndexRef.current, activePageKeys.length - 1)] ?? "page1";
+    // sourcePage 挂在当前页上只是占位；fromOutside 逻辑靠 sourceFolderId 分流
+    startDragPending(pointerId, x, y, "icon", iconId, pageKey, element);
+    const drag = editDragRef.current;
+    if (!drag) return;
+    drag.sourceFolderId = folderId;
+    setFolders(current => ({
+      ...current,
+      [folderId]: { ...current[folderId], icons: current[folderId].icons.filter(id => id !== iconId) },
+    }));
+    setOpenFolderId(null);
+    activateDragAt(pointerId, x, y);
+  }
+
+  function renameFolder(folderId: string, name: string) {
+    const folder = foldersRef.current[folderId];
+    if (!folder) return;
+    const trimmed = name.trim().slice(0, 24) || "文件夹";
+    if (trimmed === folder.name) return;
+    const next = { ...foldersRef.current, [folderId]: { ...folder, name: trimmed } };
+    setFolders(next);
+    writeDesktopFolders(next);
   }
 
   function handleItemPointerDown(
@@ -2862,6 +3329,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     setDock(nextDock);
     writeDockLayout(nextDock);
     const normalizedLayout = normalizeLayout(next.iconLayout, normalizedWidgets, new Set(nextDock));
+    // 主题包定义的是一张完整桌面，旧文件夹全部解散；成员图标由
+    // normalizeLayout 的默认兜底 + appendMissingCustomAppIcons 重新铺回页面。
+    if (Object.keys(foldersRef.current).length > 0) {
+      setFolders({});
+      writeDesktopFolders({});
+    }
+    setOpenFolderId(null);
     setWidgets(normalizedWidgets);
     setLayout(normalizedLayout);
     saveWidgets(normalizedWidgets);
@@ -3431,6 +3905,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       return <GameHubApp onClose={() => setActiveApp(null)} />;
     }
 
+    if (activeApp === "mixology") {
+      return <MixologyApp onClose={() => setActiveApp(null)} />;
+    }
+
     if (activeApp === "appmarket") {
       return (
         <AppMarketApp
@@ -3526,6 +4004,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                   {notice}
                 </aside>
               ) : null}
+
 
               {customAppUpdatePrompt ? (
                 <div
@@ -3914,9 +4393,43 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                             {/* Render icons with explicit positions for this page */}
                             {pageIcons.map((iconPos) => {
                               const iconId = iconPos.id;
-                              const icon = getDesktopIconMeta(iconId);
                               const pos = pageIconPositions.get(iconId);
-                              if (!pos || !icon) return null;
+                              if (!pos) return null;
+                              const isDragging = dragItem?.type === "icon" && dragItem.id === iconId;
+                              const isMergeTarget = mergeTargetId === iconId;
+                              const itemClass = `icon-item${isDragging ? " dragging" : ""}${isMergeTarget ? " merge-target" : ""}`;
+                              if (isFolderIconId(iconId)) {
+                                const folder = folders[iconId];
+                                if (!folder) return null;
+                                const folderBadge = folder.icons.reduce((sum, memberId) => {
+                                  const appId = customAppIdFromIconId(memberId);
+                                  return sum + (appId ? customAppBadges[appId] ?? 0 : 0);
+                                }, 0);
+                                return (
+                                  <button
+                                    key={iconId}
+                                    data-flip-id={`icon:${iconId}`}
+                                    className={itemClass}
+                                    style={{ gridRow: pos.row, gridColumn: pos.col }}
+                                    onClick={() => { if (!editMode) { setFolderPageIndex(0); setOpenFolderId(iconId); } }}
+                                    onPointerDown={(e) => handleItemPointerDown(e, "icon", iconId, pageKey)}
+                                  >
+                                    <span className="icon-glyph-box folder-glyph-box" aria-hidden>
+                                      <span className="folder-mini-grid">
+                                        {folder.icons.slice(0, 4).map(memberId => renderFolderMini(memberId))}
+                                      </span>
+                                      {folderBadge > 0 ? (
+                                        <span className="desktop-icon-badge" aria-label={`${folderBadge} 条未读`}>
+                                          {folderBadge > 99 ? "99+" : folderBadge}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    <span className="icon-label">{folder.name}</span>
+                                  </button>
+                                );
+                              }
+                              const icon = getDesktopIconMeta(iconId);
+                              if (!icon) return null;
                               const customApp = icon.customApp;
                               const builtinIconId = customApp ? null : icon.id as IconId;
                               const iconSkinId = activeIconSkins[iconId];
@@ -3926,13 +4439,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                                 : null;
                               const iconImageUrl = iconSkinUrl || customIconUrl;
                               const hasImageIcon = Boolean(iconImageUrl);
-                              const isDragging = dragItem?.type === "icon" && dragItem.id === iconId;
                               const badgeCount = customApp ? customAppBadges[customApp.id] ?? 0 : 0;
                               return (
                                 <button
                                   key={iconId}
                                   data-flip-id={`icon:${iconId}`}
-                                  className={isDragging ? "icon-item dragging" : "icon-item"}
+                                  className={itemClass}
                                   style={{ gridRow: pos.row, gridColumn: pos.col }}
                                   onClick={() => { if (!editMode) openApp(iconId); }}
                                   onPointerDown={(e) => handleItemPointerDown(e, "icon", iconId, pageKey)}
@@ -4115,6 +4627,8 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
               <QuickActionFloat />
               <MascotFloat />
               <ToyFloat />
+              {/* 预览弹窗宿主：独立于桌宠的展开/收起状态，否则桌宠收成小球时弹不出来 */}
+              <MascotPreviewHost />
 
               {/* Widget Picker Bottom Sheet */}
               {showWidgetPicker && (
@@ -4225,6 +4739,105 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
                   onClose={() => setShowDesktopCustomizer(false)}
                 />
               )}
+
+              {/* 文件夹面板：整屏压暗 + 毛玻璃，材质随 data-icon-effect 和图标底色走 */}
+              {!activeApp && openFolderId && folders[openFolderId] && (() => {
+                const folder = folders[openFolderId];
+                const memberPages: DesktopIconId[][] = [];
+                for (let i = 0; i < folder.icons.length; i += 4) {
+                  memberPages.push(folder.icons.slice(i, i + 4));
+                }
+                if (memberPages.length === 0) memberPages.push([]);
+                const boundedFolderPage = Math.min(folderPageIndex, memberPages.length - 1);
+                return (
+                  <div className="folder-overlay" onClick={() => setOpenFolderId(null)}>
+                    <input
+                      key={openFolderId}
+                      className="folder-name-input"
+                      defaultValue={folder.name}
+                      maxLength={24}
+                      aria-label="文件夹名称"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onBlur={(e) => renameFolder(openFolderId, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                    <div className="folder-panel" onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="folder-pages"
+                        onScroll={(e) => {
+                          const el = e.currentTarget;
+                          const idx = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+                          if (idx !== folderPageIndex) setFolderPageIndex(idx);
+                        }}
+                      >
+                        {memberPages.map((members, pageIdx) => (
+                          <div key={pageIdx} className="folder-page">
+                            {members.map((memberId) => {
+                              const meta = getDesktopIconMeta(memberId);
+                              if (!meta) return null;
+                              const memberCustomApp = meta.customApp;
+                              const memberBuiltinId = memberCustomApp ? null : meta.id as IconId;
+                              const memberSkinId = activeIconSkins[memberId];
+                              const memberSkinUrl = memberSkinId ? themeAssets[memberSkinId] ?? null : null;
+                              const memberCustomUrl = memberCustomApp && customAppIconStyles[memberCustomApp.id] !== "global"
+                                ? memberCustomApp.iconDataUrl ?? null
+                                : null;
+                              const memberImageUrl = memberSkinUrl || memberCustomUrl;
+                              const memberBadge = memberCustomApp ? customAppBadges[memberCustomApp.id] ?? 0 : 0;
+                              return (
+                                <button
+                                  key={memberId}
+                                  type="button"
+                                  className="folder-app"
+                                  onClick={() => { setOpenFolderId(null); openApp(memberId); }}
+                                  onPointerDown={(e) => handleFolderIconPointerDown(e, memberId)}
+                                  onPointerMove={handleFolderIconPointerMove}
+                                  onPointerUp={cancelFolderIconPress}
+                                  onPointerCancel={cancelFolderIconPress}
+                                >
+                                  <span
+                                    className={memberImageUrl ? "icon-glyph-box icon-glyph-box-skin" : "icon-glyph-box"}
+                                    style={memberImageUrl ? undefined : { "--icon-tone": meta.tone } as CSSProperties}
+                                    aria-hidden
+                                  >
+                                    {memberImageUrl ? (
+                                      <span className="icon-skin-layer" style={{ backgroundImage: `url("${memberImageUrl}")` }} />
+                                    ) : null}
+                                    {memberBuiltinId ? (
+                                      <IconGlyph
+                                        id={memberBuiltinId}
+                                        className={memberSkinUrl ? "icon-glyph icon-glyph-hidden" : "icon-glyph"}
+                                      />
+                                    ) : memberCustomUrl ? null : (
+                                      <CustomAppGlyph seed={memberCustomApp?.name || ""} className="icon-glyph" />
+                                    )}
+                                    {memberBadge > 0 ? (
+                                      <span className="desktop-icon-badge" aria-label={`${memberBadge} 条未读`}>
+                                        {memberBadge > 99 ? "99+" : memberBadge}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                  <span className="icon-label">{meta.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                      {memberPages.length > 1 && (
+                        <div className="folder-dots">
+                          {memberPages.map((_, pageIdx) => (
+                            <span key={pageIdx} className={pageIdx === boundedFolderPage ? "dot active" : "dot"} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Drag ghost — absolutely positioned INSIDE .phone-shell so the
                   clone keeps theme variables + glass effect selectors

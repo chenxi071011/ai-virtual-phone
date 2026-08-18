@@ -22,6 +22,8 @@ import { loadStorySessions, loadStoryMessages } from "@/lib/story-storage";
 import { previewStoryPromptPayload } from "@/lib/story-engine";
 import { loadVnSessions, loadVnMessages } from "@/lib/vn-storage";
 import { previewVnPromptPayload } from "@/lib/vn-engine";
+import { loadChatOfflineTurns } from "@/lib/chat-offline-storage";
+import { buildOfflinePromptHistory } from "@/lib/offline-prompt-builder";
 import { EXTRA_PROMPT_APPS, type ExtraPromptAppId } from "@/components/debug-prompt-registry";
 import { previewCheckPhonePromptPayload } from "@/lib/checkphone-engine";
 import { CHECKPHONE_APP_SPECS, type CheckPhoneAppId } from "@/lib/checkphone-config";
@@ -104,6 +106,8 @@ export function DebugPromptPanel() {
     const suppressFloatingClickRef = useRef(false);
     const [selectedChatSessionId, setSelectedChatSessionId] = useState("");
     const [followUpMode, setFollowUpMode] = useState(false);
+    const [offlinePreviewMode, setOfflinePreviewMode] = useState(false);
+    const [offlinePendingText, setOfflinePendingText] = useState("");
 
     // Moments state
     const [momentsResult, setMomentsResult] = useState<MomentsPreviewResult | null>(null);
@@ -319,17 +323,37 @@ export function DebugPromptPanel() {
         setError(null);
         setLoading(true);
         try {
-            const latestMessages = loadChatMessages(activeChatSession.id);
-            if (activeChatSession.isGroup) {
-                await previewGroupPromptRequestSnapshot(activeChatSession, latestMessages);
+            if (offlinePreviewMode) {
+                // 线下模式：历史来自「线下轮次」，assistant 内容为 <content>+摘要 XML，
+                // 与 chat-room 真实线下生成完全一致（appTags 带 offline）。
+                // 空历史也允许预览：看的就是首条线下消息发出前的完整提示词
+                const offlineTurns = loadChatOfflineTurns(activeChatSession.id);
+                const offlineHistory = buildOfflinePromptHistory(activeChatSession, offlineTurns, offlinePendingText);
+                if (activeChatSession.isGroup) {
+                    await previewGroupPromptRequestSnapshot(activeChatSession, offlineHistory, {
+                        appTags: ["group_chat", "offline"],
+                        excludeOfflineSessionId: activeChatSession.id,
+                        disableTools: true,
+                    });
+                } else {
+                    await previewPromptRequestSnapshot(activeChatSession, offlineHistory, {
+                        appTags: ["chat", "offline"],
+                        excludeOfflineSessionId: activeChatSession.id,
+                    });
+                }
             } else {
-                await previewPromptRequestSnapshot(
-                    activeChatSession,
-                    latestMessages,
-                    followUpMode
-                        ? { followUpAuto: true, appTags: ["chat", "text", "followup"] }
-                        : { appTags: ["chat", "text"] }
-                );
+                const latestMessages = loadChatMessages(activeChatSession.id);
+                if (activeChatSession.isGroup) {
+                    await previewGroupPromptRequestSnapshot(activeChatSession, latestMessages);
+                } else {
+                    await previewPromptRequestSnapshot(
+                        activeChatSession,
+                        latestMessages,
+                        followUpMode
+                            ? { followUpAuto: true, appTags: ["chat", "text", "followup"] }
+                            : { appTags: ["chat", "text"] }
+                    );
+                }
             }
             setExpandedIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
@@ -930,6 +954,21 @@ export function DebugPromptPanel() {
                                 {followUpMode ? "追发 ON" : "追发 OFF"}
                             </button>
                         )}
+                        {activeChatSession && (
+                            <>
+                                <button onClick={() => { setOfflinePreviewMode(v => !v); }} className="pv-toggle" {...(offlinePreviewMode ? { "data-active": "" } : {})}>
+                                    {offlinePreviewMode ? "线下 ON" : "线下 OFF"}
+                                </button>
+                                {offlinePreviewMode && (
+                                    <input
+                                        value={offlinePendingText}
+                                        onChange={e => setOfflinePendingText(e.target.value)}
+                                        className="pv-select"
+                                        placeholder="输入下一条线下消息（可选）"
+                                    />
+                                )}
+                            </>
+                        )}
                     </>
                 )}
                 {mode === "moments" && (
@@ -1020,7 +1059,9 @@ export function DebugPromptPanel() {
                 {displayMessages.length === 0 && !error && (
                     <div className="pv-empty">
                         {mode === "chat"
-                            ? (activeChatSession ? "点击「预览 Prompt」查看下一轮会发送的真实提示词" : "选择聊天对象后点击「预览 Prompt」")
+                            ? (activeChatSession
+                                ? (offlinePreviewMode ? "点击「预览 Prompt」查看线下模式的真实提示词（含 <content> 与摘要 XML）" : "点击「预览 Prompt」查看下一轮会发送的真实提示词")
+                                : "选择聊天对象后点击「预览 Prompt」")
                             : mode === "moments" ? "选择角色后点击「预览」查看朋友圈 Prompt"
                             : mode === "calendar" ? "选择角色与日期后点击「预览」"
                             : mode === "vn" ? "选择角色后点击「预览」查看漫卷 Prompt"
