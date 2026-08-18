@@ -452,9 +452,12 @@ function shouldApplyEmptyGenerateGuard(config: ApiConfig): boolean {
     return config.preventEmptyGenerateRambling === true;
 }
 
-function isRealUserHistoryMessage(message: ChatMessage): boolean {
+function isRealUserHistoryMessage(
+    message: ChatMessage,
+    options?: { includeRetracted?: boolean },
+): boolean {
     if (message.role !== "user") return false;
-    if (message.isRetracted) return false;
+    if (message.isRetracted && options?.includeRetracted !== true) return false;
     if (message.mediaType === "tool_result"
         || message.mediaType === "tool_notice"
         || message.mediaType === "memory_write_request") return false;
@@ -473,25 +476,26 @@ export function appendEmptyGenerateGuardMessage(
 ): void {
     if (!shouldApplyEmptyGenerateGuard(config)) return;
 
-    const hasRealUserHistory = history.some(isRealUserHistoryMessage);
+    const hasRealUserHistory = history.some(message => isRealUserHistoryMessage(message));
     if (!hasRealUserHistory) return;
 
-    let lastAssistantIndex = -1;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        if (messages[index].role === "assistant") {
-            lastAssistantIndex = index;
+    // 是不是「空生成」只取决于聊天记录本身：最后一条 AI 回复之后用户有没有再发东西。
+    // 不能拿拼装好的 messages 判断——预设里挂在聊天记录标记之后的条目走 depth 0，
+    // 会排在用户刚发的那条消息后面；只要其中有一条角色是 assistant，正常发消息
+    // 也会被误判成空生成，白白多出一段续写提示。
+    let lastTurnIsAssistant = false;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+        const message = history[index];
+        // 撤回的消息在提示词里仍以 user 身份出现，这里同样算作用户发过话
+        if (isRealUserHistoryMessage(message, { includeRetracted: true })) return;
+        if (message.role === "assistant") {
+            lastTurnIsAssistant = true;
             break;
         }
     }
-    if (lastAssistantIndex < 0) return;
+    if (!lastTurnIsAssistant) return;
 
-    const hasUserAfterLastAssistant = messages
-        .slice(lastAssistantIndex + 1)
-        .some(message => message.role === "user");
-
-    if (!hasUserAfterLastAssistant) {
-        messages.push({ role: "user", content: EMPTY_GENERATE_CONTINUATION_PROMPT });
-    }
+    messages.push({ role: "user", content: EMPTY_GENERATE_CONTINUATION_PROMPT });
 }
 
 export function publishDebugPromptSnapshot(params: {
